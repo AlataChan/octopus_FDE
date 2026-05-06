@@ -1,0 +1,102 @@
+{
+  "ir_version": "0.2",
+  "metadata": {
+    "name": "Daily Sales Digest",
+    "description": "Scheduled ETL: pull yesterday's sales, transform, summarize via LLM, post to Slack. Exercises schedule trigger, http with retry/idempotency_key, code transform.",
+    "owner": "data-ops"
+  },
+  "registry_ref": {
+    "registry_version": "2026-04-15",
+    "tools": [],
+    "datasets": [],
+    "credentials": ["internal_api", "slack_webhook"]
+  },
+  "policy": {
+    "default_timeout_s": 60,
+    "default_retry": { "max_attempts": 3, "backoff": "exponential", "retry_on": ["5xx", "timeout", "rate_limit"] },
+    "agent_budget": { "max_iterations": 10, "max_tokens": 50000 }
+  },
+  "inputs": [],
+  "outputs": [
+    { "name": "delivered", "type": "boolean" },
+    { "name": "summary",   "type": "string" }
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "trigger",
+      "mode": "schedule",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "id": "pull",
+      "type": "http",
+      "method": "GET",
+      "url": "https://api.example.com/sales/yesterday",
+      "credential": "internal_api",
+      "headers": { "Accept": "application/json" },
+      "timeout_s": 30,
+      "retry": { "max_attempts": 5, "backoff": "exponential", "retry_on": ["5xx", "timeout", "rate_limit"] }
+    },
+    {
+      "id": "transform",
+      "type": "code",
+      "language": "python",
+      "source": "records = [{'id': r['id'], 'amount': r['amount'], 'region': r['region']} for r in pull['body']]\nreturn { 'records': records, 'count': len(records) }",
+      "inputs": { "pull": "${pull}" },
+      "output_schema": {
+        "type": "object",
+        "required": ["records", "count"],
+        "properties": {
+          "records": { "type": "array" },
+          "count":   { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    {
+      "id": "summarize",
+      "type": "llm",
+      "model": "claude-sonnet-4-6",
+      "system_prompt": "You write executive sales digests. Be concise.",
+      "prompt": "Summarize ${transform.count} sales records:\n${transform.records}\n\nReturn a 3-sentence executive summary and 5 highlight bullets.",
+      "temperature": 0.3,
+      "output_schema": {
+        "type": "object",
+        "required": ["summary", "highlights"],
+        "properties": {
+          "summary":    { "type": "string" },
+          "highlights": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 5 }
+        }
+      }
+    },
+    {
+      "id": "write",
+      "type": "http",
+      "method": "POST",
+      "url": "https://hooks.slack.com/services/internal/sales-digest",
+      "credential": "slack_webhook",
+      "body": {
+        "text":       "${summarize.summary}",
+        "highlights": "${summarize.highlights}"
+      },
+      "idempotency_key": "sales-digest-${start.run_id}",
+      "timeout_s": 15,
+      "retry": { "max_attempts": 3, "backoff": "exponential", "retry_on": ["5xx", "timeout"] }
+    },
+    {
+      "id": "out",
+      "type": "output",
+      "bindings": {
+        "delivered": "true",
+        "summary":   "${summarize.summary}"
+      }
+    }
+  ],
+  "edges": [
+    { "from": "start",     "to": "pull" },
+    { "from": "pull",      "to": "transform" },
+    { "from": "transform", "to": "summarize" },
+    { "from": "summarize", "to": "write" },
+    { "from": "write",     "to": "out" }
+  ]
+}
