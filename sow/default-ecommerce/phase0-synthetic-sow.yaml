@@ -1,0 +1,70 @@
+sow_id: phase0-synthetic-ecommerce
+source: synthetic
+partner_profile: bambu-lab-style-cross-border-ecommerce-operator
+persona_id: ecommerce-operator
+business_goal: >
+  Standardize multilingual customer support and order-exception workflows
+  across Amazon, Shopify, TikTok Shop, Shein, and Temu channels.
+target_runtime: dify
+vertical: ecommerce
+channels:
+  - amazon
+  - shopify
+  - tiktok_shop
+  - shein
+  - temu
+credential_bindings:
+  llm:
+    mode: platform_configured_after_import
+    bindings:
+      - provider: platform_default
+        model: default_planner_model
+        secret_values_in_artifacts: false
+  http:
+    - handle: shopify_api
+      scheme: bearer
+      allowed_hosts: ["*.myshopify.com"]
+      secret_values_in_artifacts: false
+    - handle: amazon_sp_api
+      scheme: oauth2_client_credentials
+      allowed_hosts: ["sellingpartnerapi-*.amazon.com"]
+      secret_values_in_artifacts: false
+reviewer_policy:
+  reviewer_role: ecommerce_cs_lead
+  publish_requires_review: true
+  unrecognized_runtime_edits: block_publish_with_remediation
+success_metrics:
+  first_try_ir_validity: ">=70% in Phase 1"
+  reviewability_median: ">=4"
+  reviewer_hard_block_rate: "<5% steady-state"
+workflow_candidates:
+  - id: 01-ecommerce-customer-faq
+    trigger: buyer question arrives from marketplace or storefront channel
+    inputs: [buyer_locale, channel, product_id, question_text]
+    outputs: [answer, citations, confidence]
+    tools_datasets: [product_kb, policy_kb]
+    reviewer_policy: low confidence escalates to human support
+  - id: 05-ecommerce-order-exception
+    trigger: order, shipment, return, or refund anomaly event
+    inputs: [order_id, channel, buyer_locale, exception_type]
+    outputs: [ops_queue_route, buyer_reply, manager_review_required]
+    tools_datasets: [shopify_api, amazon_sp_api, policy_kb]
+    reviewer_policy: refund or SLA-impacting actions require manager approval
+  - id: product-content-localization
+    trigger: new or changed listing content
+    inputs: [source_locale, target_locale, product_id, source_copy]
+    outputs: [localized_copy, risk_flags]
+    tools_datasets: [product_kb, policy_kb]
+    reviewer_policy: human review before marketplace publish
+  - id: after-sales-escalation
+    trigger: buyer complaint or negative review intent
+    inputs: [channel, buyer_locale, message_text, order_context]
+    outputs: [reply_draft, escalation_reason, queue]
+    tools_datasets: [policy_kb]
+    reviewer_policy: sentiment/high-risk complaints route to human support
+  - id: operations-reporting
+    trigger: daily scheduled report
+    inputs: [date_range, channels]
+    outputs: [gmv_summary, return_rate_summary, support_sla_summary]
+    tools_datasets: [shopify_api, amazon_sp_api]
+    reviewer_policy: report is internal read-only output
