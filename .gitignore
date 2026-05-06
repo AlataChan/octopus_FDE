@@ -9,3 +9,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+
+# AI tooling local state
+.ccb/
+.cursor/

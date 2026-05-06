@@ -1,0 +1,151 @@
+{
+  "ir_version": "0.2",
+  "metadata": {
+    "name": "Inbound Message Triage",
+    "description": "Webhook-triggered support triage. Runs three classifiers in parallel (urgency, sentiment, intent), object-merges, then routes by intent. Exercises webhook trigger, parallel + merge_strategy=object_merge, condition with default.",
+    "owner": "support-ops"
+  },
+  "registry_ref": {
+    "registry_version": "2026-04-15",
+    "tools": [],
+    "datasets": [],
+    "credentials": []
+  },
+  "policy": {
+    "default_timeout_s": 30,
+    "default_retry": { "max_attempts": 2, "backoff": "exponential", "retry_on": ["5xx", "timeout", "rate_limit"] },
+    "agent_budget": { "max_iterations": 10, "max_tokens": 50000 }
+  },
+  "inputs": [
+    { "name": "message",   "type": "string", "required": true },
+    { "name": "sender_id", "type": "string", "required": true }
+  ],
+  "outputs": [
+    { "name": "queue",      "type": "string" },
+    { "name": "priority",   "type": "string" },
+    { "name": "annotations", "type": "json" }
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "trigger",
+      "mode": "webhook",
+      "webhook": { "path": "/triage", "method": "POST" }
+    },
+    {
+      "id": "analyze",
+      "type": "parallel",
+      "merge_strategy": "object_merge",
+      "branches": {
+        "urgency": [
+          {
+            "id": "urgency_check",
+            "type": "llm",
+            "model": "claude-haiku-4-5-20251001",
+            "system_prompt": "Classify urgency only. Return JSON.",
+            "prompt": "Message:\n${input.message}\n\nReturn { urgency: 'low'|'normal'|'high'|'critical' }.",
+            "temperature": 0,
+            "output_schema": {
+              "type": "object",
+              "required": ["urgency"],
+              "properties": { "urgency": { "type": "string", "enum": ["low", "normal", "high", "critical"] } }
+            }
+          }
+        ],
+        "sentiment": [
+          {
+            "id": "sentiment_check",
+            "type": "llm",
+            "model": "claude-haiku-4-5-20251001",
+            "system_prompt": "Classify sentiment only. Return JSON.",
+            "prompt": "Message:\n${input.message}\n\nReturn { sentiment: 'positive'|'neutral'|'negative'|'angry' }.",
+            "temperature": 0,
+            "output_schema": {
+              "type": "object",
+              "required": ["sentiment"],
+              "properties": { "sentiment": { "type": "string", "enum": ["positive", "neutral", "negative", "angry"] } }
+            }
+          }
+        ],
+        "intent": [
+          {
+            "id": "intent_classify",
+            "type": "llm",
+            "model": "claude-sonnet-4-6",
+            "system_prompt": "Classify intent. Return JSON.",
+            "prompt": "Message:\n${input.message}\n\nReturn { intent: 'billing'|'tech'|'account'|'general' }.",
+            "temperature": 0,
+            "output_schema": {
+              "type": "object",
+              "required": ["intent"],
+              "properties": { "intent": { "type": "string", "enum": ["billing", "tech", "account", "general"] } }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "decide_priority",
+      "type": "code",
+      "language": "python",
+      "source": "if analyze['urgency'] == 'critical' or analyze['sentiment'] == 'angry':\n    return { 'priority': 'P1' }\nif analyze['urgency'] == 'high':\n    return { 'priority': 'P2' }\nreturn { 'priority': 'P3' }",
+      "inputs": { "analyze": "${analyze}" },
+      "output_schema": {
+        "type": "object",
+        "required": ["priority"],
+        "properties": { "priority": { "type": "string", "enum": ["P1", "P2", "P3"] } }
+      }
+    },
+    {
+      "id": "route",
+      "type": "condition",
+      "branches": [
+        { "when": "${analyze.intent} == 'billing'", "next": "billing_out" },
+        { "when": "${analyze.intent} == 'tech'",    "next": "tech_out" },
+        { "when": "${analyze.intent} == 'account'", "next": "account_out" }
+      ],
+      "default": "general_out"
+    },
+    {
+      "id": "billing_out",
+      "type": "output",
+      "bindings": {
+        "queue":       "billing-team",
+        "priority":    "${decide_priority.priority}",
+        "annotations": "${analyze}"
+      }
+    },
+    {
+      "id": "tech_out",
+      "type": "output",
+      "bindings": {
+        "queue":       "tech-support",
+        "priority":    "${decide_priority.priority}",
+        "annotations": "${analyze}"
+      }
+    },
+    {
+      "id": "account_out",
+      "type": "output",
+      "bindings": {
+        "queue":       "account-team",
+        "priority":    "${decide_priority.priority}",
+        "annotations": "${analyze}"
+      }
+    },
+    {
+      "id": "general_out",
+      "type": "output",
+      "bindings": {
+        "queue":       "general-queue",
+        "priority":    "${decide_priority.priority}",
+        "annotations": "${analyze}"
+      }
+    }
+  ],
+  "edges": [
+    { "from": "start",            "to": "analyze" },
+    { "from": "analyze",          "to": "decide_priority" },
+    { "from": "decide_priority",  "to": "route" }
+  ]
+}

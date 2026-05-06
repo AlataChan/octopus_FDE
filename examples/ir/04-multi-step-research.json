@@ -1,0 +1,142 @@
+{
+  "ir_version": "0.2",
+  "metadata": {
+    "name": "Multi-Step Research",
+    "description": "Outline → per-subtopic research via agentic island (with deterministic fallback) → consolidate. Exercises loop with max_iterations, agent budget + on_budget_exhausted=fallback + fallback_edge, agent input_schema/output_schema, and loop.collect.",
+    "owner": "research-ops"
+  },
+  "registry_ref": {
+    "registry_version": "2026-04-15",
+    "tools": ["web_search", "fetch_url"],
+    "datasets": [],
+    "credentials": []
+  },
+  "policy": {
+    "default_timeout_s": 60,
+    "default_retry": { "max_attempts": 2, "backoff": "exponential", "retry_on": ["5xx", "timeout"] },
+    "agent_budget": { "max_iterations": 10, "max_tokens": 50000 }
+  },
+  "inputs": [
+    { "name": "topic", "type": "string", "required": true }
+  ],
+  "outputs": [
+    { "name": "report",  "type": "string" },
+    { "name": "sources", "type": "string[]" }
+  ],
+  "nodes": [
+    { "id": "start", "type": "trigger", "mode": "manual" },
+    {
+      "id": "outline",
+      "type": "llm",
+      "model": "claude-sonnet-4-6",
+      "system_prompt": "You break research topics into focused subtopics for parallel investigation.",
+      "prompt": "Topic: ${input.topic}\n\nReturn 3-5 subtopics covering distinct angles.",
+      "temperature": 0.4,
+      "output_schema": {
+        "type": "object",
+        "required": ["subtopics"],
+        "properties": {
+          "subtopics": { "type": "array", "items": { "type": "string" }, "minItems": 3, "maxItems": 5 }
+        }
+      }
+    },
+    {
+      "id": "research_loop",
+      "type": "loop",
+      "over": "${outline.subtopics}",
+      "as": "subtopic",
+      "max_iterations": 5,
+      "collect": "${research_outcome}",
+      "body": [
+        {
+          "id": "research_agent",
+          "type": "agent",
+          "model": "claude-sonnet-4-6",
+          "tools": ["web_search", "fetch_url"],
+          "system_prompt": "Research the assigned subtopic. Cite every claim with a URL.",
+          "input_schema": {
+            "type": "object",
+            "required": ["subtopic"],
+            "properties": { "subtopic": { "type": "string" } }
+          },
+          "output_schema": {
+            "type": "object",
+            "required": ["findings", "sources"],
+            "properties": {
+              "findings": { "type": "string" },
+              "sources":  { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          "inputs": { "subtopic": "${subtopic}" },
+          "budget": { "max_iterations": 8, "max_tokens": 30000 },
+          "on_budget_exhausted": "fallback",
+          "fallback_edge": "fallback_summary"
+        },
+        {
+          "id": "fallback_summary",
+          "type": "llm",
+          "model": "claude-haiku-4-5-20251001",
+          "system_prompt": "Produce a best-effort summary from training data only when web tools are unavailable. Mark uncertainty explicitly.",
+          "prompt": "Subtopic: ${subtopic}\n\nWrite a low-confidence summary; cite no URLs (return empty array).",
+          "output_schema": {
+            "type": "object",
+            "required": ["findings", "sources"],
+            "properties": {
+              "findings": { "type": "string" },
+              "sources":  { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        {
+          "id": "research_outcome",
+          "type": "code",
+          "language": "python",
+          "source": "if research_agent is not None:\n    return { 'findings': research_agent['findings'], 'sources': research_agent['sources'], 'confidence': 'high' }\nreturn { 'findings': fallback_summary['findings'], 'sources': fallback_summary['sources'], 'confidence': 'low' }",
+          "inputs": {
+            "research_agent":   "${research_agent}",
+            "fallback_summary": "${fallback_summary}"
+          },
+          "output_schema": {
+            "type": "object",
+            "required": ["findings", "sources", "confidence"],
+            "properties": {
+              "findings":   { "type": "string" },
+              "sources":    { "type": "array", "items": { "type": "string" } },
+              "confidence": { "type": "string", "enum": ["high", "low"] }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "consolidate",
+      "type": "llm",
+      "model": "claude-opus-4-6",
+      "system_prompt": "You synthesize subtopic research into a coherent report. Note low-confidence sections.",
+      "prompt": "Topic: ${input.topic}\n\nPer-subtopic findings:\n${research_loop.collected}\n\nProduce a report and a deduplicated source list.",
+      "temperature": 0.3,
+      "output_schema": {
+        "type": "object",
+        "required": ["report", "sources"],
+        "properties": {
+          "report":  { "type": "string" },
+          "sources": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    {
+      "id": "out",
+      "type": "output",
+      "bindings": {
+        "report":  "${consolidate.report}",
+        "sources": "${consolidate.sources}"
+      }
+    }
+  ],
+  "edges": [
+    { "from": "start",         "to": "outline" },
+    { "from": "outline",       "to": "research_loop" },
+    { "from": "research_loop", "to": "consolidate" },
+    { "from": "consolidate",   "to": "out" }
+  ]
+}

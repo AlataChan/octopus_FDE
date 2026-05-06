@@ -1,0 +1,106 @@
+{
+  "ir_version": "0.2",
+  "metadata": {
+    "name": "Document Audit",
+    "description": "Classify document, extract structured fields, route by validation outcome. Exercises code, condition with default, and multi-terminal output.",
+    "owner": "compliance-ops"
+  },
+  "registry_ref": {
+    "registry_version": "2026-04-15",
+    "tools": [],
+    "datasets": [],
+    "credentials": []
+  },
+  "policy": {
+    "default_timeout_s": 60,
+    "default_retry": { "max_attempts": 2, "backoff": "exponential", "retry_on": ["5xx", "timeout"] },
+    "agent_budget": { "max_iterations": 10, "max_tokens": 50000 }
+  },
+  "inputs": [
+    { "name": "document", "type": "file", "required": true }
+  ],
+  "outputs": [
+    { "name": "status", "type": "string" },
+    { "name": "fields", "type": "json" },
+    { "name": "issues", "type": "string[]" }
+  ],
+  "nodes": [
+    { "id": "start", "type": "trigger", "mode": "manual" },
+    {
+      "id": "classify",
+      "type": "llm",
+      "model": "claude-sonnet-4-6",
+      "system_prompt": "Classify the document. Return only the JSON object.",
+      "prompt": "Document:\n${input.document}\n\nClassify as one of: invoice, contract, receipt, other. Provide confidence in [0,1].",
+      "temperature": 0,
+      "output_schema": {
+        "type": "object",
+        "required": ["category", "confidence"],
+        "properties": {
+          "category":   { "type": "string", "enum": ["invoice", "contract", "receipt", "other"] },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    {
+      "id": "extract",
+      "type": "code",
+      "language": "python",
+      "source": "from extractors import extract\nresult = extract(document, classify['category'])\nreturn { 'fields': result.fields, 'valid': result.valid, 'issues': result.issues }",
+      "inputs": {
+        "document": "${input.document}",
+        "classify": "${classify}"
+      },
+      "output_schema": {
+        "type": "object",
+        "required": ["fields", "valid", "issues"],
+        "properties": {
+          "fields": { "type": "object" },
+          "valid":  { "type": "boolean" },
+          "issues": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    {
+      "id": "route",
+      "type": "condition",
+      "branches": [
+        { "when": "${extract.valid} == true",                                   "next": "approved_out" },
+        { "when": "${extract.valid} == false && ${classify.confidence} < 0.7", "next": "review_out" }
+      ],
+      "default": "rejected_out"
+    },
+    {
+      "id": "approved_out",
+      "type": "output",
+      "bindings": {
+        "status": "approved",
+        "fields": "${extract.fields}",
+        "issues": "${extract.issues}"
+      }
+    },
+    {
+      "id": "review_out",
+      "type": "output",
+      "bindings": {
+        "status": "needs_review",
+        "fields": "${extract.fields}",
+        "issues": "${extract.issues}"
+      }
+    },
+    {
+      "id": "rejected_out",
+      "type": "output",
+      "bindings": {
+        "status": "rejected",
+        "fields": "${extract.fields}",
+        "issues": "${extract.issues}"
+      }
+    }
+  ],
+  "edges": [
+    { "from": "start",    "to": "classify" },
+    { "from": "classify", "to": "extract" },
+    { "from": "extract",  "to": "route" }
+  ]
+}

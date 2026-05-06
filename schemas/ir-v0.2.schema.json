@@ -1,0 +1,371 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loom.example/schemas/ir-v0.2.schema.json",
+  "title": "Loom IR v0.2",
+  "description": "Intermediate Representation for Loom workflows. The Planner emits IR; the Validator checks it; the Compiler turns it into Dify DSL (or, later, n8n YAML). The schema enforces structure; the Validator enforces semantics (variable resolution, type-flow, registry refs, policy invariants).",
+  "type": "object",
+  "required": ["ir_version", "metadata", "registry_ref", "policy", "inputs", "outputs", "nodes", "edges"],
+  "additionalProperties": false,
+  "properties": {
+    "ir_version": { "const": "0.2" },
+    "metadata":     { "$ref": "#/$defs/Metadata" },
+    "registry_ref": { "$ref": "#/$defs/RegistryRef" },
+    "policy":       { "$ref": "#/$defs/Policy" },
+    "inputs":  { "type": "array", "items": { "$ref": "#/$defs/PortDecl" } },
+    "outputs": { "type": "array", "items": { "$ref": "#/$defs/PortDecl" } },
+    "nodes":   { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Node" } },
+    "edges":   { "type": "array", "items": { "$ref": "#/$defs/Edge" } }
+  },
+
+  "$defs": {
+
+    "Metadata": {
+      "type": "object",
+      "required": ["name", "owner"],
+      "additionalProperties": false,
+      "properties": {
+        "name":        { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "owner":       { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "RegistryRef": {
+      "description": "Pins the workflow to a specific registry version. The Validator resolves all tool/dataset/credential refs against this version.",
+      "type": "object",
+      "required": ["registry_version"],
+      "additionalProperties": false,
+      "properties": {
+        "registry_version": { "type": "string", "minLength": 1 },
+        "tools":       { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "default": [] },
+        "datasets":    { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "default": [] },
+        "credentials": { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "default": [] }
+      }
+    },
+
+    "Policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default_timeout_s": { "type": "number", "exclusiveMinimum": 0 },
+        "default_retry":     { "$ref": "#/$defs/Retry" },
+        "agent_budget":      { "$ref": "#/$defs/AgentBudget" }
+      }
+    },
+
+    "Retry": {
+      "type": "object",
+      "required": ["max_attempts"],
+      "additionalProperties": false,
+      "properties": {
+        "max_attempts": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "backoff":      { "enum": ["none", "linear", "exponential"], "default": "exponential" },
+        "retry_on":     { "type": "array", "items": { "enum": ["5xx", "4xx", "timeout", "network", "rate_limit"] }, "uniqueItems": true }
+      }
+    },
+
+    "AgentBudget": {
+      "type": "object",
+      "required": ["max_iterations", "max_tokens"],
+      "additionalProperties": false,
+      "properties": {
+        "max_iterations": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "max_tokens":     { "type": "integer", "minimum": 1000, "maximum": 200000 }
+      }
+    },
+
+    "PortDecl": {
+      "type": "object",
+      "required": ["name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "name":     { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$" },
+        "type":     { "$ref": "#/$defs/TypeName" },
+        "required": { "type": "boolean", "default": false },
+        "description": { "type": "string" }
+      }
+    },
+
+    "TypeName": {
+      "description": "Permitted IR primitive/composite types. Validator enforces type-flow across edges; coercions require an explicit `code` node.",
+      "enum": [
+        "string", "number", "boolean", "json",
+        "string[]", "number[]", "json[]",
+        "chunks", "file", "any"
+      ]
+    },
+
+    "VarRef": {
+      "description": "A string that may contain variable references. Schema does not enforce reference syntax (the Validator does); typical form: ${node_id.field} with .field.subfield and .field[i] supported.",
+      "type": "string"
+    },
+
+    "JSONSchemaLite": {
+      "description": "Inline JSON-Schema-shaped object describing structured data (used for llm output_schema and agent input_schema/output_schema). Validator can re-use the same parser.",
+      "type": "object"
+    },
+
+    "NodeIdentifier": {
+      "type": "string",
+      "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+    },
+
+    "NodeCommon": {
+      "description": "Fields permitted on any node. Discriminator is `type`.",
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id":              { "$ref": "#/$defs/NodeIdentifier" },
+        "type":            { "type": "string" },
+        "description":     { "type": "string" },
+        "timeout_s":       { "type": "number", "exclusiveMinimum": 0 },
+        "retry":           { "$ref": "#/$defs/Retry" },
+        "idempotency_key": { "$ref": "#/$defs/VarRef" }
+      }
+    },
+
+    "Node": {
+      "oneOf": [
+        { "$ref": "#/$defs/TriggerNode" },
+        { "$ref": "#/$defs/LLMNode" },
+        { "$ref": "#/$defs/RetrievalNode" },
+        { "$ref": "#/$defs/HTTPNode" },
+        { "$ref": "#/$defs/CodeNode" },
+        { "$ref": "#/$defs/ConditionNode" },
+        { "$ref": "#/$defs/LoopNode" },
+        { "$ref": "#/$defs/ParallelNode" },
+        { "$ref": "#/$defs/AgentNode" },
+        { "$ref": "#/$defs/OutputNode" }
+      ]
+    },
+
+    "TriggerNode": {
+      "type": "object",
+      "required": ["id", "type", "mode"],
+      "additionalProperties": false,
+      "properties": {
+        "id":       { "$ref": "#/$defs/NodeIdentifier" },
+        "type":     { "const": "trigger" },
+        "description": { "type": "string" },
+        "mode":     { "enum": ["manual", "schedule", "webhook"] },
+        "schedule": { "type": "string", "description": "cron expression; required when mode == schedule" },
+        "webhook":  {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path":   { "type": "string" },
+            "method": { "enum": ["POST", "GET", "PUT", "PATCH", "DELETE"] }
+          }
+        }
+      },
+      "allOf": [
+        { "if": { "properties": { "mode": { "const": "schedule" } } }, "then": { "required": ["schedule"] } },
+        { "if": { "properties": { "mode": { "const": "webhook"  } } }, "then": { "required": ["webhook"] } }
+      ]
+    },
+
+    "LLMNode": {
+      "type": "object",
+      "required": ["id", "type", "model", "prompt"],
+      "additionalProperties": false,
+      "properties": {
+        "id":            { "$ref": "#/$defs/NodeIdentifier" },
+        "type":          { "const": "llm" },
+        "description":   { "type": "string" },
+        "model":         { "type": "string" },
+        "prompt":        { "$ref": "#/$defs/VarRef" },
+        "system_prompt": { "$ref": "#/$defs/VarRef" },
+        "temperature":   { "type": "number", "minimum": 0, "maximum": 2 },
+        "max_tokens":    { "type": "integer", "minimum": 1 },
+        "output_schema": { "$ref": "#/$defs/JSONSchemaLite" },
+        "timeout_s":     { "type": "number", "exclusiveMinimum": 0 },
+        "retry":         { "$ref": "#/$defs/Retry" }
+      }
+    },
+
+    "RetrievalNode": {
+      "type": "object",
+      "required": ["id", "type", "dataset", "query"],
+      "additionalProperties": false,
+      "properties": {
+        "id":          { "$ref": "#/$defs/NodeIdentifier" },
+        "type":        { "const": "retrieval" },
+        "description": { "type": "string" },
+        "dataset":     { "type": "string", "description": "Handle into registry_ref.datasets" },
+        "query":       { "$ref": "#/$defs/VarRef" },
+        "top_k":       { "type": "integer", "minimum": 1, "maximum": 100, "default": 5 },
+        "rerank":      { "type": "boolean", "default": false },
+        "timeout_s":   { "type": "number", "exclusiveMinimum": 0 },
+        "retry":       { "$ref": "#/$defs/Retry" }
+      }
+    },
+
+    "HTTPNode": {
+      "type": "object",
+      "required": ["id", "type", "method", "url"],
+      "additionalProperties": false,
+      "properties": {
+        "id":              { "$ref": "#/$defs/NodeIdentifier" },
+        "type":            { "const": "http" },
+        "description":     { "type": "string" },
+        "method":          { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+        "url":             { "$ref": "#/$defs/VarRef" },
+        "headers":         { "type": "object", "additionalProperties": { "$ref": "#/$defs/VarRef" } },
+        "body":            { "description": "string or json; rendered with VarRef substitution" },
+        "credential":      { "type": "string", "description": "Opaque handle into registry_ref.credentials" },
+        "timeout_s":       { "type": "number", "exclusiveMinimum": 0 },
+        "retry":           { "$ref": "#/$defs/Retry" },
+        "idempotency_key": { "$ref": "#/$defs/VarRef" }
+      },
+      "allOf": [
+        {
+          "description": "Non-idempotent methods MUST declare an idempotency_key (Validator-enforced).",
+          "if": { "properties": { "method": { "enum": ["POST", "PUT", "PATCH", "DELETE"] } } },
+          "then": { "required": ["idempotency_key"] }
+        }
+      ]
+    },
+
+    "CodeNode": {
+      "type": "object",
+      "required": ["id", "type", "language", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "id":              { "$ref": "#/$defs/NodeIdentifier" },
+        "type":            { "const": "code" },
+        "description":     { "type": "string" },
+        "language":        { "enum": ["python", "javascript"] },
+        "source":          { "type": "string" },
+        "inputs":          { "type": "object", "additionalProperties": { "$ref": "#/$defs/VarRef" } },
+        "output_schema":   { "$ref": "#/$defs/JSONSchemaLite" },
+        "timeout_s":       { "type": "number", "exclusiveMinimum": 0 },
+        "retry":           { "$ref": "#/$defs/Retry" },
+        "idempotency_key": { "$ref": "#/$defs/VarRef" }
+      }
+    },
+
+    "ConditionNode": {
+      "type": "object",
+      "required": ["id", "type", "branches"],
+      "additionalProperties": false,
+      "properties": {
+        "id":          { "$ref": "#/$defs/NodeIdentifier" },
+        "type":        { "const": "condition" },
+        "description": { "type": "string" },
+        "branches": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["when", "next"],
+            "additionalProperties": false,
+            "properties": {
+              "when": { "type": "string", "description": "Boolean expression; truthiness rules per IR spec." },
+              "next": { "$ref": "#/$defs/NodeIdentifier" }
+            }
+          }
+        },
+        "default": { "$ref": "#/$defs/NodeIdentifier" }
+      }
+    },
+
+    "LoopNode": {
+      "type": "object",
+      "required": ["id", "type", "over", "as", "body", "max_iterations"],
+      "additionalProperties": false,
+      "properties": {
+        "id":             { "$ref": "#/$defs/NodeIdentifier" },
+        "type":           { "const": "loop" },
+        "description":    { "type": "string" },
+        "over":           { "$ref": "#/$defs/VarRef", "description": "Reference to an array-typed value" },
+        "as":             { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$", "description": "Loop variable name" },
+        "body":           { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Node" }, "description": "Linear pipeline executed per iteration" },
+        "max_iterations": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "collect":        { "$ref": "#/$defs/VarRef", "description": "Optional reference inside the body whose per-iteration value is collected into the loop's output array" },
+        "timeout_s":      { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+
+    "ParallelNode": {
+      "type": "object",
+      "required": ["id", "type", "branches", "merge_strategy"],
+      "additionalProperties": false,
+      "properties": {
+        "id":             { "$ref": "#/$defs/NodeIdentifier" },
+        "type":           { "const": "parallel" },
+        "description":    { "type": "string" },
+        "branches": {
+          "type": "object",
+          "minProperties": 2,
+          "additionalProperties": {
+            "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Node" }
+          }
+        },
+        "merge_strategy": { "enum": ["concat", "object_merge", "first_success"] },
+        "timeout_s":      { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+
+    "AgentNode": {
+      "type": "object",
+      "required": ["id", "type", "model", "tools", "input_schema", "output_schema", "budget", "on_budget_exhausted"],
+      "additionalProperties": false,
+      "properties": {
+        "id":                 { "$ref": "#/$defs/NodeIdentifier" },
+        "type":               { "const": "agent" },
+        "description":        { "type": "string" },
+        "model":              { "type": "string" },
+        "tools": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "description": "Handle into registry_ref.tools" }
+        },
+        "input_schema":       { "$ref": "#/$defs/JSONSchemaLite" },
+        "output_schema":      { "$ref": "#/$defs/JSONSchemaLite" },
+        "inputs":             { "type": "object", "additionalProperties": { "$ref": "#/$defs/VarRef" } },
+        "system_prompt":      { "$ref": "#/$defs/VarRef" },
+        "budget":             { "$ref": "#/$defs/AgentBudget" },
+        "on_budget_exhausted": { "enum": ["fallback", "fail", "return_partial"] },
+        "fallback_edge":      { "$ref": "#/$defs/NodeIdentifier" },
+        "timeout_s":          { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "allOf": [
+        {
+          "description": "fallback_edge required when on_budget_exhausted == fallback",
+          "if":   { "properties": { "on_budget_exhausted": { "const": "fallback" } } },
+          "then": { "required": ["fallback_edge"] }
+        }
+      ]
+    },
+
+    "OutputNode": {
+      "type": "object",
+      "required": ["id", "type", "bindings"],
+      "additionalProperties": false,
+      "properties": {
+        "id":          { "$ref": "#/$defs/NodeIdentifier" },
+        "type":        { "const": "output" },
+        "description": { "type": "string" },
+        "bindings": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/VarRef" },
+          "description": "Map workflow-output names to VarRefs."
+        }
+      }
+    },
+
+    "Edge": {
+      "type": "object",
+      "required": ["from", "to"],
+      "additionalProperties": false,
+      "properties": {
+        "from": { "$ref": "#/$defs/NodeIdentifier" },
+        "to":   { "$ref": "#/$defs/NodeIdentifier" },
+        "when": { "type": "string", "description": "Optional boolean expression; if absent, edge always fires." }
+      }
+    }
+
+  }
+}
