@@ -16,11 +16,8 @@
 
 > **Trim note (2026-05-06):** Code snippets below are **illustrative**. Contracts to preserve verbatim: (a) IR v0.3 schema (Phase 0 deliverable, frozen), (b) Validator failure-bucket taxonomy + ValidationFailure dataclass shape, (c) RuntimeAdapter interface (ADR 0015, Task 8.5), (d) Persona Brief shape (ADR 0023, Task 0.5), (e) Phase 1 gate criteria (Task 17 — dual-runtime explicit). Everything else may be adjusted by the executor. Per project owner directive 2026-05-06: trim over-specification, keep contracts.
 
-> **Cloud-only deployment pivot (2026-05-07).** Both runtimes are cloud SaaS (Hiagent Cloud + Dify Cloud at API `v1`). Module path placeholders **`vH_X` and `vD_Y` resolve to `cloud`** (was e.g., `v2_6` / `v1_14` under self-hosted-docker). Concretely: `loom/runtimes/dify/cloud/`, `loom/runtimes/hiagent/cloud/`. Deployer / Compiler / reverse compiler / CLI / conformance runner all hit cloud SaaS endpoints with bearer tokens loaded from `config/runtimes.yaml` (template at `config/runtimes.example.yaml`); see ADR 0002 amendment. No `bash scripts/dify_up.sh` etc. — those scripts were deleted in the same pivot. Wherever this plan still says `vH_X` / `vD_Y` / `v1_14` / `v2_6`, read it as **`cloud`**.
-
 **Prerequisites:** Phase 0 plan complete. Specifically:
-- ADRs 0001–0005 all `Accepted` (ADR 0002 carries the 2026-05-07 cloud SaaS amendment).
-- `config/runtimes.yaml` configured with Hiagent Cloud + Dify Cloud base URLs and `HIAGENT_CLOUD_TOKEN` / `DIFY_CLOUD_TOKEN` env tokens.
+- ADRs 0001–0005 all `Accepted`.
 - `reports/phase-0-gate.md` shows all rows pass.
 - `loom.runtimes.dify.ast.canonical_dify_ast_hash` and `loom.runtimes.hiagent.ast.canonical_hiagent_ast_hash` are stable on each pinned runtime.
 - The conformance matrix scaffold (`loom/conformance/`) exists with all 10 PRD §5 cells.
@@ -31,11 +28,9 @@ If any of these fails, stop. Re-iterate Phase 0 per PRD §7 before starting.
 
 ## Notes on runtime version segments
 
-> **Cloud pivot 2026-05-07.** Both placeholders `vH_X` and `vD_Y` resolve to `cloud` (cloud SaaS API `v1`). Concrete paths: `loom/runtimes/hiagent/cloud/` and `loom/runtimes/dify/cloud/`. The pre-pivot text (kept below for diff continuity) referred to docker-tag-pinned major.minor segments — that was self-hosted; we no longer ship that.
+The Compiler module paths use `loom/runtimes/hiagent/v<H_X>/` and `loom/runtimes/dify/v<D_Y>/`, where the segment matches the major.minor of each runtime locked in ADR 0002 (extended in Phase 0 to cover both runtimes). Throughout this plan we write `vH_X` and `vD_Y` as placeholders; replace with the actual values before executing each task. PRD §9: "a single compiler module per runtime major version."
 
-The Compiler module paths use `loom/runtimes/hiagent/cloud/` and `loom/runtimes/dify/cloud/`, where `cloud` is the API-version-pinned cloud SaaS module per ADR 0002 (amended 2026-05-07). Throughout this plan we write `vH_X` and `vD_Y` as legacy placeholders; **substitute `cloud` for both**. PRD §9: "a single compiler module per runtime API major version."
-
-`loom/runtimes/dify/ast.py` and `loom/runtimes/hiagent/ast.py` are intentionally unversioned (canonical-AST hashing is version-stable per Phase 0 ADR 0002). The version-segmented modules own everything that *does* change with the runtime API version.
+`loom/runtimes/dify/ast.py` and `loom/runtimes/hiagent/ast.py` are intentionally unversioned (canonical-AST hashing is version-stable per Phase 0 ADR 0002). The version-segmented modules own everything that *does* change with the runtime version.
 
 ---
 
@@ -2437,7 +2432,7 @@ git commit -m "feat(runtimes): RuntimeAdapter abstraction (Hiagent + Dify dual s
 - Create: `/Users/apple/Documents/2.1 AI Journey/Cursor_projects/octopus_FDE/tests/runtimes/dify/vX_Y/__init__.py`
 - Create: `/Users/apple/Documents/2.1 AI Journey/Cursor_projects/octopus_FDE/tests/runtimes/dify/vX_Y/test_compiler_nodes.py`
 
-> Replace `vX_Y` with `cloud` (per 2026-05-07 cloud pivot in ADR 0002). The path appears in *every* file path below; doing the replacement once at the start of this task is the easiest path.
+> Replace `vX_Y` with the actual major.minor segment from ADR 0002 (e.g., `v1_6`). The path appears in *every* file path below; doing the replacement once at the start of this task is the easiest path.
 
 The Compiler is a pure function — `IRDocument → str` (Dify YAML). It dispatches per node type; cells where the pinned Dify can't honor IR semantics natively get a wrapper synthesis (per the cell table in ADR 0002).
 

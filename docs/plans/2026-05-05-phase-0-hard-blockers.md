@@ -10,15 +10,13 @@
 
 **Architecture:** Phase 0 is mostly *decisions* and *artifacts*, not running software. The deliverables are: (1) ADR 0001 SOW / requirements intake contract; (2) ADR 0002 runtime pins — **Hiagent 2.6** and **Dify 1.14.0**; (3) ADR 0003 credential binding strategy — platform-managed LLM credentials and HTTP auth bindings for non-LLM integrations; (4) ADR 0004 default reverse-compile scope; (5) ADR 0005 agent/LLM defaults with `max_output_tokens = 8000`; (6) a frozen IR v0.3 JSON Schema; (7) five SOW-derived archetype IRs; (8) Phase 0 Dify engineering evidence: conformance baseline, N=10 canonicalization proof, reverse-compile spike, and security review. Code in Phase 0 is the minimum scaffolding to prove the assumptions. None of this code is the production system.
 
-**Tech Stack:** Python 3.11, Pydantic v2, JSON Schema 2020-12, pytest, ruff, mypy. Runtime targets are **cloud SaaS** (Hiagent Cloud + Dify Cloud at API `v1`); no local docker (see 2026-05-07 cloud pivot note below).
+**Tech Stack:** Python 3.11, Pydantic v2, JSON Schema 2020-12, Docker (pinned Hiagent + Dify images per ADR 0002), pytest, ruff, mypy.
 
 > **Trim note (2026-05-06):** Phase 0 is mostly *contracts and ADRs* — these MUST be detailed. Code snippets (Pydantic models, canonicalizer, conformance harness) below stay verbatim because Phase 1 + Phase 1.5 build on them. ADR 0001 is now the SOW / requirements intake contract, not an external partner confirmation gate. ADR 0004 is the default reverse-compile scope, not a senior-review signoff gate. Per project owner directive 2026-05-06: trim only execution-detail noise, keep all contract-level specs.
 
 > **n8n out (2026-05-06):** n8n was scoped out of v1. Phase 0 ADR 0002 covers Hiagent + Dify version pinning (extended from earlier draft that pinned only Dify); Phase 1 ships RuntimeAdapter + both compilers. References to n8n / portability redlines in earlier drafts are obsolete; ADR 0006 / 0007 / 0018 are tombstones (see Phase 3-4 plan).
 
 > **Phase 0 runtime scope (2026-05-06 clarification).** ADR 0002 pins **both** runtime versions in this phase — that's a *decision* artifact, runtime-neutral. The Phase 0 *engineering* artifacts (Dify client, canonicalization proof, conformance baseline, reverse-compile spike, gate evidence) below are intentionally **Dify-only** in this phase to keep Phase 0's scope tight. The Hiagent equivalents (`loom/runtimes/hiagent/client.py`, Hiagent canonicalization proof, Hiagent conformance baseline, Hiagent reverse spike) ship in **Phase 1 Task 11.5** alongside the RuntimeAdapter abstraction (ADR 0015). The Phase 1 gate (Task 17) requires both runtimes to pass conformance + round-trip; the Phase 0 gate only requires Dify. If the Cost-budget escape hatch (per PRD §7) is invoked **before** Phase 0 completes, Dify is dropped, this Phase 0 evidence list becomes the *Hiagent* evidence list, and the equivalent files are produced under `loom/runtimes/hiagent/` instead.
-
-> **Cloud-only deployment pivot (2026-05-07).** Both runtimes are now cloud SaaS, not self-hosted docker. ADR 0002 amended (Hiagent Cloud + Dify Cloud at API `v1`); local docker scaffolding (`docker/{hiagent,dify}-pinned/`, `scripts/{hiagent,dify}_{up,down}.sh`) deleted. Endpoints + auth tokens supplied via `config/runtimes.yaml` (template: `config/runtimes.example.yaml`). Wherever this plan still says "the pinned Dify" / "localhost:5001" / `bash scripts/dify_up.sh`, read it as **"Dify Cloud at the configured base URL with `DIFY_CLOUD_TOKEN`"**. Module paths normalize to `loom/runtimes/{hiagent,dify}/cloud/` (was `vX_Y`). Task 3 docker-compose templates remain on `main` as historical artifacts but are unused. Task 3.1 (deferred upstream Dify compose sourcing) is **retired** — cloud SaaS removes the need.
 
 ---
 
@@ -66,8 +64,6 @@ octopus_FDE/
 ├── ruff.toml                                   (NEW)
 ├── mypy.ini                                    (NEW)
 ├── README.md                                   (NEW — how to run Phase 0 evidence)
-├── config/                                     (NEW — cloud SaaS endpoint + token slots, 2026-05-07)
-│   └── runtimes.example.yaml                   (template for runtimes.yaml; gitignored real file)
 ├── loom/
 │   ├── __init__.py
 │   ├── ir/
@@ -79,15 +75,17 @@ octopus_FDE/
 │   │   ├── __init__.py
 │   │   └── dify/
 │   │       ├── __init__.py
-│   │       └── cloud/                          (was v1_14/ pre 2026-05-07 cloud pivot)
+│   │       └── v1_14/
 │   │           ├── __init__.py
-│   │           ├── client.py                   (thin Dify Cloud HTTP client, bearer auth + import/export)
-│   │           └── ast.py                      (Dify v1 DSL parse → canonical AST tree)
+│   │           ├── client.py                   (thin Dify 1.14 HTTP client, auth + import/export)
+│   │           └── ast.py                      (Dify 1.14 DSL parse → canonical AST tree)
 │   └── conformance/
 │       ├── __init__.py
 │       ├── matrix.py                           (matrix definitions; one row per §5 cell)
-│       └── runner.py                           (executes a matrix row against Dify Cloud)
+│       └── runner.py                           (executes a matrix row against pinned Dify)
 ├── scripts/
+│   ├── dify_up.sh                              (docker compose up of pinned Dify)
+│   ├── dify_down.sh
 │   ├── round_trip_proof.py                     (N=10 import/export, hash stability)
 │   ├── reverse_compile_spike.py                (manual edit → reverse compile → equality check)
 │   └── security_review.py                      (static-check helper for §9 risks)
@@ -105,7 +103,14 @@ octopus_FDE/
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml                              (lint + type + tests)
-│       └── conformance.yml                     (Phase 0 slow lane against Dify Cloud; Hiagent Cloud added in Phase 1 Task 11.5)
+│       └── conformance.yml                     (Phase 0 slow lane against pinned Dify; Hiagent added in Phase 1 Task 11.5)
+├── docker/
+│   ├── hiagent-pinned/
+│   │   ├── docker-compose.yml                  (pinned tag from decision 0002, Hiagent section)
+│   │   └── README.md
+│   └── dify-pinned/
+│       ├── docker-compose.yml                  (pinned tag from decision 0002, Dify section)
+│       └── README.md
 └── reports/
     ├── phase-0-gate.md                         (NEW — the evidence package)
     ├── round-trip-proof.json                   (artifact of round-trip script)
@@ -2065,19 +2070,17 @@ git commit -m "feat(ir): canonical IR form + content hash"
 
 ---
 
-## Task 11: Dify Cloud HTTP client (thin)
+## Task 11: Dify HTTP client (thin)
 
-> **Cloud pivot 2026-05-07 override.** Path was `loom/runtimes/dify/v1_14/`; now `loom/runtimes/dify/cloud/`. Base URL is the value of `dify.cloud.base_url` in `config/runtimes.yaml` (e.g., `https://cloud.dify.ai/v1`); auth token is `DIFY_CLOUD_TOKEN` env. The smoke test gating envvar `LOOM_DIFY_LIVE` and key envvar `LOOM_DIFY_KEY` are renamed to `LOOM_DIFY_CLOUD_LIVE` and `DIFY_CLOUD_TOKEN` respectively. Drop all references to `localhost:5001` and `bash scripts/dify_up.sh`. The four endpoints (`import_dsl`, `export_dsl`, `publish`, `get_app`) and the path shape under `/console/api/apps/...` stay the same; verify final endpoint paths against Dify Cloud's published API on first integration.
-
-**Files (post-pivot):**
+**Files:**
 - Create: `/Users/apple/Documents/2.1 AI Journey/Cursor_projects/octopus_FDE/loom/runtimes/__init__.py`
 - Create: `/Users/apple/Documents/2.1 AI Journey/Cursor_projects/octopus_FDE/loom/runtimes/dify/__init__.py`
-- Create: `/Users/apple/Documents/2.1 AI Journey/Cursor_projects/octopus_FDE/loom/runtimes/dify/cloud/__init__.py`
-- Create: `/Users/apple/Documents/2.1 AI Journey/Cursor_projects/octopus_FDE/loom/runtimes/dify/cloud/client.py`
+- Create: `/Users/apple/Documents/2.1 AI Journey/Cursor_projects/octopus_FDE/loom/runtimes/dify/v1_14/__init__.py`
+- Create: `/Users/apple/Documents/2.1 AI Journey/Cursor_projects/octopus_FDE/loom/runtimes/dify/v1_14/client.py`
 - Create: `/Users/apple/Documents/2.1 AI Journey/Cursor_projects/octopus_FDE/tests/dify/__init__.py`
 - Create: `/Users/apple/Documents/2.1 AI Journey/Cursor_projects/octopus_FDE/tests/dify/test_client_smoke.py`
 
-The thin client wraps the four Dify Cloud endpoints Phase 0 needs: import-DSL (create draft), export-DSL (fetch draft), publish, get app. Auth is bearer token via header. The client lives in `loom/runtimes/dify/cloud/` so Phase 1 can build the Dify compiler/reverse path without moving the Phase 0 integration code.
+The thin client wraps the four Dify endpoints Phase 0 needs: import-DSL (create draft), export-DSL (fetch draft), publish, get app. Auth is API-key via header. The client lives in `loom/runtimes/dify/v1_14/` so Phase 1 can build the Dify compiler/reverse path without moving the Phase 0 integration code.
 
 - [ ] **Step 1: Write the smoke test (network-gated)**
 
@@ -2171,22 +2174,22 @@ class DifyClient:
 
 > **Note for the engineer:** the exact API payload shape must be verified against Dify 1.14.0. The values above are placeholders matching common Dify console-API conventions. The Phase 1 Compiler module owns precise DSL emission; this client only owns network calls that exist on the pinned version.
 
-- [ ] **Step 4: Run smoke test against Dify Cloud**
+- [ ] **Step 4: Run smoke test (only if Dify is running)**
 
 ```bash
-# Cloud SaaS — no local docker. Set credentials and base URL via env:
-export DIFY_CLOUD_BASE_URL="https://cloud.dify.ai/v1"
-export DIFY_CLOUD_TOKEN="<your-cloud-api-key>"
-LOOM_DIFY_CLOUD_LIVE=1 pytest tests/dify/test_client_smoke.py -v
+# Start the pinned Dify per Task 3:
+bash scripts/dify_up.sh
+LOOM_DIFY_LIVE=1 LOOM_DIFY_KEY=<key> pytest tests/dify/test_client_smoke.py -v
+bash scripts/dify_down.sh
 ```
 
-The smoke test stays skipped unless `LOOM_DIFY_CLOUD_LIVE=1`.
+The smoke test stays skipped unless `LOOM_DIFY_LIVE=1`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add loom/runtimes/__init__.py loom/runtimes/dify/__init__.py loom/runtimes/dify/cloud/__init__.py loom/runtimes/dify/cloud/client.py tests/dify/
-git commit -m "feat(dify): thin Dify Cloud HTTP client (health, import, export, publish)"
+git add loom/runtimes/__init__.py loom/runtimes/dify/__init__.py loom/runtimes/dify/v1_14/__init__.py loom/runtimes/dify/v1_14/client.py tests/dify/
+git commit -m "feat(dify): thin HTTP client (health, import, export, publish)"
 ```
 
 ---
@@ -2802,21 +2805,19 @@ git commit -m "feat(conformance): matrix scaffold (one row per §5 cell, factori
 
 ## Task 14: Conformance baseline run + populate ADR 0002 cell table
 
-> **Cloud pivot 2026-05-07 override.** "Pinned Dify 1.14.0 is running" → "Dify Cloud is reachable with `DIFY_CLOUD_TOKEN` set". Module path `loom.runtimes.dify.v1_14.client` → `loom.runtimes.dify.cloud.client`. No local docker startup needed. Cloud-SaaS makes this task ~1 day instead of 2-3 days (no infra reliability issues). Examples directory `examples/dify-conformance/` unchanged.
-
 **Files:**
 - Modify: `/Users/apple/Documents/2.1 AI Journey/Cursor_projects/octopus_FDE/docs/decisions/0002-runtime-versions.md`
 - Create: `/Users/apple/Documents/2.1 AI Journey/Cursor_projects/octopus_FDE/reports/conformance-baseline.md`
 
-This task runs after ADR 0002 is written and Dify Cloud auth is configured. For Phase 0, we use **hand-authored DSL** keyed off the conformance cases — Phase 1's Compiler will replace the hand-authoring. The point is to populate the Dify side of the §5 cell table in ADR 0002 and prove the matrix is executable end-to-end on the pinned Phase 0 engineering target.
+This task runs after ADR 0002 is written and pinned Dify 1.14.0 is running. For Phase 0, we use **hand-authored DSL** keyed off the conformance cases — Phase 1's Compiler will replace the hand-authoring. The point is to populate the Dify side of the §5 cell table in ADR 0002 and prove the matrix is executable end-to-end on the pinned Phase 0 engineering target.
 
 - [ ] **Step 1: For each MATRIX row, hand-author the Dify DSL by hand**
 
-Working off the matrix shapes in `loom/conformance/matrix.py`, hand-write a Dify YAML that implements the same semantics. Save to `examples/dify-conformance/<row.id>.yaml`. Cloud-SaaS speeds this up vs the original local-docker estimate; budget ~2 hours per row.
+Working off the matrix shapes in `loom/conformance/matrix.py`, hand-write a Dify YAML that implements the same semantics. Save to `examples/dify-conformance/<row.id>.yaml`. This is the least pleasant Phase 0 task; budget half a day per row.
 
-- [ ] **Step 2: Push each DSL to Dify Cloud and run with the case inputs**
+- [ ] **Step 2: Push each DSL to pinned Dify and run with the case inputs**
 
-Use `loom.runtimes.dify.cloud.client.DifyClient.import_dsl(...)`, then trigger via Dify Cloud's run API (path is API-version-specific; consult ADR 0002). Record the result and call `case.expect(result)`.
+Use `loom.runtimes.dify.v1_14.client.DifyClient.import_dsl(...)`, then trigger via Dify's run API (path is version-specific; consult ADR 0002). Record the result and call `case.expect(result)`.
 
 - [ ] **Step 3: Fill in the cell table in `docs/decisions/0002-runtime-versions.md`**
 

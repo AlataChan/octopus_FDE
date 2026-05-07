@@ -25,8 +25,7 @@
 - **§7**：**Phase 1 从 Day 1 起就跑双运行时（Hiagent 主线 + Dify 副线）**——通过 RuntimeAdapter 抽象（原本 Phase 3.1 的工作前移）。**Phase 1.5** 把双运行时的 forward compiler 都扩到 3 个 TCM 影子 archetype；reverse 在两个电商 deep-coverage archetype 上保持窄覆盖。**n8n 已从 v1 范围移除**（决策日 2026-05-06）；运行时可移植性由 Phase 1 双运行时构造证明。**Phase 3.2**（原 n8n GA）改为可选 LangGraph alpha。Phase 2 仍拆为 2A（承重基础设施）+ 2B（UI / RBAC / Trace / 全量反编译）。**Persona Brief**（用户/角色定位）作为 FDE Session 的第一步加入（在 Workflow Brief 之前），让系统 persona 无关、不锁定垂直。
 - **§9**：新增 IR 版本迁移、提示词/工具描述注入、代码节点沙箱逃逸、Trace PII 留存、Trace 存储成本、一致性测试波动等风险。
 - **§10**：失败分类从 Planner 扩展到全链路（编译、部署、运行时一致性、反编译、注册表/ACL、人审拒绝）。
-- **§11**：Q1/Q2/Q3/Q5/Q6 不再作为外部硬阻塞等待，改为 Phase 0 默认决策：SOW / 需求输入契约、Hiagent Cloud + Dify Cloud（API `v1`）双 pin、凭证绑定策略、反编译默认边界、Agent / LLM 默认设置（`max_output_tokens = 8000`）。
-- **2026-05-07 修订**：运行时部署模式从 self-hosted-docker 切到 cloud SaaS。两个运行时都走云端，本地 docker 脚手架（`docker/`、`scripts/{dify,hiagent}_{up,down}.sh`）已删；endpoint + auth token 通过 `config/runtimes.yaml` 配置（模板：`config/runtimes.example.yaml`）。
+- **§11**：Q1/Q2/Q3/Q5/Q6 不再作为外部硬阻塞等待，改为 Phase 0 默认决策：SOW / 需求输入契约、Hiagent 2.6 + Dify 1.14.0 双 pin、凭证绑定策略、反编译默认边界、Agent / LLM 默认设置（`max_output_tokens = 8000`）。
 
 ## 1. 产品主张（Pitch）
 
@@ -283,7 +282,7 @@ flowchart LR
 Phase 0 默认决策：
 
 - ADR 0001 — SOW / 需求输入契约；真实伙伴只是 SOW 的一种来源，不是构建 FDE 的前置阻塞。
-- ADR 0002 — 运行时版本固定（云端 SaaS）：Hiagent Cloud（主） + Dify Cloud（副），均 pin API `v1`。Endpoint + token 通过 `config/runtimes.yaml` 配置；不依赖本地 docker。
+- ADR 0002 — 运行时版本固定：Hiagent = `2.6`，Dify = `1.14.0`。
 - ADR 0003 — 凭证绑定策略：LLM 凭证在目标平台配置；FDE 生成 YAML / JSON / ZIP 后导入平台再绑定；非 LLM 凭证走 HTTP 节点 auth binding，密钥值不进入生成物。
 - ADR 0004 — 反编译默认边界：只反编译 FDE 正向生成过的结构与已识别参数编辑；未识别运行时侧编辑硬阻塞并给修复路径。
 - ADR 0005 — Agent / LLM 默认设置：先用默认值，导入后允许运营者在平台侧调整；首版 `max_output_tokens = 8000`。
@@ -377,7 +376,7 @@ FDE 对话界面、Web Authoring、语义 diff、Trace 观测、FDE 原生 RBAC�
 原 Q1/Q2/Q3/Q5/Q6 不再作为外部硬阻塞等待，而是在 Phase 0 写成默认 ADR：
 
 - Q1 → ADR 0001 SOW / 需求输入契约；真实伙伴可后补，合成伙伴模式可启动。
-- Q2 → ADR 0002 固定 API 版本（云端 SaaS）：Hiagent Cloud `v1`，Dify Cloud `v1`。本地 docker 已退役（2026-05-07）。
+- Q2 → ADR 0002 固定版本：Hiagent `2.6`，Dify `1.14.0`。
 - Q3 → ADR 0003 凭证绑定策略；不再要求先选中心化密钥管理器。
 - Q5 → ADR 0004 默认反编译边界。
 - Q6 → ADR 0005 默认 Agent / LLM 设置，`max_output_tokens = 8000`。
