@@ -18,6 +18,14 @@
 
 > **Phase 0 runtime scope (2026-05-06 clarification).** ADR 0002 pins **both** runtime versions in this phase — that's a *decision* artifact, runtime-neutral. The Phase 0 *engineering* artifacts (Dify client, canonicalization proof, conformance baseline, reverse-compile spike, gate evidence) below are intentionally **Dify-only** in this phase to keep Phase 0's scope tight. The Hiagent equivalents (`loom/runtimes/hiagent/client.py`, Hiagent canonicalization proof, Hiagent conformance baseline, Hiagent reverse spike) ship in **Phase 1 Task 11.5** alongside the RuntimeAdapter abstraction (ADR 0015). The Phase 1 gate (Task 17) requires both runtimes to pass conformance + round-trip; the Phase 0 gate only requires Dify. If the Cost-budget escape hatch (per PRD §7) is invoked **before** Phase 0 completes, Dify is dropped, this Phase 0 evidence list becomes the *Hiagent* evidence list, and the equivalent files are produced under `loom/runtimes/hiagent/` instead.
 
+> **MVP scope (2026-05-07).** The cloud-only-pivot of 2026-05-07 was reverted because both runtimes are **self-hosted-docker on customer-owned cloud VMs** (the customer's IT ops deploys; FDE itself does not run docker locally or operate cloud VMs). MVP definition is locked at **"NL → Planner → IR → Compiler → YAML file"** — no auto-push, no per-customer endpoint/token wiring. The operator manually imports the generated YAML in their self-hosted Dify / Hiagent console.
+>
+> Implications for Phase 0 task scope under MVP:
+> - **Tasks 7 / 8 / 9 / 10**: critical path, ship as-written.
+> - **Tasks 11 / 12 / 13**: ship as-written **but run offline only** in MVP (unit + golden + canonical-AST hash; no live HTTP smoke unless the executor sets `LOOM_DIFY_LIVE=1` against an externally-provided Dify endpoint).
+> - **Tasks 14 / 15 / 16 / 17 (Phase 0 gate evidence rows that need a live runtime)**: marked **first-customer-deferred**. The evidence is produced when the first customer integration provides a Dify endpoint + token; the Phase 0 gate report carries these rows as `deferred_to_first_customer_integration` rather than `passed`. Phase 0 close-out for MVP does not require these rows green.
+> - **Task 3.1 (deferred upstream Dify 1.14.0 compose sourcing)**: still deferred; needed eventually for customer-side deployment artifacts but not blocking MVP.
+
 ---
 
 ## Repo layout established by Phase 0
