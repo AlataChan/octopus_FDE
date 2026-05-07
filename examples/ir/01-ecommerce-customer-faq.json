@@ -1,0 +1,58 @@
+{
+  "ir_version": "0.3",
+  "metadata": {
+    "name": "Ecommerce Customer FAQ",
+    "description": "Multilingual buyer-question Q&A from product/policy KB with citations and low-confidence escalation.",
+    "owner": "ecommerce-ops",
+    "rationale": "Baseline ecommerce knowledge-base archetype. Exercises trigger / retrieval / llm / output and llm.output_schema. Default deep-coverage #1 for Phase 1 per PRD §1 (ecommerce-primary wedge)."
+  },
+  "registry_ref": {
+    "registry_version": "sha:0000000",
+    "tools": ["translate"],
+    "datasets": ["product_kb", "policy_kb"],
+    "credentials": []
+  },
+  "policy": {
+    "default_timeout_s": 60,
+    "default_retry": { "max_attempts": 3, "backoff": "exponential", "retry_on": ["5xx", "timeout", "rate_limit"] },
+    "agent_budget": { "max_iterations": 10, "max_tokens": 50000, "max_wall_clock_s": 300 }
+  },
+  "inputs":  [{ "name": "query", "type": "string", "required": true }, { "name": "buyer_locale", "type": "string", "required": false }],
+  "outputs": [{ "name": "answer", "type": "string" }, { "name": "sources", "type": "string[]" }, { "name": "confidence", "type": "number" }],
+  "nodes": [
+    { "id": "start", "type": "trigger", "mode": "manual", "rationale": "Manual entry; this archetype is interactive — invoked per buyer message." },
+    { "id": "retrieve", "type": "retrieval", "rationale": "Pull top-K candidate passages from the merged product + policy KB before LLM ranking.",
+      "dataset": "product_kb", "query": "${input.query}", "top_k": 20 },
+    { "id": "rerank", "type": "llm", "rationale": "Cheap re-rank pass to narrow 20 → 5; reduces tokens for the answer step and lets us threshold confidence.",
+      "model": "configured-small-model",
+      "system_prompt": "You re-rank candidate passages by relevance to the buyer query. Return only the indices and a confidence score.",
+      "prompt": "Query: ${input.query}\n\nPassages:\n${retrieve.chunks}\n\nReturn JSON: top 5 passage indices and a 0.0–1.0 confidence score for whether the KB can answer this query.",
+      "temperature": 0,
+      "output_schema": {
+        "type": "object", "required": ["top_indices", "confidence"],
+        "properties": {
+          "top_indices": { "type": "array", "items": { "type": "integer" }, "minItems": 1, "maxItems": 5 },
+          "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+        }
+      }
+    },
+    { "id": "answer", "type": "llm", "rationale": "Final answer in the buyer's locale, with citations by source index. No compensation promises beyond stated policy.",
+      "model": "configured-planner-model",
+      "system_prompt": "Answer the buyer's query using only the provided KB context. Cite by source index. Do not promise specific refund/compensation amounts beyond policy. Reply in buyer_locale if provided, else infer from query.",
+      "prompt": "Query: ${input.query}\nLocale: ${input.buyer_locale}\nTop passage indices: ${rerank.top_indices}\nFull retrieval: ${retrieve.chunks}\n\nProduce a JSON answer.",
+      "temperature": 0.2,
+      "output_schema": {
+        "type": "object", "required": ["answer", "sources"],
+        "properties": { "answer": { "type": "string" }, "sources": { "type": "array", "items": { "type": "string" } } }
+      }
+    },
+    { "id": "out", "type": "output", "rationale": "Bind workflow outputs; confidence is the raw rerank score (0.0–1.0). The boolean needs_escalation is derived from a condition node introduced in Phase 1.5 once the SOW/operator-configured threshold is locked.",
+      "bindings": { "answer": "${answer.answer}", "sources": "${answer.sources}", "confidence": "${rerank.confidence}" } }
+  ],
+  "edges": [
+    { "from": "start", "to": "retrieve" },
+    { "from": "retrieve", "to": "rerank" },
+    { "from": "rerank", "to": "answer" },
+    { "from": "answer", "to": "out" }
+  ]
+}

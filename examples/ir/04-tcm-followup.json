@@ -1,20 +1,21 @@
 {
-  "ir_version": "0.2",
+  "ir_version": "0.3",
   "metadata": {
-    "name": "Multi-Step Research",
-    "description": "Outline → per-subtopic research via agentic island (with deterministic fallback) → consolidate. Exercises loop with max_iterations, agent budget + on_budget_exhausted=fallback + fallback_edge, agent input_schema/output_schema, and loop.collect.",
-    "owner": "research-ops"
+    "name": "TCM Follow-up",
+    "description": "Outline follow-up needs, run a bounded agentic review per item with deterministic fallback, then consolidate a staff-reviewed follow-up draft.",
+    "owner": "clinic-ops",
+    "rationale": "Shadow TCM follow-up archetype for bounded agent governance and fallback behavior. Keeps the original outline / loop / agent island / consolidate skeleton."
   },
   "registry_ref": {
-    "registry_version": "2026-04-15",
-    "tools": ["web_search", "fetch_url"],
+    "registry_version": "sha:0000000",
+    "tools": ["patient_history_lookup", "clinic_policy_lookup"],
     "datasets": [],
     "credentials": []
   },
   "policy": {
     "default_timeout_s": 60,
     "default_retry": { "max_attempts": 2, "backoff": "exponential", "retry_on": ["5xx", "timeout"] },
-    "agent_budget": { "max_iterations": 10, "max_tokens": 50000 }
+    "agent_budget": { "max_iterations": 10, "max_tokens": 50000, "max_wall_clock_s": 300 }
   },
   "inputs": [
     { "name": "topic", "type": "string", "required": true }
@@ -24,13 +25,14 @@
     { "name": "sources", "type": "string[]" }
   ],
   "nodes": [
-    { "id": "start", "type": "trigger", "mode": "manual" },
+    { "id": "start", "type": "trigger", "mode": "manual", "rationale": "Manual trigger lets staff start follow-up drafting from a patient or visit context." },
     {
       "id": "outline",
       "type": "llm",
-      "model": "claude-sonnet-4-6",
-      "system_prompt": "You break research topics into focused subtopics for parallel investigation.",
-      "prompt": "Topic: ${input.topic}\n\nReturn 3-5 subtopics covering distinct angles.",
+      "rationale": "Break the follow-up context into bounded subtopics so each review step stays small.",
+      "model": "configured-planner-model",
+      "system_prompt": "You break TCM follow-up work into focused subtopics for staff-reviewed investigation.",
+      "prompt": "Follow-up topic: ${input.topic}\n\nReturn 3-5 subtopics covering distinct follow-up needs.",
       "temperature": 0.4,
       "output_schema": {
         "type": "object",
@@ -43,6 +45,7 @@
     {
       "id": "research_loop",
       "type": "loop",
+      "rationale": "Run the same bounded review pattern for each follow-up subtopic.",
       "over": "${outline.subtopics}",
       "as": "subtopic",
       "max_iterations": 5,
@@ -51,9 +54,10 @@
         {
           "id": "research_agent",
           "type": "agent",
-          "model": "claude-sonnet-4-6",
-          "tools": ["web_search", "fetch_url"],
-          "system_prompt": "Research the assigned subtopic. Cite every claim with a URL.",
+          "rationale": "Use bounded tools to gather visit-history and clinic-policy context for one follow-up subtopic.",
+          "model": "configured-planner-model",
+          "tools": ["patient_history_lookup", "clinic_policy_lookup"],
+          "system_prompt": "Research the assigned follow-up subtopic. Do not provide diagnosis or treatment changes; prepare staff-review context only.",
           "input_schema": {
             "type": "object",
             "required": ["subtopic"],
@@ -68,16 +72,17 @@
             }
           },
           "inputs": { "subtopic": "${subtopic}" },
-          "budget": { "max_iterations": 8, "max_tokens": 30000 },
+          "budget": { "max_iterations": 8, "max_tokens": 30000, "max_wall_clock_s": 300 },
           "on_budget_exhausted": "fallback",
           "fallback_edge": "fallback_summary"
         },
         {
           "id": "fallback_summary",
           "type": "llm",
-          "model": "claude-haiku-4-5-20251001",
-          "system_prompt": "Produce a best-effort summary from training data only when web tools are unavailable. Mark uncertainty explicitly.",
-          "prompt": "Subtopic: ${subtopic}\n\nWrite a low-confidence summary; cite no URLs (return empty array).",
+          "rationale": "Provide a conservative fallback summary when tool-backed context is unavailable.",
+          "model": "configured-small-model",
+          "system_prompt": "Produce a cautious best-effort follow-up summary when tools are unavailable. Mark uncertainty explicitly.",
+          "prompt": "Subtopic: ${subtopic}\n\nWrite a low-confidence staff-review note; cite no sources (return empty array).",
           "output_schema": {
             "type": "object",
             "required": ["findings", "sources"],
@@ -90,6 +95,7 @@
         {
           "id": "research_outcome",
           "type": "code",
+          "rationale": "Normalize the agent or fallback result into a consistent collected item.",
           "language": "python",
           "source": "if research_agent is not None:\n    return { 'findings': research_agent['findings'], 'sources': research_agent['sources'], 'confidence': 'high' }\nreturn { 'findings': fallback_summary['findings'], 'sources': fallback_summary['sources'], 'confidence': 'low' }",
           "inputs": {
@@ -111,9 +117,10 @@
     {
       "id": "consolidate",
       "type": "llm",
-      "model": "claude-opus-4-6",
-      "system_prompt": "You synthesize subtopic research into a coherent report. Note low-confidence sections.",
-      "prompt": "Topic: ${input.topic}\n\nPer-subtopic findings:\n${research_loop.collected}\n\nProduce a report and a deduplicated source list.",
+      "rationale": "Synthesize per-subtopic notes into one staff-reviewed follow-up draft.",
+      "model": "configured-planner-model",
+      "system_prompt": "You synthesize TCM follow-up context into a staff-reviewed draft. Note low-confidence sections and avoid autonomous clinical advice.",
+      "prompt": "Follow-up topic: ${input.topic}\n\nPer-subtopic findings:\n${research_loop.collected}\n\nProduce a follow-up draft and a deduplicated source list.",
       "temperature": 0.3,
       "output_schema": {
         "type": "object",
@@ -127,6 +134,7 @@
     {
       "id": "out",
       "type": "output",
+      "rationale": "Expose the consolidated follow-up draft and source list for staff review.",
       "bindings": {
         "report":  "${consolidate.report}",
         "sources": "${consolidate.sources}"
