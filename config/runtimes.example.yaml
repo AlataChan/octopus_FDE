@@ -1,0 +1,27 @@
+# FDE runtime configuration template (cloud SaaS)
+# Copy to config/runtimes.yaml and fill the values for your environment.
+# Auth tokens are loaded from environment variables, not committed here.
+#
+# Pinned via ADR 0002 (amended 2026-05-07): Hiagent Cloud + Dify Cloud at API v1.
+# Local docker mode was retired on 2026-05-07.
+
+hiagent:
+  cloud:
+    # Public Cloud base URL — record the exact URL on first integration.
+    base_url: "https://<hiagent-cloud-host>/v1"
+    # Bearer token loaded from env at runtime; do NOT inline secret values here.
+    token_env: HIAGENT_CLOUD_TOKEN
+    # API major version pinned in ADR 0002.
+    api_version: v1
+
+dify:
+  cloud:
+    # Public Cloud base URL (e.g., https://cloud.dify.ai/v1).
+    base_url: "https://cloud.dify.ai/v1"
+    token_env: DIFY_CLOUD_TOKEN
+    api_version: v1
+
+# Cost-budget escape hatch (PRD §7 / ADR 0002): if running both runtimes is
+# too expensive, drop dify by removing the dify: block above and calling
+# loom.runtimes.registry.unregister("dify") at boot. Hiagent-only mode is a
+# valid v1 ship state.
