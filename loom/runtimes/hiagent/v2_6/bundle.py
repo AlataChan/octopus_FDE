@@ -33,3 +33,33 @@ class HiagentBundle:
             for p, c in self.files.items()
             if p.startswith("workflow/")
         ]
+
+    def to_zip_bytes(self) -> bytes:
+        """Render bundle to a ZIP archive [bytes].
+
+        Each entry in self.files is dumped as YAML and stored under
+        '<bundle_name>/<relative-path>' in the zip. Mirrors the customer
+        sample folder layout exactly.
+
+        ZIP entries use a deterministic timestamp so equal bundle contents
+        produce byte-identical zips.
+        """
+        import io
+        import zipfile
+
+        import yaml  # type: ignore[import-untyped]
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for rel_path, content in sorted(self.files.items()):
+                full = f"{self.bundle_name}/{rel_path}"
+                yaml_text = yaml.safe_dump(
+                    content,
+                    sort_keys=False,
+                    allow_unicode=True,
+                    default_flow_style=False,
+                )
+                info = zipfile.ZipInfo(full, date_time=(1980, 1, 1, 0, 0, 0))
+                info.compress_type = zipfile.ZIP_DEFLATED
+                zf.writestr(info, yaml_text.encode("utf-8"))
+        return buf.getvalue()

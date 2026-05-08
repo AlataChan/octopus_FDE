@@ -1,0 +1,30 @@
+# Hiagent customer Binding - copy to config/customers/<your-customer-id>.hiagent.yaml
+# and fill in real Hiagent server-side IDs.
+# Per ADR 0024: workspace_id is required; ID maps are optional [empty -> customer
+# wires in Hiagent UI after import].
+#
+# This file is a committed template; per-customer real bindings are gitignored.
+
+customer: example
+target: hiagent
+target_version: "2.6"
+
+# Required: your customer's Hiagent workspace ID [find it in Hiagent admin / URL].
+workspace_id: REPLACE-WITH-YOUR-WORKSPACE-ID
+
+# Optional: map IR dataset handles to Hiagent KB IDs.
+# Leave empty / partial -> customer wires unbound KBs in Hiagent UI after import.
+dataset_id_map: {}
+  # product_kb: d7jlclt4shhcm7crdbj0
+  # policy_kb:  d7km56e4shhcm7crdbk0
+
+# Optional: map IR model handles to Hiagent model IDs.
+model_id_map: {}
+  # planner-model: d2s17uicrg32144vrj9g
+  # small-model:   d6gmjc8enn6vcp82q4ug
+
+# Optional: rerank model used by KnowledgeBase nodes [single value].
+rerank_model_id: ""
+
+# Optional: IR tool handle -> Hiagent tool/plugin ID.
+tool_id_map: {}
