@@ -311,8 +311,15 @@ def _normalize_sys_refs(nodes: list[dict[str, object]]) -> None:
 def _replace_sys_refs(value: object, start_code: str) -> None:
     if isinstance(value, dict):
         if value.get("RefType") == "sys":
+            field = _default_start_field(value.get("Path"), value.get("Name"))
             value["RefType"] = "node_field"
             value["NodeCode"] = start_code
+            value["Name"] = field
+            value["Path"] = field
+        elif value.get("RefType") == "node_field" and value.get("NodeCode") == start_code:
+            field = _default_start_field(value.get("Path"), value.get("Name"))
+            value["Name"] = field
+            value["Path"] = field
         for child in value.values():
             _replace_sys_refs(child, start_code)
     elif isinstance(value, list):
@@ -329,9 +336,7 @@ def _patch_chatflow_node_config(
         return
     generated_type = str(generated_node["Type"])
     if generated_type == "Start":
-        start = configs.get("Start")
-        if isinstance(start, dict):
-            _set_node_config(server_node, "StartNode", _with_schema_descriptions(start))
+        return
     elif generated_type == "KnowledgeBase":
         knowledge = configs.get("KnowledgeBase")
         if isinstance(knowledge, dict):
@@ -407,21 +412,38 @@ def _set_node_config(
         server_node["NodeConfig"] = {key: value}
 
 
-def _with_schema_descriptions(config: dict[object, object]) -> dict[object, object]:
-    out = dict(config)
-    for key in ["InputSchema", "OutputSchema"]:
-        value = out.get(key)
-        if not isinstance(value, list):
-            continue
-        fixed: list[object] = []
-        for item in value:
-            if isinstance(item, dict):
-                name = item.get("Name", "input")
-                fixed.append({**item, "Desc": item.get("Desc") or str(name), "Required": True})
-            else:
-                fixed.append(item)
-        out[key] = fixed
-    return out
+def _default_start_field(path: object, name: object = "") -> str:
+    raw = str(path or name or "query").strip()
+    head = raw.replace("[", ".").split(".", 1)[0].lower().replace("-", "_")
+    if head in {
+        "file",
+        "files",
+        "attachment",
+        "attachments",
+    }:
+        return "files"
+    if head in {
+        "chat_history",
+        "chat_histories",
+        "conversation",
+        "conversations",
+        "history",
+        "histories",
+    }:
+        return "chat_histories"
+    if head in {
+        "query",
+        "user_query",
+        "user_question",
+        "question",
+        "message",
+        "input",
+        "text",
+        "user_input",
+        "prompt",
+    }:
+        return "query"
+    return "query"
 
 
 def _flow_id(nodes: list[dict[str, object]]) -> str | None:

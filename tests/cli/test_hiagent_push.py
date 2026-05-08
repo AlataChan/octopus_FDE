@@ -3,9 +3,25 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from loom.cli.commands.hiagent_push import _normalize_sys_refs
 from loom.cli.main import cli
 
 ROOT = Path(__file__).resolve().parents[2]
+
+DEFAULT_START_NODE_CONFIG = {
+    "StartNode": {
+        "InputSchema": [
+            {"Name": "query", "Type": 0},
+            {"Name": "files", "Type": 11},
+            {"Name": "chat_histories", "Type": 9},
+        ],
+        "OutputSchema": [
+            {"Name": "query", "Type": 0},
+            {"Name": "files", "Type": 11},
+            {"Name": "chat_histories", "Type": 9},
+        ],
+    }
+}
 
 
 class _FakeClient:
@@ -37,7 +53,7 @@ class _FakeClient:
                     "Type": "Start",
                     "Name": "Start",
                     "Layout": {"X": 100, "Y": 100},
-                    "NodeConfig": {"StartNode": {}},
+                    "NodeConfig": DEFAULT_START_NODE_CONFIG,
                 },
                 {
                     "Code": "server_end",
@@ -300,6 +316,9 @@ def test_hiagent_push_mode_chatflow_calls_correct_actions(tmp_path, monkeypatch)
     _, (_, nodes, links) = graph_save_call
     assert len(nodes) > 1
     assert len(links) > 0
+    start_nodes = [n for n in nodes if n["Type"] == "Start"]
+    assert len(start_nodes) == 1
+    assert start_nodes[0]["NodeConfig"] == DEFAULT_START_NODE_CONFIG
     config_save_call = next(c for c in fake.calls if c[0] == "save_chatflow")
     _, (_, chatflow_config) = config_save_call
     assert chatflow_config["MetaType"] == "Workflow"
@@ -311,3 +330,36 @@ def test_hiagent_push_mode_chatflow_calls_correct_actions(tmp_path, monkeypatch)
     assert publish_chatflow_config == chatflow_config
     assert agent_mode == ""
     assert "Saving chatflow config draft" in result.output
+
+
+def test_chatflow_input_refs_normalize_to_server_start_defaults():
+    nodes = [
+        {"Type": "Start", "Code": "server_start", "NodeConfig": DEFAULT_START_NODE_CONFIG},
+        {
+            "Type": "LLM",
+            "Code": "llm",
+            "NodeConfig": {
+                "LLMNode": {
+                    "Input": [
+                        {"Name": "user_question", "RefType": "sys", "Path": "user_question"},
+                        {"Name": "attachments", "RefType": "sys", "Path": "attachments"},
+                        {"Name": "history", "RefType": "sys", "Path": "chat_history"},
+                        {"Name": "custom", "RefType": "sys", "Path": "custom_field"},
+                    ]
+                }
+            },
+        },
+    ]
+    _normalize_sys_refs(nodes)
+    refs = nodes[1]["NodeConfig"]["LLMNode"]["Input"]
+    assert refs == [
+        {"Name": "query", "RefType": "node_field", "Path": "query", "NodeCode": "server_start"},
+        {"Name": "files", "RefType": "node_field", "Path": "files", "NodeCode": "server_start"},
+        {
+            "Name": "chat_histories",
+            "RefType": "node_field",
+            "Path": "chat_histories",
+            "NodeCode": "server_start",
+        },
+        {"Name": "query", "RefType": "node_field", "Path": "query", "NodeCode": "server_start"},
+    ]
