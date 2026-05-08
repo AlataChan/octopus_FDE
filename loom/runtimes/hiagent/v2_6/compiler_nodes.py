@@ -80,7 +80,7 @@ def _base(
         "_ir_id": n.id,
         "Code": node_code_map[n.id],
         "ID": gen_id(),
-        "Name": _name(n),
+        "Name": _name(n, type_name),
         "Description": n.rationale,
         "Type": type_name,
         "Layout": {"X": x, "Y": y},
@@ -88,7 +88,14 @@ def _base(
     }
 
 
-def _name(n: AnyNode) -> str:
+def _name(n: AnyNode, type_name: str) -> str:
+    """Hiagent v2.6 import validates Start/End nodes' Name field as the
+    literal 'Start'/'End' (gold sample workflow shows Name: Start /
+    Name: End). Other node types use free-form names (rationale prefix)."""
+    if type_name == "Start":
+        return "Start"
+    if type_name == "End":
+        return "End"
     return n.rationale[:30] or n.id
 
 
