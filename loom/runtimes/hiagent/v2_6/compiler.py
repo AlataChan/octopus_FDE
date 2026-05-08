@@ -1,15 +1,10 @@
-"""IR v0.3 -> Hiagent v2.6 bundle compiler.
+"""IR v0.3 -> Hiagent v2.6 Agent bundle compiler.
 
-Per ADR 0024. Pure function: takes IRDocument + HiagentBinding, returns
-HiagentBundle. Bundle serialization to disk + zip is Sub-task C.
-
-Pipeline:
-  1. Generate fresh IDs [workflow Code+ID, per-node Code+ID]
-  2. Translate IR var-refs to Hiagent's NodeCode/Path/RefType objects
-  3. Emit one Hiagent node per IR node via compiler_nodes.emit_node
-  4. Compute layout [topological + grid]
-  5. Substitute KB / Model IDs from binding [empty if unbound]
-  6. Assemble workflow YAML + index.yaml + dependent file stubs
+The currently validated Hiagent import path is chat-mode Agent ZIP import:
+root `index.yaml` + `agent/<name>.yaml` and optional model/knowledge sidecars.
+Workflow import remains useful as a reference format, but this compiler now
+emits a single-agent chat app because that is the confirmed customer-importable
+shape.
 """
 from __future__ import annotations
 
@@ -17,9 +12,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from loom.runtimes.hiagent.v2_6.bundle import HiagentBundle
-from loom.runtimes.hiagent.v2_6.compiler_nodes import emit_workflow_nodes
 from loom.runtimes.hiagent.v2_6.ids import gen_id
-from loom.runtimes.hiagent.v2_6.layout import topological_layout
 
 if TYPE_CHECKING:
     from loom.ir.models import IRDocument
@@ -27,74 +20,17 @@ if TYPE_CHECKING:
 
 
 def compile_ir(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
-    """Compile IR to a Hiagent v2.6 bundle, ready for Sub-task C to zip+write.
+    """Compile IR to a Hiagent v2.6 chat-mode Agent bundle.
 
     The binding provides workspace_id [required] and optional KB/Model
     id mappings [missing entries become empty strings in the YAML].
     """
-    workflow_id = gen_id()
-
-    node_code_map: dict[str, str] = {n.id: gen_id() for n in ir.nodes}
-
-    edges = [(e.from_, e.to) for e in ir.edges]
-    positions = topological_layout([n.id for n in ir.nodes], edges)
-
-    nodes_dsl = emit_workflow_nodes(
-        ir, binding, node_code_map=node_code_map, positions=positions
-    )
-
-    deps_by_dest: dict[str, list[dict[str, Any]]] = {}
-    for src, dst in edges:
-        deps_by_dest.setdefault(dst, []).append({
-            "NodeCode": node_code_map[src],
-        })
-    for n_dsl in nodes_dsl:
-        ir_id = n_dsl.pop("_ir_id")
-        deps = deps_by_dest.get(ir_id, [])
-        n_dsl["Depends"] = deps
-        n_dsl.setdefault("ErrorConfig", {"ErrorConfigType": "None"})
-
-    workflow_yaml: dict[str, Any] = {
-        "DLVersion": "v2",
-        "Depends": {
-            "AppMap": {},
-            "DataSourceMap": {},
-            "DatabaseMap": {},
-            "KnowledgeMap": _build_knowledge_map(ir, binding),
-            "ModelMap": _build_model_map(ir, binding),
-            "PluginMap": {},
-            "QADataSetMap": {},
-            "TermDatasetMap": {},
-            "ToolMap": {},
-            "WorkflowMap": {},
-        },
-        "Desc": ir.metadata.description or "",
-        "DisplayName": ir.metadata.name,
-        "FlowType": "Workflow",
-        "ID": workflow_id,
-        "LogoPath": "",
-        "MetaType": "Workflow",
-        "Nodes": nodes_dsl,
-        "WorkspaceID": binding.workspace_id,
-    }
-
-    bundle_name = _bundle_dirname(ir, workflow_id)
-    # Customer Hiagent samples never use spaces in filenames; replace spaces
-    # in IR's free-text name with underscores so Hiagent's import path
-    # accepts the filename. Display names inside the YAML keep spaces.
+    agent_id = gen_id()
+    bundle_name = _bundle_dirname(ir)
     safe_name = ir.metadata.name.replace(" ", "_")
-    workflow_filename = f"{safe_name}.yaml"
     agent_filename = f"{safe_name}.yaml"
 
-    # Agent bundle (verified import format per user 2026-05-08): MainMeta=Agent,
-    # ChatFlow wrapper agent calls our business workflow as a sub-step.
-    agent_id = gen_id()
-    agent_yaml = _build_agent_yaml(
-        ir=ir,
-        binding=binding,
-        agent_id=agent_id,
-        workflow_id=workflow_id,
-    )
+    agent_yaml = _build_agent_yaml(ir=ir, binding=binding, agent_id=agent_id)
 
     index_yaml: dict[str, Any] = {
         "DLVersion": "0.0.1",
@@ -107,8 +43,9 @@ def compile_ir(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
     files: dict[str, Any] = {
         "index.yaml": index_yaml,
         f"agent/{agent_filename}": agent_yaml,
-        f"workflow/{workflow_filename}": workflow_yaml,
     }
+    files.update(_build_knowledge_files(ir, binding))
+    files.update(_build_model_files(ir, binding))
 
     return HiagentBundle(bundle_name=bundle_name, files=files)
 
@@ -118,182 +55,103 @@ def _build_agent_yaml(
     ir: IRDocument,
     binding: HiagentBinding,
     agent_id: str,
-    workflow_id: str,
 ) -> dict[str, Any]:
-    """Build the ChatFlow-wrapper agent yaml that hosts our IR workflow.
-
-    Mirrors the structure of customer's 小芸用户维修方案智能体 agent
-    (which contains MetaType: Agent + AppConfig.ChatFlowDetail with a
-    3-node Start->Workflow->End graph). The Workflow node calls our
-    business workflow via WorkflowID.
-    """
-    chatflow_id = gen_id()
-    start_code = gen_id()
-    workflow_node_code = gen_id()
-    end_code = gen_id()
-
-    # Map IR inputs to ChatFlow start node InputSchema; pass through to workflow.
-    start_input_schema = [
-        {
-            "Desc": p.description or "",
-            "Name": p.name,
-            "Required": p.required,
-            "Type": _type_code(p.type),
-        }
-        for p in ir.inputs
+    """Build a chat-mode Agent YAML matching the importable samples."""
+    app_depends = _build_app_depends(ir, binding)
+    model_handle = _primary_model_handle(ir, binding)
+    model_id = binding.resolve_model(model_handle) if model_handle else ""
+    knowledge_ids = [
+        binding.resolve_dataset(ds)
+        for ds in ir.registry_ref.datasets
+        if binding.resolve_dataset(ds)
     ]
-    # Workflow node InputVariables: each maps to a Start node output.
-    workflow_input_variables = [
-        {
-            "Name": p.name,
-            "NodeCode": start_code,
-            "Path": p.name,
-            "RefType": "node_field",
-        }
-        for p in ir.inputs
-    ]
-    # Workflow node OutputSchema: mirror IR outputs.
-    workflow_output_schema = [
-        {
-            "Name": p.name,
-            "Required": p.required,
-            "Type": _type_code(p.type),
-        }
-        for p in ir.outputs
-    ]
-    # End node OutputSchema: same shape.
-    end_output_schema = [
-        {
-            "Desc": p.description or "",
-            "Name": p.name,
-            "Required": p.required,
-            "Type": _type_code(p.type),
-        }
-        for p in ir.outputs
-    ]
-
-    chatflow_nodes = [
-        {
-            "Code": start_code,
-            "Configs": {
-                "Start": {
-                    "InputSchema": start_input_schema,
-                    "OutputSchema": start_input_schema,
-                }
-            },
-            "Description": "User input.",
-            "ErrorConfig": {"ErrorConfigType": "None"},
-            "ID": gen_id(),
-            "Layout": {"X": 0.0, "Y": 0.0},
-            "Name": "Start",
-            "Type": "Start",
-        },
-        {
-            "Code": workflow_node_code,
-            "Configs": {
-                "Workflow": {
-                    "Description": ir.metadata.description or "",
-                    "Icon": "",
-                    "InputSchema": [
-                        {"Desc": s.get("Desc", ""), "Name": s["Name"], "Type": s["Type"]}
-                        for s in start_input_schema
-                    ],
-                    "InputVariables": workflow_input_variables,
-                    "Name": ir.metadata.name,
-                    "OutputSchema": workflow_output_schema,
-                    "WorkflowID": workflow_id,
-                }
-            },
-            "Depends": [{"NodeCode": start_code}],
-            "Description": ir.metadata.rationale,
-            "ErrorConfig": {"ErrorConfigType": "None"},
-            "ID": gen_id(),
-            "Layout": {"X": 300.0, "Y": 0.0},
-            "Name": ir.metadata.name,
-            "Type": "Workflow",
-        },
-        {
-            "Code": end_code,
-            "Configs": {
-                "End": {
-                    "OutputSchema": end_output_schema,
-                    "OutputType": "Content",
-                    "StreamOutput": True,
-                    "Template": _end_template_from_outputs(ir),
-                }
-            },
-            "Depends": [{"NodeCode": workflow_node_code}],
-            "Description": "Final output.",
-            "ErrorConfig": {"ErrorConfigType": "None"},
-            "ID": gen_id(),
-            "Layout": {"X": 600.0, "Y": 0.0},
-            "Name": "End",
-            "Type": "End",
-        },
-    ]
+    now_ms = int(time.time() * 1000)
+    update_time = time.strftime("%Y-%m-%d %H:%M:%S")
+    version_name = "v1.0.0"
 
     return {
         "AppConfig": {
-            "AgentMode": "",
+            "AgentMode": "Single",
             "AppID": agent_id,
-            "ChatFlowDetail": {
-                "DLVersion": "v2",
-                "Depends": {
-                    "AppMap": {},
-                    "DataSourceMap": {},
-                    "DatabaseMap": {},
-                    "KnowledgeMap": {},
-                    "ModelMap": {},
-                    "PluginMap": {},
-                    "QADataSetMap": {},
-                    "TermDatasetMap": {},
-                    "ToolMap": {},
-                    "WorkflowMap": {
-                        workflow_id: {
-                            "Desc": ir.metadata.description or "",
-                            "ID": workflow_id,
-                            "LogoPath": "",
-                            "Name": ir.metadata.name,
-                            "ResourceWorkspaceID": binding.workspace_id,
-                        }
-                    },
-                },
-                "Desc": "",
-                "DisplayName": agent_id,
-                "FlowType": "Agent",
-                "ID": chatflow_id,
-                "LogoPath": "",
-                "MetaType": "Workflow",
-                "Nodes": chatflow_nodes,
-                "UniqueName": chatflow_id,
-            },
+            "ChatFlowDetail": None,
             "MultiAgentConfig": None,
-            "SingleAgentConfig": None,
+            "SingleAgentConfig": {
+                "A2aAgentIDs": [],
+                "AgentIDs": [],
+                "ChatAdvancedConfig": _chat_advanced_config(),
+                "DatabaseIDs": [],
+                "GraphConfig": {
+                    "MatchType": "force",
+                    "SearchDepth": 3,
+                    "SearchType": 2,
+                    "TopK": 30,
+                },
+                "GraphIDs": [],
+                "KnowledgeConfig": {
+                    "ContextComponents": ["id", "video_metadata", "video_frames", "content"],
+                    "MatchType": "force",
+                    "RerankID": binding.rerank_model_id,
+                    "RetrievalSearchMethod": 0,
+                    "Similarity": 0.5,
+                    "TopK": _primary_retrieval_top_k(ir),
+                },
+                "KnowledgeIDs": knowledge_ids,
+                "ModelConfig": {
+                    "CurrentTimeEnabled": False,
+                    "IsAdvancedMode": False,
+                    "MaxIterations": ir.policy.agent_budget.max_iterations
+                    if ir.policy and ir.policy.agent_budget
+                    else 10,
+                    "MaxTokens": ir.policy.agent_budget.max_tokens
+                    if ir.policy and ir.policy.agent_budget
+                    else 32768,
+                    "ModelInteractiveMode": "direct",
+                    "RagEnabled": bool(knowledge_ids),
+                    "RagNum": 3,
+                    "ReasoningMode": True,
+                    "ReasoningSwitch": True,
+                    "ReasoningSwitchType": "enabled",
+                    "RoundsReserved": 3,
+                    "Strategy": "function_call",
+                    "Temperature": _primary_temperature(ir),
+                    "TopP": 0.9,
+                },
+                "ModelID": model_id,
+                "ModelName": model_handle,
+                "PrePrompt": _pre_prompt(ir),
+                "PromptConfig": {"PromptMode": "regex"},
+                "QADatasetConfig": {
+                    "MatchType": "force",
+                    "RetrievalSearchMethod": 0,
+                    "Similarity": 0.5,
+                    "TopK": 1,
+                },
+                "QADatasetIDs": [],
+                "SummaryModelID": "",
+                "SummaryModelName": "",
+                "TerminologyConfig": {
+                    "MatchType": "force",
+                    "RetrievalSearchMethod": 0,
+                    "Similarity": 0.5,
+                    "TopK": 3,
+                },
+                "TerminologyIDs": [],
+                "ToolIDs": [
+                    binding.resolve_tool(t)
+                    for t in ir.registry_ref.tools
+                    if binding.resolve_tool(t)
+                ],
+                "UpdateTime": update_time,
+                "VariableConfigs": [],
+                "Version": version_name,
+                "VersionDescription": ir.metadata.description or "",
+                "WorkflowIDs": [],
+            },
             "WorkspaceID": binding.workspace_id,
         },
-        "AppDepends": {
-            "AppMap": {},
-            "DataSourceMap": {},
-            "DatabaseMap": {},
-            "KnowledgeMap": {},
-            "ModelMap": {},
-            "PluginMap": {},
-            "QADataSetMap": {},
-            "TermDatasetMap": {},
-            "ToolMap": {},
-            "WorkflowMap": {
-                workflow_id: {
-                    "Desc": ir.metadata.description or "",
-                    "ID": workflow_id,
-                    "LogoPath": "",
-                    "Name": ir.metadata.name,
-                    "ResourceWorkspaceID": binding.workspace_id,
-                    "SourceTypes": ["Agent"],
-                }
-            },
-        },
+        "AppDepends": app_depends,
         "AppInfo": {
-            "AgentMode": "",
+            "AgentMode": "Single",
             "AppID": agent_id,
             "AppType": "Chat",
             "WorkspaceID": binding.workspace_id,
@@ -304,26 +162,104 @@ def _build_agent_yaml(
         "LogoPath": "",
         "MetaType": "Agent",
         "UniqueName": agent_id,
-        "UpdatedAt": int(time.time() * 1000),
+        "UpdatedAt": now_ms,
         "VersionCode": gen_id(),
-        "VersionName": "v1.0.0",
+        "VersionName": version_name,
     }
 
 
-def _type_code(ir_type: str) -> int:
-    """Inline type-code mapping; ChatFlow Schema uses the same Hiagent codes."""
-    mapping = {"string": 0, "number": 2, "boolean": 3, "json": 4, "null": 6}
-    if ir_type in mapping:
-        return mapping[ir_type]
-    if ir_type.endswith("[]"):
-        return 5
-    return 0
+def _chat_advanced_config() -> dict[str, Any]:
+    return {
+        "AdvancedReviewType": "unused",
+        "FeedbackTagConfig": {
+            "DislikeTags": [
+                "没有帮助",
+                "知识过时",
+                "问题理解错误",
+                "事实错误",
+                "回答不准确",
+                "内容有害/不健康",
+                "前后回复不一致",
+            ],
+            "Enabled": True,
+            "LikeTags": None,
+        },
+        "OpeningConfig": {"OpeningEnabled": False},
+        "ReferenceEnabled": False,
+        "ReviewEnabled": False,
+        "SpeechInteractionConfig": {},
+        "SuggestEnabled": False,
+        "SuggestPromptConfig": {"Enabled": False, "Prompt": ""},
+        "ThoughtLanguageConfig": {"Language": "zh"},
+        "UploadConfig": {
+            "Enabled": False,
+            "UploadAudioAllowed": True,
+            "UploadCompressedAllowed": False,
+            "UploadDocumentAllowed": True,
+            "UploadImageAllowed": True,
+            "UploadOtherAllowed": False,
+            "UploadVideoAllowed": True,
+        },
+    }
 
 
-def _end_template_from_outputs(ir: IRDocument) -> str:
-    """Generate End node Template from IR outputs (Hiagent uses {{var}} mustache)."""
-    lines = [f"{p.name}: {{{{{p.name}}}}}" for p in ir.outputs]
-    return "\n".join(lines) if lines else "{{output}}"
+def _pre_prompt(ir: IRDocument) -> str:
+    lines = [
+        f"# {ir.metadata.name}",
+        "",
+        ir.metadata.description or "",
+        "",
+        "# Rationale",
+        ir.metadata.rationale,
+        "",
+        "# Inputs",
+    ]
+    lines.extend(f"- {p.name}: {p.type}" for p in ir.inputs)
+    lines.extend(["", "# Expected outputs"])
+    lines.extend(f"- {p.name}: {p.type}" for p in ir.outputs)
+    return "\n".join(lines).strip()
+
+
+def _primary_retrieval_top_k(ir: IRDocument) -> int:
+    for n in ir.nodes:
+        if getattr(n, "type", None) == "retrieval":
+            return int(getattr(n, "top_k", 30))
+    return 30
+
+
+def _primary_temperature(ir: IRDocument) -> float:
+    for n in ir.nodes:
+        temp = getattr(n, "temperature", None)
+        if temp is not None:
+            return float(temp)
+    return 0.7
+
+
+def _primary_model_handle(ir: IRDocument, binding: HiagentBinding) -> str:
+    handles: list[str] = []
+    for n in ir.nodes:
+        model_handle = getattr(n, "model", None)
+        if model_handle and model_handle not in handles:
+            handles.append(model_handle)
+    for h in handles:
+        if binding.resolve_model(h):
+            return h
+    return handles[0] if handles else ""
+
+
+def _build_app_depends(ir: IRDocument, binding: HiagentBinding) -> dict[str, Any]:
+    return {
+        "AppMap": {},
+        "DataSourceMap": {},
+        "DatabaseMap": {},
+        "KnowledgeMap": _build_knowledge_map(ir, binding),
+        "ModelMap": _build_model_map(ir, binding),
+        "PluginMap": {},
+        "QADataSetMap": {},
+        "TermDatasetMap": {},
+        "ToolMap": {},
+        "WorkflowMap": {},
+    }
 
 
 def _build_knowledge_map(ir: IRDocument, binding: HiagentBinding) -> dict[str, dict[str, Any]]:
@@ -340,6 +276,7 @@ def _build_knowledge_map(ir: IRDocument, binding: HiagentBinding) -> dict[str, d
                 "LogoPath": "",
                 "Name": ds,
                 "ResourceWorkspaceID": binding.workspace_id,
+                "SourceTypes": ["SkillInfo"],
             }
     return out
 
@@ -361,11 +298,73 @@ def _build_model_map(ir: IRDocument, binding: HiagentBinding) -> dict[str, dict[
                 "ID": model_id,
                 "LogoPath": "",
                 "Name": model_handle,
+                "SourceTypes": ["Agent"],
             }
     return out
 
 
-def _bundle_dirname(ir: IRDocument, workflow_id: str) -> str:
+def _build_knowledge_files(ir: IRDocument, binding: HiagentBinding) -> dict[str, Any]:
+    files: dict[str, Any] = {}
+    now_ms = int(time.time() * 1000)
+    for ds in ir.registry_ref.datasets:
+        kb_id = binding.resolve_dataset(ds)
+        if not kb_id:
+            continue
+        files[f"knowledge/{ds}.yaml"] = {
+            "DLVersion": "v1.0.0",
+            "Desc": "",
+            "DisplayName": ds,
+            "LogoPath": "",
+            "MetaType": "kbs_dataset",
+            "UniqueName": kb_id,
+            "UpdatedAt": now_ms,
+            "VersionCode": kb_id,
+            "VersionName": "v1.0.0",
+            "data": {
+                "Name": ds,
+                "WorkspaceID": binding.workspace_id,
+                "XID": kb_id,
+            },
+        }
+    return files
+
+
+def _build_model_files(ir: IRDocument, binding: HiagentBinding) -> dict[str, Any]:
+    files: dict[str, Any] = {}
+    now_ms = int(time.time() * 1000)
+    seen: set[str] = set()
+    for n in ir.nodes:
+        model_handle = getattr(n, "model", None)
+        if not model_handle or model_handle in seen:
+            continue
+        seen.add(model_handle)
+        model_id = binding.resolve_model(model_handle)
+        if not model_id:
+            continue
+        files[f"model/{model_handle}.yaml"] = {
+            "DLVersion": "0.0.1",
+            "DeletedAt": None,
+            "Desc": "",
+            "DisplayName": model_handle,
+            "Implement": "",
+            "IsDefault": True,
+            "IsPublic": True,
+            "Key": model_handle,
+            "LogoPath": "",
+            "MetaType": "Model",
+            "Source": "custom",
+            "SourceTypes": ["Agent"],
+            "TenantId": "",
+            "Type": "text-generation",
+            "UniqueName": model_id,
+            "UpdatedAt": now_ms,
+            "VersionCode": "",
+            "VersionName": "",
+        }
+    return files
+
+
+def _bundle_dirname(ir: IRDocument) -> str:
     """Generate bundle dir name like '<workflow-name>_v1.0.0_<timestamp>'.
 
     Spaces in IR metadata.name are replaced with underscores; customer

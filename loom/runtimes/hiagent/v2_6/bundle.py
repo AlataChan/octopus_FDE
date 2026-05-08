@@ -1,29 +1,11 @@
 """HiagentBundle data structure - the artifact the compiler emits.
 
-Hiagent has TWO import paths (verified by user 2026-05-08 with screenshot
-of import dialog):
-
-1. **Workflow import** (what we target for MVP):
-   Accepts a single **.json** file (NOT a zip!). The JSON content is the
-   workflow document directly: top-level `DLVersion: v2`, `MetaType: Workflow`,
-   `FlowType: Workflow`, `DisplayName`, `ID`, `Nodes[]`, `Depends`, `WorkspaceID`.
-   This is the same shape as the workflow.yaml from the App-bundle export,
-   just JSON-serialized.
-
-2. **Agent import** (out of MVP scope):
-   Accepts a multi-file **.zip** containing index.yaml + agent/ + knowledge/
-   + model/ + asset/upload/. Used for full chat-agent imports. We may add
-   support in v1.1 once Workflow import is validated end-to-end.
-
-The earlier `to_zip_bytes()` we wrote targeted neither path correctly —
-Hiagent's "No signature found after EOCD record" error was its way of
-saying "this isn't a valid Agent zip". The fix: emit JSON via
-`to_workflow_json()` and skip zip entirely for Workflow import.
-
-The HiagentBundle in-memory model still carries the structured
-`index.yaml` + `workflow/<name>.yaml` files dict (matching ADR 0024) for
-clarity at the compiler level; serialization picks one entry depending on
-the requested format.
+Hiagent Agent import accepts a ZIP whose entries are root-relative:
+`index.yaml`, `agent/<name>.yaml`, and optional `model/` / `knowledge/`
+sidecar YAML files. The import parser rejects bundles nested under a
+top-level directory with a misleading "No signature found after EOCD
+record" error, so ZIP serialization intentionally mirrors the working
+customer exports' entry layout and metadata.
 """
 from __future__ import annotations
 
@@ -76,36 +58,68 @@ class HiagentBundle:
     def to_agent_bundle_zip_bytes(self) -> bytes:
         """Render the bundle to a multi-file Agent-import ZIP archive.
 
-        On-disk layout (matches customer 用户维修方案 / 小芸 / 车联网故障问数 samples):
+        On-disk layout (matches customer 用户维修方案 / 车联网故障问数 samples):
 
-            <bundle_name>/
-            ├── index.yaml
-            ├── agent/<name>.yaml
-            ├── workflow/<name>.yaml
-            └── (model/, knowledge/, asset/upload/ omitted in MVP)
+            index.yaml
+            agent/<name>.yaml
+            model/<name>.yaml       # optional, when binding has model IDs
+            knowledge/<name>.yaml   # optional, when binding has dataset IDs
 
-        Each entry's content is dumped as YAML. UTF-8 filename flag set on
-        non-ASCII names (Python's zipfile auto-sets for non-ASCII).
-        Deterministic 1980-01-01 timestamps so equal bundles are byte-identical.
+        Each entry's content is dumped as YAML. The ZIP is written through a
+        non-seekable buffer so Python emits data descriptors (flag bit 0x8),
+        matching Hiagent's working exports more closely.
         """
         import io
+        import time
         import zipfile
 
         import yaml  # type: ignore[import-untyped]
 
-        buf = io.BytesIO()
+        class _NonSeekableBytesIO(io.BytesIO):
+            def seekable(self) -> bool:
+                return False
+
+            def seek(self, *args: Any, **kwargs: Any) -> int:
+                raise io.UnsupportedOperation("non-seekable")
+
+        buf = _NonSeekableBytesIO()
+        timestamp = time.localtime()[:6]
         with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for rel_path, content in sorted(self.files.items()):
-                full = f"{self.bundle_name}/{rel_path}"
+            for rel_path, content in self.files.items():
                 yaml_text = yaml.safe_dump(
                     content,
                     sort_keys=False,
                     allow_unicode=True,
                     default_flow_style=False,
                 )
-                info = zipfile.ZipInfo(full, date_time=(1980, 1, 1, 0, 0, 0))
+                info = zipfile.ZipInfo(rel_path, date_time=timestamp)
                 info.compress_type = zipfile.ZIP_DEFLATED
-                info.flag_bits |= 0x800
-                info.external_attr = (0o644 & 0xFFFF) << 16
+                info.create_system = 0
                 zf.writestr(info, yaml_text.encode("utf-8"))
-        return buf.getvalue()
+        return _zero_external_attrs(buf.getvalue())
+
+
+def _zero_external_attrs(raw: bytes) -> bytes:
+    """Set central-directory external attributes to zero.
+
+    Python's zipfile fills 0600 attrs when writing from a ZipInfo with attrs
+    unset; Hiagent exports use external_attr=0. Patch only central-directory
+    headers, leaving local file headers and payloads untouched.
+    """
+    import struct
+
+    data = bytearray(raw)
+    eocd = data.rfind(b"PK\x05\x06")
+    if eocd < 0:
+        return raw
+    cd_size = struct.unpack_from("<I", data, eocd + 12)[0]
+    cd_offset = struct.unpack_from("<I", data, eocd + 16)[0]
+    pos = cd_offset
+    end = cd_offset + cd_size
+    while pos < end:
+        if data[pos : pos + 4] != b"PK\x01\x02":
+            break
+        name_len, extra_len, comment_len = struct.unpack_from("<HHH", data, pos + 28)
+        data[pos + 38 : pos + 42] = b"\x00\x00\x00\x00"
+        pos += 46 + name_len + extra_len + comment_len
+    return bytes(data)

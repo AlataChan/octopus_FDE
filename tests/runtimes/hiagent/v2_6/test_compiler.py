@@ -23,25 +23,26 @@ def minimal_binding() -> HiagentBinding:
 
 @pytest.fixture
 def faq_ir() -> IRDocument:
-    return IRDocument.model_validate(json.loads(
-        (ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json").read_text()
-    ))
+    return IRDocument.model_validate(
+        json.loads((ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json").read_text())
+    )
 
 
-def _workflow(bundle: HiagentBundle) -> dict[str, Any]:
-    workflow_files = bundle.workflow_files()
-    assert len(workflow_files) == 1
-    return workflow_files[0][1]
+def _agent(bundle: HiagentBundle) -> dict[str, Any]:
+    agent_files = [(p, c) for p, c in bundle.files.items() if p.startswith("agent/")]
+    assert len(agent_files) == 1
+    return agent_files[0][1]
 
 
 def test_compile_archetype_01_returns_bundle(faq_ir: IRDocument, minimal_binding: HiagentBinding):
     assert isinstance(compile_ir(faq_ir, minimal_binding), HiagentBundle)
 
 
-def test_bundle_has_index_and_workflow(faq_ir: IRDocument, minimal_binding: HiagentBinding):
+def test_bundle_has_index_and_single_agent_only(faq_ir: IRDocument, minimal_binding: HiagentBinding):
     bundle = compile_ir(faq_ir, minimal_binding)
     assert "index.yaml" in bundle.files
-    assert any(p.startswith("workflow/") and p.endswith(".yaml") for p in bundle.files)
+    assert any(p.startswith("agent/") and p.endswith(".yaml") for p in bundle.files)
+    assert not any(p.startswith("workflow/") for p in bundle.files)
 
 
 def test_bundle_index_has_required_fields(faq_ir: IRDocument, minimal_binding: HiagentBinding):
@@ -53,68 +54,49 @@ def test_bundle_index_has_required_fields(faq_ir: IRDocument, minimal_binding: H
     assert index["MainUniqueName"]
 
 
-def test_bundle_has_agent_yaml(faq_ir: IRDocument, minimal_binding: HiagentBinding):
-    """Agent bundle must include agent/<n>.yaml with ChatFlow wrapper."""
+def test_agent_yaml_has_single_chat_mode(faq_ir: IRDocument, minimal_binding: HiagentBinding):
+    agent = _agent(compile_ir(faq_ir, minimal_binding))
+    assert agent["DLVersion"] == "0.0.1"
+    assert agent["MetaType"] == "Agent"
+    assert agent["AppInfo"]["AppType"] == "Chat"
+    assert agent["AppInfo"]["AgentMode"] == "Single"
+    assert agent["AppConfig"]["AgentMode"] == "Single"
+    assert agent["AppConfig"]["ChatFlowDetail"] is None
+    assert agent["AppConfig"]["SingleAgentConfig"]["WorkflowIDs"] == []
+
+
+def test_agent_unique_name_matches_index(faq_ir: IRDocument, minimal_binding: HiagentBinding):
     bundle = compile_ir(faq_ir, minimal_binding)
-    agent_paths = [p for p in bundle.files if p.startswith("agent/")]
-    assert len(agent_paths) == 1, f"expected 1 agent yaml, got {agent_paths}"
-    agent_yaml = bundle.files[agent_paths[0]]
-    assert agent_yaml["MetaType"] == "Agent"
-    assert "ChatFlowDetail" in agent_yaml["AppConfig"]
-    chatflow = agent_yaml["AppConfig"]["ChatFlowDetail"]
-    assert chatflow["MetaType"] == "Workflow"
-    assert chatflow["FlowType"] == "Agent"
-    # 3 nodes: Start -> Workflow -> End
-    types = [n["Type"] for n in chatflow["Nodes"]]
-    assert types == ["Start", "Workflow", "End"]
+    agent = _agent(bundle)
+    assert agent["UniqueName"] == bundle.index["MainUniqueName"]
 
 
-def test_workflow_yaml_has_dlversion_v2(faq_ir: IRDocument, minimal_binding: HiagentBinding):
-    assert _workflow(compile_ir(faq_ir, minimal_binding))["DLVersion"] == "v2"
-
-
-def test_workflow_yaml_has_metatype_workflow(faq_ir: IRDocument, minimal_binding: HiagentBinding):
-    assert _workflow(compile_ir(faq_ir, minimal_binding))["MetaType"] == "Workflow"
-
-
-def test_workflow_yaml_workspace_id_matches_binding(
+def test_single_agent_config_has_required_chat_defaults(
     faq_ir: IRDocument,
     minimal_binding: HiagentBinding,
 ):
-    assert _workflow(compile_ir(faq_ir, minimal_binding))["WorkspaceID"] == minimal_binding.workspace_id
+    single = _agent(compile_ir(faq_ir, minimal_binding))["AppConfig"]["SingleAgentConfig"]
+    advanced = single["ChatAdvancedConfig"]
+    assert advanced["AdvancedReviewType"] == "unused"
+    assert advanced["FeedbackTagConfig"]["Enabled"] is True
+    assert advanced["OpeningConfig"]["OpeningEnabled"] is False
+    assert advanced["UploadConfig"]["Enabled"] is False
+    assert single["PromptConfig"] == {"PromptMode": "regex"}
+    assert single["ModelConfig"]["Strategy"] == "function_call"
+    assert single["KnowledgeConfig"]["TopK"] == 20
 
 
-def test_all_nodes_have_layout_and_code_and_id(faq_ir: IRDocument, minimal_binding: HiagentBinding):
-    nodes = _workflow(compile_ir(faq_ir, minimal_binding))["Nodes"]
-    for node in nodes:
-        assert node["Code"]
-        assert node["ID"]
-        assert set(node["Layout"]) == {"X", "Y"}
-
-
-def test_node_codes_are_unique(faq_ir: IRDocument, minimal_binding: HiagentBinding):
-    nodes = _workflow(compile_ir(faq_ir, minimal_binding))["Nodes"]
-    codes = [n["Code"] for n in nodes]
-    assert len(codes) == len(set(codes))
-
-
-def test_depends_link_destination_to_source(faq_ir: IRDocument, minimal_binding: HiagentBinding):
-    nodes = _workflow(compile_ir(faq_ir, minimal_binding))["Nodes"]
-    by_type = {n["Type"]: n for n in nodes}
-    retrieve = by_type["KnowledgeBase"]
-    start = by_type["Start"]
-    assert retrieve["Depends"] == [{"NodeCode": start["Code"]}]
-
-
-def test_compile_with_unbound_kb_emits_empty_knowledge_map(
+def test_compile_with_unbound_kb_has_empty_knowledge_refs(
     faq_ir: IRDocument,
     minimal_binding: HiagentBinding,
 ):
-    workflow = _workflow(compile_ir(faq_ir, minimal_binding))
-    assert workflow["Depends"]["KnowledgeMap"] == {}
+    agent = _agent(compile_ir(faq_ir, minimal_binding))
+    single = agent["AppConfig"]["SingleAgentConfig"]
+    assert single["KnowledgeIDs"] == []
+    assert agent["AppDepends"]["KnowledgeMap"] == {}
 
 
-def test_compile_with_bound_kb_populates_knowledge_map(faq_ir: IRDocument):
+def test_compile_with_bound_kb_populates_agent_knowledge_refs(faq_ir: IRDocument):
     kb_id = "d7jl0000shhcm7cr99hg"
     binding = HiagentBinding(
         customer="test",
@@ -122,5 +104,49 @@ def test_compile_with_bound_kb_populates_knowledge_map(faq_ir: IRDocument):
         workspace_id="d31pcnoboot936af1tsg",
         dataset_id_map={"product_kb": kb_id},
     )
-    workflow = _workflow(compile_ir(faq_ir, binding))
-    assert workflow["Depends"]["KnowledgeMap"][kb_id]["ID"] == kb_id
+    agent = _agent(compile_ir(faq_ir, binding))
+    single = agent["AppConfig"]["SingleAgentConfig"]
+    assert single["KnowledgeIDs"] == [kb_id]
+    assert agent["AppDepends"]["KnowledgeMap"][kb_id]["ID"] == kb_id
+
+
+def test_compile_with_bound_kb_emits_knowledge_sidecar(faq_ir: IRDocument):
+    kb_id = "d7jl0000shhcm7cr99hg"
+    binding = HiagentBinding(
+        customer="test",
+        target="hiagent",
+        workspace_id="d31pcnoboot936af1tsg",
+        dataset_id_map={"product_kb": kb_id},
+    )
+    bundle = compile_ir(faq_ir, binding)
+    knowledge_paths = [p for p in bundle.files if p.startswith("knowledge/")]
+    assert knowledge_paths == ["knowledge/product_kb.yaml"]
+    assert bundle.files[knowledge_paths[0]]["UniqueName"] == kb_id
+
+
+def test_compile_with_bound_model_populates_agent_model_refs(faq_ir: IRDocument):
+    model_id = "d2s17uicrg32144vrj9g"
+    binding = HiagentBinding(
+        customer="test",
+        target="hiagent",
+        workspace_id="d31pcnoboot936af1tsg",
+        model_id_map={"configured-planner-model": model_id},
+    )
+    agent = _agent(compile_ir(faq_ir, binding))
+    single = agent["AppConfig"]["SingleAgentConfig"]
+    assert single["ModelID"] == model_id
+    assert agent["AppDepends"]["ModelMap"][model_id]["ID"] == model_id
+
+
+def test_compile_with_bound_model_emits_model_sidecar(faq_ir: IRDocument):
+    model_id = "d2s17uicrg32144vrj9g"
+    binding = HiagentBinding(
+        customer="test",
+        target="hiagent",
+        workspace_id="d31pcnoboot936af1tsg",
+        model_id_map={"configured-planner-model": model_id},
+    )
+    bundle = compile_ir(faq_ir, binding)
+    model_paths = [p for p in bundle.files if p.startswith("model/")]
+    assert model_paths == ["model/configured-planner-model.yaml"]
+    assert bundle.files[model_paths[0]]["UniqueName"] == model_id

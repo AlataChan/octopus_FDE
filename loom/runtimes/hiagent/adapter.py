@@ -47,13 +47,11 @@ class HiagentAdapter:
         import hashlib
 
         if isinstance(dsl, HiagentBundle):
-            payload = dsl.to_workflow_json().encode("utf-8")
-        elif isinstance(dsl, str):
-            payload = dsl.encode("utf-8")
+            payload = dsl.to_agent_bundle_zip_bytes()
         elif isinstance(dsl, bytes):
             payload = dsl
         else:
-            raise TypeError("canonical_ast_hash needs HiagentBundle, str, or bytes")
+            raise TypeError("canonical_ast_hash needs HiagentBundle or bytes")
         return hashlib.sha256(payload).hexdigest()
 
     def serialize_dsl(self, dsl: Any) -> bytes:
