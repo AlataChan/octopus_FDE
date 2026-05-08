@@ -61,5 +61,13 @@ class HiagentBundle:
                 )
                 info = zipfile.ZipInfo(full, date_time=(1980, 1, 1, 0, 0, 0))
                 info.compress_type = zipfile.ZIP_DEFLATED
+                # Set UTF-8 filename flag (bit 11 of general purpose bit flag).
+                # Hiagent's Java zip parser fails with cryptic "No signature
+                # found after EOCD record" when filenames contain non-ASCII
+                # bytes without this flag set. Always-on is safe for ASCII too.
+                info.flag_bits |= 0x800
+                # Standard Unix file permissions (rw-r--r--) so Java parsers
+                # don't choke on default external_attr=0.
+                info.external_attr = (0o644 & 0xFFFF) << 16
                 zf.writestr(info, yaml_text.encode("utf-8"))
         return buf.getvalue()
