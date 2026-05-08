@@ -16,6 +16,9 @@ dependencies = [
   "openai>=1.50,<2",
 ]
 
+[project.scripts]
+loom = "loom.cli.main:cli"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0,<9",
