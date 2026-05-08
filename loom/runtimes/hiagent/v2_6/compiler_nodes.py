@@ -105,6 +105,7 @@ def _trigger(
     node_code_map: dict[str, str],
     positions: dict[str, tuple[float, float]],
 ) -> dict[str, Any]:
+    # Spec: docs/runtimes/hiagent/node-specs.md#start-node-server-fixed
     """Hiagent Start node only has InputSchema + OutputSchema (verified via
     customer's 小芸维修专家 sample). IR's mode/schedule/webhook fields are
     not represented in the v2.6 graph node — they live elsewhere in the
@@ -124,6 +125,7 @@ def _llm(
     node_code_map: dict[str, str],
     positions: dict[str, tuple[float, float]],
 ) -> dict[str, Any]:
+    # Spec: docs/runtimes/hiagent/node-specs.md#llm-node
     out = _base(n, "LLM", node_code_map, positions)
     model_id = binding.resolve_model(n.model)
     out["Configs"]["LLM"] = {
@@ -133,7 +135,7 @@ def _llm(
         "Prompt": n.prompt,
         "Temperature": n.temperature if n.temperature is not None else 0.7,
         "MaxTokens": n.max_tokens or 4096,
-        "OutputSchema": _json_schema_to_hiagent_schema(n.output_schema),
+        "OutputSchema": _llm_output_schema(n.output_schema),
         "QueryVariable": _first_query_variable(n.prompt, node_code_map),
         "ReasoningMode": None,
         "ReasoningSwitch": None,
@@ -151,15 +153,16 @@ def _retrieval(
     node_code_map: dict[str, str],
     positions: dict[str, tuple[float, float]],
 ) -> dict[str, Any]:
-    out = _base(n, "KnowledgeBase", node_code_map, positions)
+    # Spec: docs/runtimes/hiagent/node-specs.md#knowledge-node
+    out = _base(n, "Knowledge", node_code_map, positions)
     kb_id = binding.resolve_dataset(n.dataset)
-    out["Configs"]["KnowledgeBase"] = {
+    out["Configs"]["Knowledge"] = {
         "KnowledgeIDs": [kb_id] if kb_id else [],
         "TopK": n.top_k,
         "MatchType": "vector",
         "RerankID": binding.rerank_model_id,
         "RetrievalSearchMethod": "semantic",
-        "Similarity": 0.0,
+        "Similarity": 0.5,
         "QueryVariable": _to_ref("query", n.query, node_code_map),
         "OutputSchema": [{"Name": "chunks", "Required": True, "Type": 5}],
     }
@@ -171,6 +174,7 @@ def _http(
     node_code_map: dict[str, str],
     positions: dict[str, tuple[float, float]],
 ) -> dict[str, Any]:
+    # Spec: docs/runtimes/hiagent/node-specs.md#http-node
     out = _base(n, "HTTPRequest", node_code_map, positions)
     out["Configs"]["HTTPRequest"] = {
         "Method": n.method,
@@ -189,6 +193,7 @@ def _code(
     node_code_map: dict[str, str],
     positions: dict[str, tuple[float, float]],
 ) -> dict[str, Any]:
+    # Spec: docs/runtimes/hiagent/node-specs.md#code-node
     """Hiagent Code node fields (verified via customer's 小芸 sample):
 
       Configs:
@@ -222,6 +227,7 @@ def _condition(
     node_code_map: dict[str, str],
     positions: dict[str, tuple[float, float]],
 ) -> dict[str, Any]:
+    # Spec: docs/runtimes/hiagent/node-specs.md#intent-node
     out = _base(n, "Intent", node_code_map, positions)
     model_name = "configured-small-model"
     model_id = binding.resolve_model(model_name)
@@ -233,6 +239,7 @@ def _condition(
         "MaxTokens": 4096,
         "ModelID": model_id,
         "ModelName": model_name,
+        "QueryVariable": {"Name": "query", "RefType": "sys", "Path": "query"},
         "OutputSchema": [
             {"Name": "classificationId", "Required": True, "Type": 1},
             {"Name": "classificationName", "Required": True, "Type": 0},
@@ -248,6 +255,7 @@ def _loop(
     node_code_map: dict[str, str],
     positions: dict[str, tuple[float, float]],
 ) -> dict[str, Any]:
+    # Spec: docs/runtimes/hiagent/node-specs.md#loop-node
     """Hiagent Loop node uses LoopType strings; gold sample shows 'Infinite'
     for chat-dispatch loops. IR's bounded `max_iterations` semantic doesn't
     map natively in v2.6; until a customer needs the bounded form, emit
@@ -265,6 +273,7 @@ def _parallel(
     node_code_map: dict[str, str],
     positions: dict[str, tuple[float, float]],
 ) -> dict[str, Any]:
+    # Spec: docs/runtimes/hiagent/node-specs.md#parallel-node
     out = _base(n, "Code", node_code_map, positions)
     out["Description"] = (
         n.rationale + "\nTODO: parallel branches require VariableAggregator wrapper."
@@ -292,6 +301,7 @@ def _agent(
     node_code_map: dict[str, str],
     positions: dict[str, tuple[float, float]],
 ) -> dict[str, Any]:
+    # Spec: docs/runtimes/hiagent/node-specs.md#llm-node
     out = _base(n, "LLM", node_code_map, positions)
     model_id = binding.resolve_model(n.model)
     out["Configs"]["LLM"] = {
@@ -301,7 +311,7 @@ def _agent(
         "Prompt": "",
         "ToolIDs": [binding.resolve_tool(t) for t in n.tools if binding.resolve_tool(t)],
         "InputSchema": _json_schema_to_hiagent_schema(n.input_schema),
-        "OutputSchema": _json_schema_to_hiagent_schema(n.output_schema),
+        "OutputSchema": _llm_output_schema(n.output_schema),
         "Budget": n.budget.model_dump(),
         "OnBudgetExhausted": n.on_budget_exhausted,
         "FallbackEdge": n.fallback_edge,
@@ -315,6 +325,7 @@ def _output(
     node_code_map: dict[str, str],
     positions: dict[str, tuple[float, float]],
 ) -> dict[str, Any]:
+    # Spec: docs/runtimes/hiagent/node-specs.md#end-node
     out = _base(n, "End", node_code_map, positions)
     out["Configs"]["End"] = {
         "OutputType": "Content",
@@ -359,6 +370,20 @@ def _json_schema_to_hiagent_schema(schema: dict[str, Any] | None) -> list[dict[s
             for name, prop in properties.items()
         ]
     return [{"Name": "output", "Required": True, "Type": _json_type_to_hiagent_type(schema)}]
+
+
+def _llm_output_schema(schema: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """LLM nodes always expose raw_output first.
+
+    Spec: docs/runtimes/hiagent/node-specs.md#llm-node
+    """
+    raw_output = {"Name": "raw_output", "Required": True, "Type": 0}
+    extra = [
+        field
+        for field in _json_schema_to_hiagent_schema(schema)
+        if field.get("Name") != "raw_output"
+    ]
+    return [raw_output, *extra]
 
 
 def _json_schema_to_hiagent_schema_minimal(schema: dict[str, Any] | None) -> list[dict[str, Any]]:

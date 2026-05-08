@@ -12,6 +12,7 @@ import click
 from loom.ir.models import IRDocument
 from loom.runtimes.hiagent.api_client import HiagentAPIClient, HiagentAPIError
 from loom.runtimes.hiagent.binding import HiagentBinding, HiagentBindingError
+from loom.runtimes.hiagent.spec_check import check_materialized_chatflow_nodes
 from loom.runtimes.hiagent.v2_6.compiler import (
     build_agent_config_draft,
     build_agent_config_request,
@@ -211,6 +212,7 @@ def _materialize_chatflow_graph(
 
     links = _server_links(generated_nodes, server_by_generated_code)
     _normalize_sys_refs(server_nodes)
+    check_materialized_chatflow_nodes(server_nodes)
     client.save_chatflow(app_id, nodes=server_nodes, links=links)
     flow_id = _flow_id(server_nodes) or app_id
     return {
@@ -256,6 +258,7 @@ def _pop_reusable_node(
 def _chatflow_api_node_type(type_name: str) -> str:
     return {
         "KnowledgeBase": "Knowledge",
+        "Knowledge": "Knowledge",
         "HTTPRequest": "Tool",
     }.get(type_name, type_name)
 
@@ -337,8 +340,8 @@ def _patch_chatflow_node_config(
     generated_type = str(generated_node["Type"])
     if generated_type == "Start":
         return
-    elif generated_type == "KnowledgeBase":
-        knowledge = configs.get("KnowledgeBase")
+    elif generated_type in {"Knowledge", "KnowledgeBase"}:
+        knowledge = configs.get("Knowledge") or configs.get("KnowledgeBase")
         if isinstance(knowledge, dict):
             _set_node_config(
                 server_node,

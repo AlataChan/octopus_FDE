@@ -86,9 +86,11 @@ def test_llm_emits_llm_node(minimal_binding: HiagentBinding):
     assert cfg["SystemPrompt"] == "You answer briefly."
     assert cfg["Prompt"] == "${input.query}"
     assert cfg["ModelID"] == ""
+    assert cfg["OutputSchema"][0] == {"Name": "raw_output", "Required": True, "Type": 0}
+    assert {"Name": "answer", "Required": False, "Type": 0} in cfg["OutputSchema"]
 
 
-def test_retrieval_emits_knowledge_base_with_empty_ids_when_unbound(minimal_binding: HiagentBinding):
+def test_knowledge_node_uses_api_typename(minimal_binding: HiagentBinding):
     ir = _doc([{
         "id": "retrieve",
         "type": "retrieval",
@@ -97,8 +99,10 @@ def test_retrieval_emits_knowledge_base_with_empty_ids_when_unbound(minimal_bind
         "query": "${input.query}",
     }], datasets=["product_kb"])
     node = _emit_one(ir, minimal_binding)
-    assert node["Type"] == "KnowledgeBase"
-    assert node["Configs"]["KnowledgeBase"]["KnowledgeIDs"] == []
+    assert node["Type"] == "Knowledge"
+    assert "Knowledge" in node["Configs"]
+    assert "KnowledgeBase" not in node["Configs"]
+    assert node["Configs"]["Knowledge"]["KnowledgeIDs"] == []
 
 
 def test_retrieval_uses_bound_kb_id():
@@ -117,7 +121,7 @@ def test_retrieval_uses_bound_kb_id():
         "query": "${input.query}",
     }], datasets=["product_kb"])
     node = _emit_one(ir, binding)
-    assert node["Configs"]["KnowledgeBase"]["KnowledgeIDs"] == [kb_id]
+    assert node["Configs"]["Knowledge"]["KnowledgeIDs"] == [kb_id]
 
 
 def test_http_emits_httprequest(minimal_binding: HiagentBinding):

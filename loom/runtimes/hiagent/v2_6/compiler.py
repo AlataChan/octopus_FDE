@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any
 
+from loom.runtimes.hiagent.spec_check import check_generated_chatflow_config
 from loom.runtimes.hiagent.v2_6.bundle import HiagentBundle
 from loom.runtimes.hiagent.v2_6.compiler_nodes import emit_workflow_nodes
 from loom.runtimes.hiagent.v2_6.ids import gen_id
@@ -132,7 +133,7 @@ def build_chatflow_config_draft(
     )
     _attach_depends_and_error_config(nodes, node_code_map=node_code_map, edges=edges)
 
-    return {
+    detail: dict[str, Any] = {
         "DLVersion": "v2",
         "Depends": _build_app_depends(ir, binding),
         "Desc": ir.metadata.description or "",
@@ -153,6 +154,8 @@ def build_chatflow_config_draft(
         "VersionName": version_code,
         "WorkspaceID": binding.workspace_id,
     }
+    check_generated_chatflow_config(detail)
+    return detail
 
 
 def build_chatflow_workflow_snapshot(chatflow_config: dict[str, Any]) -> dict[str, Any]:

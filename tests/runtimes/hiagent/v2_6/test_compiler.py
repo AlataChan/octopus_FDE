@@ -146,7 +146,7 @@ def test_build_chatflow_config_draft_includes_all_ir_nodes(
 ):
     detail = build_chatflow_config_draft(faq_ir, minimal_binding)
     assert len(detail["Nodes"]) == len(faq_ir.nodes)
-    assert {n["Type"] for n in detail["Nodes"]} >= {"Start", "KnowledgeBase", "LLM", "End"}
+    assert {n["Type"] for n in detail["Nodes"]} >= {"Start", "Knowledge", "LLM", "End"}
     assert all("_ir_id" not in n for n in detail["Nodes"])
     assert all("Depends" in n for n in detail["Nodes"])
     assert all("ErrorConfig" in n for n in detail["Nodes"])

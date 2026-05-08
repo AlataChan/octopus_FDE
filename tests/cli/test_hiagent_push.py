@@ -316,9 +316,16 @@ def test_hiagent_push_mode_chatflow_calls_correct_actions(tmp_path, monkeypatch)
     _, (_, nodes, links) = graph_save_call
     assert len(nodes) > 1
     assert len(links) > 0
+    assert any(n["Type"] == "Knowledge" for n in nodes)
     start_nodes = [n for n in nodes if n["Type"] == "Start"]
     assert len(start_nodes) == 1
     assert start_nodes[0]["NodeConfig"] == DEFAULT_START_NODE_CONFIG
+    llm_nodes = [n for n in nodes if n["Type"] == "LLM"]
+    assert llm_nodes
+    assert any(
+        field.get("Name") == "raw_output"
+        for field in llm_nodes[0]["NodeConfig"]["LLMNode"]["OutputSchema"]
+    )
     config_save_call = next(c for c in fake.calls if c[0] == "save_chatflow")
     _, (_, chatflow_config) = config_save_call
     assert chatflow_config["MetaType"] == "Workflow"
