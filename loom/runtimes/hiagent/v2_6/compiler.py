@@ -79,7 +79,11 @@ def compile_ir(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
     }
 
     bundle_name = _bundle_dirname(ir, workflow_id)
-    workflow_filename = f"{ir.metadata.name}.yaml"
+    # Customer Hiagent samples never use spaces in filenames; replace spaces
+    # in IR's free-text name with underscores so Hiagent's import path
+    # accepts the filename. Display names inside the YAML keep spaces.
+    safe_name = ir.metadata.name.replace(" ", "_")
+    workflow_filename = f"{safe_name}.yaml"
     index_yaml: dict[str, Any] = {
         "DLVersion": "0.0.1",
         "FromWorkspaceID": binding.workspace_id,
@@ -136,6 +140,13 @@ def _build_model_map(ir: IRDocument, binding: HiagentBinding) -> dict[str, dict[
 
 
 def _bundle_dirname(ir: IRDocument, workflow_id: str) -> str:
-    """Generate bundle dir name like '<workflow-name>_v1.0.0_<timestamp>'."""
+    """Generate bundle dir name like '<workflow-name>_v1.0.0_<timestamp>'.
+
+    Spaces in IR metadata.name are replaced with underscores; customer
+    Hiagent samples never use spaces in directory or filenames, and
+    Hiagent's importer can fail on space-containing filenames with a
+    misleading 'No signature found after EOCD record' error.
+    """
     ts = time.strftime("%Y%m%d%H%M%S")
-    return f"{ir.metadata.name}_v1.0.0_{ts}"
+    safe_name = ir.metadata.name.replace(" ", "_")
+    return f"{safe_name}_v1.0.0_{ts}"
