@@ -98,13 +98,14 @@ def _trigger(
     node_code_map: dict[str, str],
     positions: dict[str, tuple[float, float]],
 ) -> dict[str, Any]:
+    """Hiagent Start node only has InputSchema + OutputSchema (verified via
+    customer's 小芸维修专家 sample). IR's mode/schedule/webhook fields are
+    not represented in the v2.6 graph node — they live elsewhere in the
+    Agent's chat config or trigger metadata."""
     out = _base(n, "Start", node_code_map, positions)
     out["Configs"]["Start"] = {
-        "Mode": n.mode,
-        "Schedule": n.schedule,
-        "Webhook": n.webhook.model_dump() if n.webhook else None,
-        "InputSchema": [_port_schema(p) for p in ir.inputs],
-        "OutputSchema": [_port_schema(p) for p in ir.inputs],
+        "InputSchema": [_port_schema_minimal(p) for p in ir.inputs],
+        "OutputSchema": [_port_schema_minimal(p) for p in ir.inputs],
     }
     return out
 
@@ -181,15 +182,29 @@ def _code(
     node_code_map: dict[str, str],
     positions: dict[str, tuple[float, float]],
 ) -> dict[str, Any]:
+    """Hiagent Code node fields (verified via customer's 小芸 sample):
+
+      Configs:
+        Code:
+          Code: "<source>"        # field name 'Code', NOT 'Source'
+          Language: 1             # INT enum: 1=python, 2=javascript
+          OutputSchema: [...]     # items are {Name, Type} only — no Required
+          Retries: 0
+          TimeoutSeconds: 120
+
+    Hiagent's Go decoder fails with 'cannot unmarshal string into Go struct
+    field CodeNodeConfig.Nodes.Configs.Code.Language of type
+    node.CodeLanguage' when Language is a string instead of the integer
+    enum. We map IR's 'python'/'javascript' to 1/2.
+    """
+    language_code = {"python": 1, "javascript": 2}.get(n.language, 1)
     out = _base(n, "Code", node_code_map, positions)
     out["Configs"]["Code"] = {
-        "Language": n.language,
-        "Source": n.source,
-        "InputVariables": [
-            _to_ref(name, value, node_code_map)
-            for name, value in (n.inputs or {}).items()
-        ],
-        "OutputSchema": _json_schema_to_hiagent_schema(n.output_schema),
+        "Code": n.source,
+        "Language": language_code,
+        "OutputSchema": _json_schema_to_hiagent_schema_minimal(n.output_schema),
+        "Retries": n.retry.max_attempts if n.retry else 0,
+        "TimeoutSeconds": int(n.timeout_s or 120),
     }
     return out
 
@@ -226,12 +241,14 @@ def _loop(
     node_code_map: dict[str, str],
     positions: dict[str, tuple[float, float]],
 ) -> dict[str, Any]:
+    """Hiagent Loop node uses LoopType strings; gold sample shows 'Infinite'
+    for chat-dispatch loops. IR's bounded `max_iterations` semantic doesn't
+    map natively in v2.6; until a customer needs the bounded form, emit
+    'Infinite' which is what real samples use."""
     out = _base(n, "Loop", node_code_map, positions)
     out["Configs"]["Loop"] = {
-        "LoopType": "Bounded",
-        "MaxIterations": n.max_iterations,
+        "LoopType": "Infinite",
         "InterVariables": [_to_ref(n.as_, n.over, node_code_map)],
-        "Collect": n.collect,
     }
     return out
 
@@ -310,6 +327,16 @@ def _port_schema(port: PortDecl) -> dict[str, Any]:
     }
 
 
+def _port_schema_minimal(port: PortDecl) -> dict[str, Any]:
+    """Start node's InputSchema/OutputSchema in gold sample uses Desc + Name + Type
+    (no Required field). We preserve the field set that real Hiagent samples emit."""
+    return {
+        "Desc": port.description or "",
+        "Name": port.name,
+        "Type": to_hiagent_type_code(port.type),
+    }
+
+
 def _json_schema_to_hiagent_schema(schema: dict[str, Any] | None) -> list[dict[str, Any]]:
     if not schema:
         return []
@@ -325,6 +352,27 @@ def _json_schema_to_hiagent_schema(schema: dict[str, Any] | None) -> list[dict[s
             for name, prop in properties.items()
         ]
     return [{"Name": "output", "Required": True, "Type": _json_type_to_hiagent_type(schema)}]
+
+
+def _json_schema_to_hiagent_schema_minimal(schema: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Some Hiagent node configs (Code, certain LLMs) use OutputSchema items
+    with just {Name, Type} — no Required field. Gold sample's Code node:
+        OutputSchema:
+        - Name: qr_code_output
+          Type: 0
+    """
+    if not schema:
+        return []
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        return [
+            {
+                "Name": name,
+                "Type": _json_type_to_hiagent_type(prop if isinstance(prop, dict) else {}),
+            }
+            for name, prop in properties.items()
+        ]
+    return [{"Name": "output", "Type": _json_type_to_hiagent_type(schema)}]
 
 
 def _json_type_to_hiagent_type(schema: dict[str, Any]) -> int:

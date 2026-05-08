@@ -144,8 +144,12 @@ def test_code_emits_code(minimal_binding: HiagentBinding):
     }])
     node = _emit_one(ir, minimal_binding)
     assert node["Type"] == "Code"
-    assert node["Configs"]["Code"]["Language"] == "python"
-    assert node["Configs"]["Code"]["Source"] == "return {'answer': 'ok'}"
+    # Hiagent's Go backend expects Language as integer enum (1=python, 2=js).
+    assert node["Configs"]["Code"]["Language"] == 1
+    # Hiagent uses 'Code' field name, not 'Source'.
+    assert node["Configs"]["Code"]["Code"] == "return {'answer': 'ok'}"
+    assert "Retries" in node["Configs"]["Code"]
+    assert "TimeoutSeconds" in node["Configs"]["Code"]
 
 
 def test_condition_emits_intent_with_intentions(minimal_binding: HiagentBinding):
@@ -178,7 +182,10 @@ def test_loop_emits_loop(minimal_binding: HiagentBinding):
     }])
     node = _emit_one(ir, minimal_binding)
     assert node["Type"] == "Loop"
-    assert node["Configs"]["Loop"]["MaxIterations"] == 7
+    # Real Hiagent samples use LoopType: Infinite; bounded semantic via
+    # Hiagent's runtime control rather than a config field.
+    assert node["Configs"]["Loop"]["LoopType"] == "Infinite"
+    assert "InterVariables" in node["Configs"]["Loop"]
 
 
 def test_output_emits_end(minimal_binding: HiagentBinding):
