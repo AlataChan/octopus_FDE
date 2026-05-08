@@ -233,6 +233,57 @@ class HiagentAPIClient:
             raise HiagentAPIError("CreateApp response missing AppID")
         return app_id
 
+    def get_chatflow(self, app_id: str, *, with_node: bool = True) -> dict[str, Any]:
+        result = self._post(
+            "GetChatflow",
+            {
+                "WorkspaceID": self.workspace_id,
+                "AppID": app_id,
+                "WithNode": with_node,
+            },
+        )
+        return result
+
+    def create_chatflow_node(
+        self,
+        app_id: str,
+        *,
+        node_type: str,
+        layout: dict[str, Any],
+        name: str = "",
+    ) -> dict[str, Any]:
+        result = self._post(
+            "CreateChatFlowNode",
+            {
+                "WorkspaceID": self.workspace_id,
+                "AppID": app_id,
+                "Type": node_type,
+                "Layout": layout,
+                "Name": name,
+            },
+        )
+        node = result.get("Node")
+        if not isinstance(node, dict):
+            raise HiagentAPIError("CreateChatFlowNode response missing Node")
+        return node
+
+    def save_chatflow(
+        self,
+        app_id: str,
+        *,
+        nodes: list[dict[str, Any]],
+        links: list[dict[str, Any]],
+    ) -> None:
+        self._post(
+            "SaveChatflow",
+            {
+                "WorkspaceID": self.workspace_id,
+                "AppID": app_id,
+                "Nodes": nodes,
+                "Links": links,
+            },
+        )
+
     def list_workspace_models(self) -> list[dict[str, Any]]:
         """Return models granted to the current workspace.
 
@@ -257,6 +308,35 @@ class HiagentAPIClient:
         if not isinstance(items, list):
             raise HiagentAPIError("ListModelByWorkspaceGrant response Items is not a list")
         return [item for item in items if isinstance(item, dict)]
+
+    def list_workspace_datasets(self) -> list[dict[str, Any]]:
+        result = self._post(
+            "ListDatasets",
+            {
+                "WorkspaceID": self.workspace_id,
+                "PageNumber": 1,
+                "PageSize": 40,
+            },
+        )
+        items = result.get("Items", [])
+        if not isinstance(items, list):
+            raise HiagentAPIError("ListDatasets response Items is not a list")
+        return [item for item in items if isinstance(item, dict)]
+
+    def resolve_default_dataset_id(self) -> str | None:
+        env_dataset = os.environ.get("HIAGENT_DATASET_ID")
+        if env_dataset:
+            return env_dataset
+        datasets = [
+            dataset
+            for dataset in self.list_workspace_datasets()
+            if isinstance(dataset.get("Id"), str) or isinstance(dataset.get("ID"), str)
+        ]
+        if not datasets:
+            return None
+        first = datasets[0]
+        dataset_id = first.get("Id") or first.get("ID")
+        return str(dataset_id)
 
     def resolve_default_text_generation_model_id(self) -> str | None:
         """Pick a usable text-generation model for API-created Chat apps."""
@@ -285,21 +365,45 @@ class HiagentAPIClient:
             },
         )
 
+    def save_chatflow_config_draft(
+        self,
+        app_id: str,
+        chatflow_config: dict[str, Any],
+    ) -> None:
+        self._post(
+            "SaveChatFlowConfigDraft",
+            {
+                "WorkspaceID": self.workspace_id,
+                "AppID": app_id,
+                "ChatFlowConfig": chatflow_config,
+            },
+        )
+
     def publish_app_v2(
         self,
         app_id: str,
         *,
-        app_config: dict[str, Any],
+        app_config: dict[str, Any] | None = None,
+        chatflow_config: dict[str, Any] | None = None,
+        agent_mode: str = "Single",
         version: str = "v1.0.0",
     ) -> str:
+        if (app_config is None) == (chatflow_config is None):
+            raise HiagentAPIError(
+                "PublishAppV2 requires exactly one of app_config or chatflow_config"
+            )
+        payload: dict[str, Any] = {
+            "WorkspaceID": self.workspace_id,
+            "AppID": app_id,
+            "AgentMode": agent_mode,
+        }
+        if app_config is not None:
+            payload["AppConfig"] = {**app_config, "Version": version}
+        if chatflow_config is not None:
+            payload["ChatFlowConfig"] = {**chatflow_config, "Version": version}
         result = self._post(
             "PublishAppV2",
-            {
-                "WorkspaceID": self.workspace_id,
-                "AppID": app_id,
-                "AgentMode": "Single",
-                "AppConfig": {**app_config, "Version": version},
-            },
+            payload,
         )
         publish_id = result.get("PublishID") or result.get("VersionCode")
         if not isinstance(publish_id, str) or not publish_id:

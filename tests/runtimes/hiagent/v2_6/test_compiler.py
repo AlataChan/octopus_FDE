@@ -7,7 +7,12 @@ import pytest
 from loom.ir.models import IRDocument
 from loom.runtimes.hiagent.binding import HiagentBinding
 from loom.runtimes.hiagent.v2_6.bundle import HiagentBundle
-from loom.runtimes.hiagent.v2_6.compiler import build_agent_config_request, compile_ir
+from loom.runtimes.hiagent.v2_6.compiler import (
+    build_agent_config_request,
+    build_chatflow_config_draft,
+    build_chatflow_workflow_snapshot,
+    compile_ir,
+)
 
 ROOT = Path(__file__).resolve().parents[4]
 
@@ -133,3 +138,44 @@ def test_compile_with_bound_model_populates_agent_model_refs(faq_ir: IRDocument)
     single = agent["AppConfig"]["SingleAgentConfig"]
     assert single["ModelID"] == model_id
     assert agent["AppDepends"]["ModelMap"][model_id]["ID"] == model_id
+
+
+def test_build_chatflow_config_draft_includes_all_ir_nodes(
+    faq_ir: IRDocument,
+    minimal_binding: HiagentBinding,
+):
+    detail = build_chatflow_config_draft(faq_ir, minimal_binding)
+    assert len(detail["Nodes"]) == len(faq_ir.nodes)
+    assert {n["Type"] for n in detail["Nodes"]} >= {"Start", "KnowledgeBase", "LLM", "End"}
+    assert all("_ir_id" not in n for n in detail["Nodes"])
+    assert all("Depends" in n for n in detail["Nodes"])
+    assert all("ErrorConfig" in n for n in detail["Nodes"])
+
+
+def test_chatflow_detail_has_metatype_workflow_inside(
+    faq_ir: IRDocument,
+    minimal_binding: HiagentBinding,
+):
+    detail = build_chatflow_config_draft(faq_ir, minimal_binding)
+    assert detail["DLVersion"] == "v2"
+    assert detail["FlowType"] == "Agent"
+    assert detail["MetaType"] == "Workflow"
+    assert detail["WorkspaceID"] == minimal_binding.workspace_id
+    assert detail["WorkflowID"] == detail["ID"]
+
+
+def test_chatflow_workflow_snapshot_derives_links_from_depends(
+    faq_ir: IRDocument,
+    minimal_binding: HiagentBinding,
+):
+    detail = build_chatflow_config_draft(
+        faq_ir,
+        minimal_binding,
+        workflow_id="workflow_123",
+    )
+    snapshot = build_chatflow_workflow_snapshot(detail)
+    assert snapshot["Nodes"] == detail["Nodes"]
+    assert len(snapshot["Links"]) == len(faq_ir.edges)
+    assert all(set(link) == {"From", "To"} for link in snapshot["Links"])
+    assert all(link["From"]["NodeCode"] for link in snapshot["Links"])
+    assert all(link["To"]["NodeCode"] for link in snapshot["Links"])

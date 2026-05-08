@@ -10,7 +10,9 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from loom.runtimes.hiagent.v2_6.bundle import HiagentBundle
+from loom.runtimes.hiagent.v2_6.compiler_nodes import emit_workflow_nodes
 from loom.runtimes.hiagent.v2_6.ids import gen_id
+from loom.runtimes.hiagent.v2_6.layout import topological_layout
 
 if TYPE_CHECKING:
     from loom.ir.models import IRDocument
@@ -98,6 +100,90 @@ def build_agent_config_request(ir: IRDocument, binding: HiagentBinding) -> dict[
         for key, value in single.items()
         if key in _APP_CONFIG_REQUEST_KEYS
     }
+
+
+def build_chatflow_config_draft(
+    ir: IRDocument,
+    binding: HiagentBinding,
+    *,
+    workflow_id: str | None = None,
+    workflow_publish_id: str = "",
+) -> dict[str, Any]:
+    """Return API `app.ChatFlowConfig` payload with the full IR graph inline.
+
+    Exported Hiagent ChatFlow agents store the graph under
+    `AppConfig.ChatFlowDetail`. The TOP API names the corresponding request
+    field `ChatFlowConfig`; this helper returns that detail object so the CLI
+    can call SaveChatFlowConfigDraft without collapsing the IR into a single
+    chat prompt.
+    """
+    chatflow_id = workflow_id or gen_id()
+    version_code = gen_id()
+    now_ms = int(time.time() * 1000)
+    update_time = time.strftime("%Y-%m-%d %H:%M:%S")
+    node_code_map: dict[str, str] = {n.id: gen_id() for n in ir.nodes}
+    edges = [(e.from_, e.to) for e in ir.edges]
+    positions = topological_layout([n.id for n in ir.nodes], edges)
+    nodes = emit_workflow_nodes(
+        ir,
+        binding,
+        node_code_map=node_code_map,
+        positions=positions,
+    )
+    _attach_depends_and_error_config(nodes, node_code_map=node_code_map, edges=edges)
+
+    return {
+        "DLVersion": "v2",
+        "Depends": _build_app_depends(ir, binding),
+        "Desc": ir.metadata.description or "",
+        "DisplayName": ir.metadata.name,
+        "FlowType": "Agent",
+        "ID": chatflow_id,
+        "LogoPath": "",
+        "MetaType": "Workflow",
+        "Nodes": nodes,
+        "UniqueName": chatflow_id,
+        "WorkflowID": chatflow_id,
+        "WorkflowPublishID": workflow_publish_id,
+        "UpdatedAt": now_ms,
+        "UpdateTime": update_time,
+        "Version": "v1.0.0",
+        "VersionCode": version_code,
+        "VersionDescription": ir.metadata.description or "",
+        "VersionName": version_code,
+        "WorkspaceID": binding.workspace_id,
+    }
+
+
+def build_chatflow_workflow_snapshot(chatflow_config: dict[str, Any]) -> dict[str, Any]:
+    """Return SaveWorkflow's `Nodes` + `Links` snapshot from ChatFlow detail."""
+    nodes = chatflow_config["Nodes"]
+    links: list[dict[str, Any]] = []
+    for node in nodes:
+        to_code = node["Code"]
+        for dep in node.get("Depends", []):
+            from_code = dep.get("NodeCode")
+            if from_code:
+                links.append({
+                    "From": {"NodeCode": from_code},
+                    "To": {"NodeCode": to_code},
+                })
+    return {"Nodes": nodes, "Links": links}
+
+
+def _attach_depends_and_error_config(
+    nodes: list[dict[str, Any]],
+    *,
+    node_code_map: dict[str, str],
+    edges: list[tuple[str, str]],
+) -> None:
+    deps_by_dest: dict[str, list[dict[str, Any]]] = {}
+    for src, dst in edges:
+        deps_by_dest.setdefault(dst, []).append({"NodeCode": node_code_map[src]})
+    for node in nodes:
+        ir_id = node.pop("_ir_id")
+        node["Depends"] = deps_by_dest.get(ir_id, [])
+        node.setdefault("ErrorConfig", {"ErrorConfigType": "None"})
 
 
 def _build_agent_yaml(

@@ -77,6 +77,80 @@ def test_create_app_returns_app_id():
     assert app_id == "app_123"
 
 
+def test_create_app_chatflow_type():
+    http = _HTTP([_Response({"Result": {"AppID": "app_123"}})])
+    app_id = _client(http).create_app(name="demo", app_type="ChatFlow", description="desc")
+    assert app_id == "app_123"
+    assert json.loads(http.calls[0]["content"])["AppType"] == "ChatFlow"
+
+
+def test_save_chatflow_config_draft_uses_correct_action():
+    http = _HTTP([_Response({"Result": {}})])
+    _client(http).save_chatflow_config_draft("app_123", {"Nodes": []})
+    call = http.calls[0]
+    assert "Action=SaveChatFlowConfigDraft" in call["url"]
+    payload = json.loads(call["content"])
+    assert payload["AppID"] == "app_123"
+    assert payload["ChatFlowConfig"] == {"Nodes": []}
+
+
+def test_get_chatflow_uses_app_id_and_with_node_flag():
+    http = _HTTP([_Response({"Result": {"Nodes": []}})])
+    result = _client(http).get_chatflow("app_123", with_node=True)
+    assert result == {"Nodes": []}
+    call = http.calls[0]
+    assert "Action=GetChatflow" in call["url"]
+    payload = json.loads(call["content"])
+    assert payload["AppID"] == "app_123"
+    assert payload["WithNode"] is True
+
+
+def test_create_chatflow_node_returns_node():
+    http = _HTTP([_Response({"Result": {"Node": {"Code": "node_123"}}})])
+    node = _client(http).create_chatflow_node(
+        "app_123",
+        node_type="LLM",
+        layout={"X": 1.0, "Y": 2.0},
+        name="Draft",
+    )
+    assert node == {"Code": "node_123"}
+    call = http.calls[0]
+    assert "Action=CreateChatFlowNode" in call["url"]
+    payload = json.loads(call["content"])
+    assert payload["Type"] == "LLM"
+    assert payload["Layout"] == {"X": 1.0, "Y": 2.0}
+
+
+def test_save_chatflow_posts_nodes_and_links():
+    http = _HTTP([_Response({"Result": {}})])
+    _client(http).save_chatflow(
+        "app_123",
+        nodes=[{"Code": "a"}],
+        links=[{"From": {"NodeCode": "a"}, "To": {"NodeCode": "b"}}],
+    )
+    call = http.calls[0]
+    assert "Action=SaveChatflow" in call["url"]
+    payload = json.loads(call["content"])
+    assert payload["AppID"] == "app_123"
+    assert payload["Nodes"] == [{"Code": "a"}]
+    assert payload["Links"][0]["From"]["NodeCode"] == "a"
+
+
+def test_publish_chatflow_uses_empty_agent_mode_and_chatflow_config():
+    http = _HTTP([_Response({"Result": {"PublishID": "pub_123"}})])
+    published = _client(http).publish_app_v2(
+        "app_123",
+        chatflow_config={"Nodes": []},
+        agent_mode="",
+        version="v1.0.0",
+    )
+    assert published == "pub_123"
+    payload = json.loads(http.calls[0]["content"])
+    assert payload["AgentMode"] == ""
+    assert payload["ChatFlowConfig"] == {"Nodes": [], "Version": "v1.0.0"}
+    assert "AppConfig" not in payload
+
+
 def test_list_workspace_models_uses_aigw_service():
     http = _HTTP([
         _Response(
@@ -117,6 +191,24 @@ def test_resolve_default_text_generation_model_prefers_default():
         )
     ])
     assert _client(http).resolve_default_text_generation_model_id() == "model_default"
+
+
+def test_resolve_default_dataset_id_uses_first_dataset():
+    http = _HTTP([
+        _Response(
+            {
+                "Result": {
+                    "Items": [
+                        {"Id": "dataset_1", "Name": "KB"},
+                        {"Id": "dataset_2", "Name": "KB2"},
+                    ],
+                    "Total": 2,
+                }
+            }
+        )
+    ])
+    assert _client(http).resolve_default_dataset_id() == "dataset_1"
+    assert "Action=ListDatasets" in http.calls[0]["url"]
 
 
 def test_response_metadata_error_raises():

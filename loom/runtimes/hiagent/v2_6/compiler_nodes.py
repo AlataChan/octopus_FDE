@@ -227,9 +227,9 @@ def _condition(
     model_id = binding.resolve_model(model_name)
     out["Configs"]["Intent"] = {
         "Intentions": [
-            {"Name": f"class_{i}", "Description": b.when, "PortID": f"class_{i}"}
+            {"Name": f"class{i + 1:02d}", "Description": b.when, "PortID": f"class{i + 1:02d}"}
             for i, b in enumerate(n.branches)
-        ],
+        ] + [{"Name": "Others", "Description": n.default, "PortID": "class_other"}],
         "MaxTokens": 4096,
         "ModelID": model_id,
         "ModelName": model_name,

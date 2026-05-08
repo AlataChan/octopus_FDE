@@ -166,8 +166,10 @@ def test_condition_emits_intent_with_intentions(minimal_binding: HiagentBinding)
     node = _emit_one(ir, minimal_binding)
     cfg = node["Configs"]["Intent"]
     assert node["Type"] == "Intent"
-    assert len(cfg["Intentions"]) == 2
+    assert len(cfg["Intentions"]) == 3
     assert cfg["Intentions"][0]["Description"] == "${answer.intent} == 'refund'"
+    assert cfg["Intentions"][0]["PortID"] == "class01"
+    assert cfg["Intentions"][2]["PortID"] == "class_other"
 
 
 def test_loop_emits_loop(minimal_binding: HiagentBinding):

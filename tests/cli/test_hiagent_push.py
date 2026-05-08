@@ -24,13 +24,72 @@ class _FakeClient:
     def save_app_config_draft(self, app_id: str, config_draft: dict) -> None:
         self.calls.append(("save", (app_id, config_draft)))
 
-    def publish_app_v2(self, app_id: str, *, app_config: dict, version: str) -> str:
-        self.calls.append(("publish", (app_id, app_config, version)))
+    def save_chatflow_config_draft(self, app_id: str, chatflow_config: dict) -> None:
+        self.calls.append(("save_chatflow", (app_id, chatflow_config)))
+
+    def get_chatflow(self, app_id: str, *, with_node: bool = True) -> dict:
+        self.calls.append(("get_chatflow", (app_id, with_node)))
+        return {
+            "Nodes": [
+                {
+                    "Code": "server_start",
+                    "FlowID": "flow_123",
+                    "Type": "Start",
+                    "Name": "Start",
+                    "Layout": {"X": 100, "Y": 100},
+                    "NodeConfig": {"StartNode": {}},
+                },
+                {
+                    "Code": "server_end",
+                    "FlowID": "flow_123",
+                    "Type": "End",
+                    "Name": "End",
+                    "Layout": {"X": 1200, "Y": 200},
+                    "NodeConfig": {"EndNode": {}},
+                },
+            ]
+        }
+
+    def create_chatflow_node(
+        self,
+        app_id: str,
+        *,
+        node_type: str,
+        layout: dict,
+        name: str = "",
+    ) -> dict:
+        self.calls.append(("create_node", (app_id, node_type, layout, name)))
+        return {
+            "Code": f"server_{node_type}_{len(self.calls)}",
+            "FlowID": "flow_123",
+            "Type": node_type,
+            "Name": name,
+            "Layout": layout,
+            "NodeConfig": {f"{node_type}Node": {}},
+        }
+
+    def save_chatflow(self, app_id: str, *, nodes: list[dict], links: list[dict]) -> None:
+        self.calls.append(("save_chatflow_graph", (app_id, nodes, links)))
+
+    def publish_app_v2(
+        self,
+        app_id: str,
+        *,
+        app_config: dict | None = None,
+        chatflow_config: dict | None = None,
+        agent_mode: str = "Single",
+        version: str,
+    ) -> str:
+        self.calls.append(("publish", (app_id, app_config, chatflow_config, agent_mode, version)))
         return "pub_123"
 
     def resolve_default_text_generation_model_id(self) -> str | None:
         self.calls.append(("resolve_model", None))
         return "model_default"
+
+    def resolve_default_dataset_id(self) -> str | None:
+        self.calls.append(("resolve_dataset", None))
+        return "dataset_default"
 
     def app_url(self, app_id: str) -> str:
         return f"http://example.test/workspace/ws_1/agent/{app_id}"
@@ -67,7 +126,14 @@ def test_hiagent_push_runs_create_save_publish(tmp_path, monkeypatch):
         ],
     )
     assert result.exit_code == 0, result.output
-    assert [c[0] for c in fake.calls] == ["check", "create", "resolve_model", "save", "publish"]
+    assert [c[0] for c in fake.calls] == [
+        "check",
+        "create",
+        "resolve_model",
+        "resolve_dataset",
+        "save",
+        "publish",
+    ]
     assert "http://example.test/workspace/ws_1/agent/app_123" in result.output
     assert "Checking app name" in result.output
     assert "Creating app" in result.output
@@ -116,7 +182,7 @@ def test_hiagent_push_saves_single_agent_config_shape(tmp_path, monkeypatch):
         ],
     )
     assert result.exit_code == 0, result.output
-    _, (_, draft) = fake.calls[3]
+    _, (_, draft) = fake.calls[4]
     # The draft is JSON-serializable and uses API AppConfigDraftRequest fields,
     # not the ZIP/YAML-only AppConfig wrapper.
     json.dumps(draft)
@@ -142,8 +208,8 @@ def test_hiagent_push_auto_fills_unbound_model_from_workspace(tmp_path, monkeypa
         ],
     )
     assert result.exit_code == 0, result.output
-    _, (_, draft) = fake.calls[3]
-    _, (_, publish_config, _) = fake.calls[4]
+    _, (_, draft) = fake.calls[4]
+    _, (_, publish_config, _, _, _) = fake.calls[5]
     assert draft["ModelID"] == "model_default"
     assert publish_config["ModelID"] == "model_default"
 
@@ -196,3 +262,52 @@ def test_hiagent_push_auto_open_opens_url(tmp_path, monkeypatch):
     )
     assert result.exit_code == 0, result.output
     assert opened == ["http://example.test/workspace/ws_1/agent/app_123"]
+
+
+def test_hiagent_push_mode_chatflow_calls_correct_actions(tmp_path, monkeypatch):
+    fake = _FakeClient()
+    monkeypatch.setattr("loom.cli.commands.hiagent_push.HiagentAPIClient.from_env", lambda: fake)
+    ir_file = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "hiagent",
+            "push",
+            str(ir_file),
+            "--binding",
+            str(_binding(tmp_path)),
+            "--name",
+            "Demo ChatFlow",
+            "--mode",
+            "chatflow",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    call_names = [c[0] for c in fake.calls]
+    assert call_names[:5] == [
+        "check",
+        "create",
+        "resolve_model",
+        "resolve_dataset",
+        "get_chatflow",
+    ]
+    assert "create_node" in call_names
+    assert call_names[-3:] == ["save_chatflow_graph", "save_chatflow", "publish"]
+    _, create_args = fake.calls[1]
+    assert create_args[1] == "ChatFlow"
+    graph_save_call = next(c for c in fake.calls if c[0] == "save_chatflow_graph")
+    _, (_, nodes, links) = graph_save_call
+    assert len(nodes) > 1
+    assert len(links) > 0
+    config_save_call = next(c for c in fake.calls if c[0] == "save_chatflow")
+    _, (_, chatflow_config) = config_save_call
+    assert chatflow_config["MetaType"] == "Workflow"
+    assert len(chatflow_config["Nodes"]) > 1
+    assert chatflow_config["WorkflowID"] == "flow_123"
+    publish_call = next(c for c in fake.calls if c[0] == "publish")
+    _, (_, app_config, publish_chatflow_config, agent_mode, _) = publish_call
+    assert app_config is None
+    assert publish_chatflow_config == chatflow_config
+    assert agent_mode == ""
+    assert "Saving chatflow config draft" in result.output
