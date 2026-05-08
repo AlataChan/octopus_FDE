@@ -27,10 +27,10 @@ def test_validate_fails_on_missing_rationale(tmp_path):
     assert "schema" in result.output
 
 
-def test_compile_to_hiagent_writes_zip(tmp_path):
-    """Hiagent target with valid --binding produces a zip file that contains index.yaml."""
+def test_compile_to_hiagent_writes_workflow_json(tmp_path):
+    """Hiagent target with valid --binding produces a .json workflow file."""
     src = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"
-    out = tmp_path / "out.zip"
+    out = tmp_path / "out.json"
     binding_path = tmp_path / "bind.yaml"
     binding_path.write_text(
         "customer: test\n"
@@ -47,19 +47,11 @@ def test_compile_to_hiagent_writes_zip(tmp_path):
     ])
     assert result.exit_code == 0, result.output
     assert out.exists() and out.stat().st_size > 0
-
-    import io
-    import zipfile
-
-    import yaml
-    with zipfile.ZipFile(io.BytesIO(out.read_bytes())) as zf:
-        names = zf.namelist()
-        # Hiagent workflow-import format: single yaml at zip root, no subdirs.
-        assert len(names) == 1, f"expected single entry, got {names}"
-        assert names[0].endswith(".yaml") and "/" not in names[0]
-        doc = yaml.safe_load(zf.read(names[0]))
+    # File is a Hiagent workflow-import JSON.
+    doc = json.loads(out.read_text())
     assert doc["MetaType"] == "Workflow"
     assert doc["DLVersion"] == "v2"
+    assert doc["WorkspaceID"] == "d31pcnoboot936af1tsg"
 
 
 def test_compile_hiagent_without_binding_fails(tmp_path):
