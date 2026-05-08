@@ -65,6 +65,22 @@ def test_agent_zip_has_no_workflow_entry_for_chat_mode(sample_bundle: HiagentBun
     assert not any(n.startswith("workflow/") for n in names)
 
 
+def test_agent_zip_contains_complete_gold_style_folder_skeleton(sample_bundle: HiagentBundle):
+    names = [i.filename for i in _zip_infos(sample_bundle)]
+    assert any(n.startswith("agent/") for n in names)
+    assert any(n.startswith("knowledge/") for n in names)
+    assert any(n.startswith("model/") for n in names)
+    assert any(n.startswith("asset/upload/full/") for n in names)
+    assert len(names) >= 5
+
+
+def test_binary_asset_entry_is_not_yaml_serialized(sample_bundle: HiagentBundle):
+    raw = sample_bundle.to_agent_bundle_zip_bytes()
+    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+        asset_name = next(n for n in zf.namelist() if n.startswith("asset/upload/full/"))
+        assert zf.read(asset_name) == b"\x00"
+
+
 def test_zip_metadata_matches_hiagent_export_conventions(sample_bundle: HiagentBundle):
     infos = _zip_infos(sample_bundle)
     for info in infos:

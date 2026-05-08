@@ -45,6 +45,24 @@ def test_bundle_has_index_and_single_agent_only(faq_ir: IRDocument, minimal_bind
     assert not any(p.startswith("workflow/") for p in bundle.files)
 
 
+def test_bundle_has_complete_gold_style_folder_skeleton(
+    faq_ir: IRDocument,
+    minimal_binding: HiagentBinding,
+):
+    bundle = compile_ir(faq_ir, minimal_binding)
+    assert any(p.startswith("agent/") for p in bundle.files)
+    assert any(p.startswith("knowledge/") for p in bundle.files)
+    assert any(p.startswith("model/") for p in bundle.files)
+    assert any(p.startswith("asset/upload/full/") for p in bundle.files)
+
+
+def test_asset_placeholder_is_binary(faq_ir: IRDocument, minimal_binding: HiagentBinding):
+    bundle = compile_ir(faq_ir, minimal_binding)
+    asset_paths = [p for p in bundle.files if p.startswith("asset/upload/full/")]
+    assert len(asset_paths) == 1
+    assert bundle.files[asset_paths[0]] == b"\x00"
+
+
 def test_bundle_index_has_required_fields(faq_ir: IRDocument, minimal_binding: HiagentBinding):
     index = compile_ir(faq_ir, minimal_binding).index
     assert index["DLVersion"] == "0.0.1"

@@ -57,7 +57,11 @@ def test_compile_to_hiagent_writes_agent_zip(tmp_path):
         # Agent bundle import expects root-relative index.yaml + agent/<n>.yaml.
         assert names[0] == "index.yaml", names
         assert any(n.startswith("agent/") for n in names), names
+        assert any(n.startswith("knowledge/") for n in names), names
+        assert any(n.startswith("model/") for n in names), names
+        assert any(n.startswith("asset/upload/full/") for n in names), names
         assert not any(n.startswith("workflow/") for n in names), names
+        assert len(names) >= 5
         idx = yaml.safe_load(zf.read("index.yaml"))
     assert idx["MainMeta"] == "Agent"
     assert idx["FromWorkspaceID"] == "d31pcnoboot936af1tsg"

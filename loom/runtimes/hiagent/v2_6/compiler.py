@@ -19,6 +19,12 @@ if TYPE_CHECKING:
     from loom.runtimes.hiagent.binding import HiagentBinding
 
 
+_ASSET_PLACEHOLDER_PATH = (
+    "asset/upload/full/00/00/"
+    "0000000000000000000000000000000000000000000000000000000000000000"
+)
+
+
 def compile_ir(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
     """Compile IR to a Hiagent v2.6 chat-mode Agent bundle.
 
@@ -46,6 +52,7 @@ def compile_ir(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
     }
     files.update(_build_knowledge_files(ir, binding))
     files.update(_build_model_files(ir, binding))
+    files[_ASSET_PLACEHOLDER_PATH] = b"\x00"
 
     return HiagentBundle(bundle_name=bundle_name, files=files)
 
@@ -326,6 +333,26 @@ def _build_knowledge_files(ir: IRDocument, binding: HiagentBinding) -> dict[str,
                 "XID": kb_id,
             },
         }
+    if not files:
+        files["knowledge/placeholder.yaml"] = {
+            "DLVersion": "v1.0.0",
+            "Desc": "",
+            "DisplayName": "placeholder-kb",
+            "LogoPath": "",
+            "MetaType": "kbs_dataset",
+            "UniqueName": "placeholder-kb",
+            "UpdatedAt": 0,
+            "VersionCode": "placeholder-kb",
+            "VersionName": "v1.0.0",
+            "data": {
+                "Description": None,
+                "DirectoryID": "default",
+                "Name": "placeholder-kb",
+                "SpaceType": 1,
+                "WorkspaceID": binding.workspace_id,
+                "XID": "placeholder-kb",
+            },
+        }
     return files
 
 
@@ -358,6 +385,27 @@ def _build_model_files(ir: IRDocument, binding: HiagentBinding) -> dict[str, Any
             "Type": "text-generation",
             "UniqueName": model_id,
             "UpdatedAt": now_ms,
+            "VersionCode": "",
+            "VersionName": "",
+        }
+    if not files:
+        files["model/placeholder.yaml"] = {
+            "DLVersion": "0.0.1",
+            "DeletedAt": None,
+            "Desc": "",
+            "DisplayName": "placeholder-model",
+            "Implement": "custom",
+            "IsDefault": False,
+            "IsPublic": False,
+            "Key": "placeholder-model",
+            "LogoPath": "",
+            "MetaType": "Model",
+            "Source": "custom",
+            "SourceTypes": ["Agent"],
+            "TenantId": "placeholder",
+            "Type": "text-generation",
+            "UniqueName": "placeholder-model",
+            "UpdatedAt": 0,
             "VersionCode": "",
             "VersionName": "",
         }

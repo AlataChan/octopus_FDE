@@ -2,10 +2,10 @@
 
 Hiagent Agent import accepts a ZIP whose entries are root-relative:
 `index.yaml`, `agent/<name>.yaml`, and optional `model/` / `knowledge/`
-sidecar YAML files. The import parser rejects bundles nested under a
-top-level directory with a misleading "No signature found after EOCD
-record" error, so ZIP serialization intentionally mirrors the working
-customer exports' entry layout and metadata.
+sidecar YAML files plus `asset/upload/full/...` binary asset files. The
+import parser rejects incomplete or nested bundles with a misleading
+"No signature found after EOCD record" error, so ZIP serialization
+intentionally mirrors the working customer exports' entry layout and metadata.
 """
 from __future__ import annotations
 
@@ -62,13 +62,14 @@ class HiagentBundle:
 
             index.yaml
             agent/<name>.yaml
-            model/<name>.yaml       # optional, when binding has model IDs
-            knowledge/<name>.yaml   # optional, when binding has dataset IDs
+            knowledge/<name-or-placeholder>.yaml
+            model/<name-or-placeholder>.yaml
+            asset/upload/full/<hash>/<hash>/<hash>
 
-        Each entry's content is dumped as YAML. The ZIP is written through a
+        Mapping/list/scalar entries are dumped as YAML. Byte entries are
+        written verbatim for binary assets. The ZIP is written through a
         non-seekable buffer so Python emits data descriptors (flag bit 0x8),
-        and every entry carries Info-ZIP's UT extended timestamp extra field,
-        matching Hiagent's working exports more closely.
+        and every entry carries Info-ZIP's UT extended timestamp extra field.
         """
         import io
         import struct
@@ -93,19 +94,22 @@ class HiagentBundle:
         ut_extra = struct.pack("<HHB", 0x5455, 5, 0x01) + struct.pack("<I", mtime_int)
         with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for rel_path, content in self.files.items():
-                yaml_text = yaml.safe_dump(
-                    content,
-                    sort_keys=False,
-                    allow_unicode=True,
-                    default_flow_style=False,
-                )
                 info = zipfile.ZipInfo(rel_path, date_time=timestamp)
                 info.compress_type = zipfile.ZIP_DEFLATED
                 info.create_system = 0
                 info.create_version = 20
                 info.extract_version = 20
                 info.extra = ut_extra
-                zf.writestr(info, yaml_text.encode("utf-8"))
+                if isinstance(content, bytes):
+                    zf.writestr(info, content)
+                else:
+                    yaml_text = yaml.safe_dump(
+                        content,
+                        sort_keys=False,
+                        allow_unicode=True,
+                        default_flow_style=False,
+                    )
+                    zf.writestr(info, yaml_text.encode("utf-8"))
         return _zero_external_attrs(buf.getvalue())
 
 
