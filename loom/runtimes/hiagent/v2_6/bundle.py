@@ -67,9 +67,11 @@ class HiagentBundle:
 
         Each entry's content is dumped as YAML. The ZIP is written through a
         non-seekable buffer so Python emits data descriptors (flag bit 0x8),
+        and every entry carries Info-ZIP's UT extended timestamp extra field,
         matching Hiagent's working exports more closely.
         """
         import io
+        import struct
         import time
         import zipfile
 
@@ -83,7 +85,12 @@ class HiagentBundle:
                 raise io.UnsupportedOperation("non-seekable")
 
         buf = _NonSeekableBytesIO()
-        timestamp = time.localtime()[:6]
+        mtime_int = int(time.time())
+        # ZIP's DOS timestamp stores seconds at 2-second granularity. Keep
+        # the UT extra and date_time exactly consistent by using an even mtime.
+        mtime_int -= mtime_int % 2
+        timestamp = time.localtime(mtime_int)[:6]
+        ut_extra = struct.pack("<HHB", 0x5455, 5, 0x01) + struct.pack("<I", mtime_int)
         with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for rel_path, content in self.files.items():
                 yaml_text = yaml.safe_dump(
@@ -95,6 +102,9 @@ class HiagentBundle:
                 info = zipfile.ZipInfo(rel_path, date_time=timestamp)
                 info.compress_type = zipfile.ZIP_DEFLATED
                 info.create_system = 0
+                info.create_version = 20
+                info.extract_version = 20
+                info.extra = ut_extra
                 zf.writestr(info, yaml_text.encode("utf-8"))
         return _zero_external_attrs(buf.getvalue())
 

@@ -1,5 +1,7 @@
 import io
 import json
+import struct
+import time
 import zipfile
 from pathlib import Path
 
@@ -37,6 +39,14 @@ def _zip_yaml(bundle: HiagentBundle, name: str) -> dict:
         return yaml.safe_load(zf.read(name))
 
 
+def _local_extra(raw: bytes, info: zipfile.ZipInfo) -> bytes:
+    offset = info.header_offset
+    assert raw[offset : offset + 4] == b"PK\x03\x04"
+    name_len, extra_len = struct.unpack_from("<HH", raw, offset + 26)
+    start = offset + 30 + name_len
+    return raw[start : start + extra_len]
+
+
 def test_agent_zip_entries_are_root_relative_with_index_first(sample_bundle: HiagentBundle):
     names = [i.filename for i in _zip_infos(sample_bundle)]
     assert names[0] == "index.yaml"
@@ -64,6 +74,34 @@ def test_zip_metadata_matches_hiagent_export_conventions(sample_bundle: HiagentB
         assert info.extract_version == 20
         assert info.external_attr == 0
         assert info.flag_bits & 0x8
+
+
+def test_zip_entries_have_info_zip_ut_extra_in_central_and_local_headers(
+    sample_bundle: HiagentBundle,
+):
+    raw = sample_bundle.to_agent_bundle_zip_bytes()
+    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+        infos = zf.infolist()
+    for info in infos:
+        assert info.extra[:5] == b"UT\x05\x00\x01"
+        assert len(info.extra) == 9
+        assert _local_extra(raw, info) == info.extra
+        mtime = struct.unpack("<I", info.extra[5:9])[0]
+        assert info.date_time == time.localtime(mtime)[:6]
+
+
+def test_ascii_and_non_ascii_filename_flags_match_hiagent_exports():
+    bundle = HiagentBundle(
+        bundle_name="bn",
+        files={
+            "index.yaml": {"DLVersion": "0.0.1"},
+            "agent/用户维修方案.yaml": {"MetaType": "Agent"},
+        },
+    )
+    with zipfile.ZipFile(io.BytesIO(bundle.to_agent_bundle_zip_bytes())) as zf:
+        infos = {info.filename: info for info in zf.infolist()}
+    assert infos["index.yaml"].flag_bits == 0x0008
+    assert infos["agent/用户维修方案.yaml"].flag_bits == 0x0808
 
 
 def test_index_yaml_has_required_agent_fields_at_zip_root(sample_bundle: HiagentBundle):
