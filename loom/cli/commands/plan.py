@@ -22,5 +22,5 @@ def plan(intent_file: Path, out_path: Path) -> None:
     if res.ir is None:
         click.echo("Planner returned ok=True without IR", err=True)
         sys.exit(2)
-    out_path.write_text(json.dumps(res.ir.model_dump(by_alias=True), indent=2))
+    out_path.write_text(json.dumps(res.ir.model_dump(by_alias=True, exclude_none=True), indent=2))
     click.echo(f"OK in {res.attempts} attempts; ${res.cost_usd:.4f}; {res.latency_s:.1f}s")
