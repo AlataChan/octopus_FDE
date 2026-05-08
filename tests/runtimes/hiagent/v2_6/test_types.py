@@ -7,16 +7,16 @@ def test_string_zero():
     assert to_hiagent_type_code("string") == 0
 
 
-def test_number_two():
-    assert to_hiagent_type_code("number") == 2
+def test_number_three():
+    assert to_hiagent_type_code("number") == 3
 
 
-def test_boolean_three():
-    assert to_hiagent_type_code("boolean") == 3
+def test_boolean_two():
+    assert to_hiagent_type_code("boolean") == 2
 
 
-def test_json_four():
-    assert to_hiagent_type_code("json") == 4
+def test_json_nine():
+    assert to_hiagent_type_code("json") == 9
 
 
 def test_array_five():

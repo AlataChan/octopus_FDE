@@ -132,7 +132,7 @@ def _llm(
         "ModelID": model_id,
         "ModelName": n.model,
         "SystemPrompt": n.system_prompt or "",
-        "Prompt": n.prompt,
+        "Prompt": _llm_prompt(n.prompt, n.output_schema),
         "Temperature": n.temperature if n.temperature is not None else 0.7,
         "MaxTokens": n.max_tokens or 4096,
         "OutputSchema": _llm_output_schema(n.output_schema),
@@ -212,7 +212,7 @@ def _code(
     language_code = {"python": 1, "javascript": 2}.get(n.language, 1)
     out = _base(n, "Code", node_code_map, positions)
     out["Configs"]["Code"] = {
-        "Code": n.source,
+        "Code": _code_source(n),
         "Language": language_code,
         "OutputSchema": _json_schema_to_hiagent_schema_minimal(n.output_schema),
         "Retries": n.retry.max_attempts if n.retry else 0,
@@ -411,17 +411,60 @@ def _json_type_to_hiagent_type(schema: dict[str, Any]) -> int:
     typ = schema.get("type")
     if typ == "integer":
         return 1
-    if typ == "number":
-        return 2
     if typ == "boolean":
+        return 2
+    if typ == "number":
         return 3
     if typ == "object":
-        return 4
+        return 9
     if typ == "array":
+        items = schema.get("items")
+        if isinstance(items, dict) and items.get("type") in {"integer", "number", "boolean"}:
+            return 0
         return 5
     if typ == "null":
         return 6
     return 0
+
+
+def _llm_prompt(prompt: str, schema: dict[str, Any] | None) -> str:
+    stringified_arrays = _stringified_array_fields(schema)
+    if not stringified_arrays:
+        return prompt
+    fields = ", ".join(sorted(stringified_arrays))
+    return (
+        prompt
+        + "\n\nHiagent output contract: these fields must be strings, not JSON arrays, "
+        + f"because Hiagent v2.6 validates generic LLM arrays as Array<String>: {fields}. "
+        + "Use a comma-separated string such as \"1,3,0\" for numeric index lists."
+    )
+
+
+def _stringified_array_fields(schema: dict[str, Any] | None) -> list[str]:
+    if not schema:
+        return []
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return []
+    out: list[str] = []
+    for name, prop in properties.items():
+        if not isinstance(name, str) or not isinstance(prop, dict):
+            continue
+        if prop.get("type") != "array":
+            continue
+        items = prop.get("items")
+        if isinstance(items, dict) and items.get("type") in {"integer", "number", "boolean"}:
+            out.append(name)
+    return out
+
+
+def _code_source(n: CodeNode) -> str:
+    if n.language != "python" or "def handler(" in n.source:
+        return n.source
+    lines = n.source.strip().splitlines()
+    if not lines:
+        return "def handler(params):\n    return {}"
+    return "def handler(params):\n" + "\n".join(f"    {line}" if line else "" for line in lines)
 
 
 def _first_query_variable(value: str, node_code_map: dict[str, str]) -> dict[str, Any] | None:

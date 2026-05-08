@@ -180,6 +180,7 @@ def _materialize_chatflow_graph(
     graph = client.get_chatflow(app_id, with_node=True)
     default_nodes = _as_node_list(graph.get("Nodes", []))
     reusable = _default_node_pool(default_nodes)
+    dataset_infos = _dataset_infos_by_id(client)
     server_by_generated_code: dict[str, dict[str, object]] = {}
     server_nodes: list[dict[str, object]] = []
     first_end_node: dict[str, object] | None = None
@@ -205,7 +206,7 @@ def _materialize_chatflow_graph(
                 }
             if api_type == "End":
                 first_end_node = server_node
-        _patch_chatflow_node_config(server_node, node)
+        _patch_chatflow_node_config(server_node, node, dataset_infos=dataset_infos)
         server_by_generated_code[str(node["Code"])] = server_node
         if not any(existing.get("Code") == server_node.get("Code") for existing in server_nodes):
             server_nodes.append(server_node)
@@ -333,6 +334,8 @@ def _replace_sys_refs(value: object, start_code: str) -> None:
 def _patch_chatflow_node_config(
     server_node: dict[str, object],
     generated_node: dict[str, object],
+    *,
+    dataset_infos: dict[str, dict[str, object]],
 ) -> None:
     configs = generated_node.get("Configs")
     if not isinstance(configs, dict):
@@ -343,16 +346,42 @@ def _patch_chatflow_node_config(
     elif generated_type in {"Knowledge", "KnowledgeBase"}:
         knowledge = configs.get("Knowledge") or configs.get("KnowledgeBase")
         if isinstance(knowledge, dict):
+            knowledge_ids = [
+                str(value)
+                for value in knowledge.get("KnowledgeIDs", [])
+                if isinstance(value, str) and value
+            ]
             _set_node_config(
                 server_node,
                 "KnowledgeNode",
                 {
                     "QueryVariable": knowledge.get("QueryVariable"),
-                    "Knowledges": knowledge.get("KnowledgeIDs", []),
+                    "Knowledges": knowledge_ids,
+                    "DatasetParamsVariable": [
+                        {
+                            "Name": f"dataset_params[{index}].dataset_id",
+                            "RefType": "value",
+                            "JsonValue": json.dumps(dataset_id, ensure_ascii=False),
+                        }
+                        for index, dataset_id in enumerate(knowledge_ids)
+                    ],
+                    "DatabaseInfos": [
+                        dataset_infos.get(
+                            dataset_id,
+                            {"ID": dataset_id, "Name": dataset_id, "Description": "", "Icon": ""},
+                        )
+                        for dataset_id in knowledge_ids
+                    ],
+                    "KnowledgeRange": knowledge_ids,
+                    "ConfigVersion": 2,
+                    "ContextComponents": ["id", "video_metadata", "video_frames", "content"],
                     "TopK": knowledge.get("TopK", 3),
                     "ScoreThreshold": max(float(knowledge.get("Similarity") or 0.5), 0.01),
                     "RetrievalSearchMethod": 0,
                     "Expand": False,
+                    "ExpandNum": None,
+                    "RerankID": knowledge.get("RerankID") or None,
+                    "OutputSchema": knowledge.get("OutputSchema", []),
                 },
             )
     elif generated_type == "LLM":
@@ -413,6 +442,25 @@ def _set_node_config(
 ) -> None:
     if isinstance(value, dict):
         server_node["NodeConfig"] = {key: value}
+
+
+def _dataset_infos_by_id(client: HiagentAPIClient) -> dict[str, dict[str, object]]:
+    try:
+        datasets = client.list_workspace_datasets()
+    except HiagentAPIError:
+        return {}
+    out: dict[str, dict[str, object]] = {}
+    for item in datasets:
+        raw_id = item.get("Id") or item.get("ID")
+        if not isinstance(raw_id, str) or not raw_id:
+            continue
+        out[raw_id] = {
+            "ID": raw_id,
+            "Name": str(item.get("Name") or raw_id),
+            "Description": str(item.get("Description") or ""),
+            "Icon": str(item.get("Icon") or ""),
+        }
+    return out
 
 
 def _default_start_field(path: object, name: object = "") -> str:

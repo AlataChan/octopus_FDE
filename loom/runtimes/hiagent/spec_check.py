@@ -108,6 +108,18 @@ def _check_materialized_knowledge(config: Mapping[str, Any]) -> None:
     knowledges = _list(config.get("Knowledges"), "KnowledgeNode.Knowledges")
     if not knowledges:
         raise HiagentSpecError("KnowledgeNode.Knowledges must be non-empty before save")
+    dataset_params = _list(
+        config.get("DatasetParamsVariable"),
+        "KnowledgeNode.DatasetParamsVariable",
+    )
+    if len(dataset_params) != len(knowledges):
+        raise HiagentSpecError("KnowledgeNode.DatasetParamsVariable must match Knowledges")
+    knowledge_range = _list(config.get("KnowledgeRange"), "KnowledgeNode.KnowledgeRange")
+    if knowledge_range != knowledges:
+        raise HiagentSpecError("KnowledgeNode.KnowledgeRange must match Knowledges")
+    database_infos = _list(config.get("DatabaseInfos"), "KnowledgeNode.DatabaseInfos")
+    if len(database_infos) != len(knowledges):
+        raise HiagentSpecError("KnowledgeNode.DatabaseInfos must match Knowledges")
     score = float(config.get("ScoreThreshold") or 0)
     if score <= 0:
         raise HiagentSpecError("KnowledgeNode.ScoreThreshold must be > 0")

@@ -78,16 +78,27 @@ def test_llm_emits_llm_node(minimal_binding: HiagentBinding):
         "system_prompt": "You answer briefly.",
         "prompt": "${input.query}",
         "temperature": 0,
-        "output_schema": {"type": "object", "properties": {"answer": {"type": "string"}}},
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "answer": {"type": "string"},
+                "confidence": {"type": "number"},
+                "top_indices": {"type": "array", "items": {"type": "integer"}},
+            },
+        },
     }])
     node = _emit_one(ir, minimal_binding)
     cfg = node["Configs"]["LLM"]
     assert node["Type"] == "LLM"
     assert cfg["SystemPrompt"] == "You answer briefly."
-    assert cfg["Prompt"] == "${input.query}"
+    assert cfg["Prompt"].startswith("${input.query}")
+    assert "top_indices" in cfg["Prompt"]
+    assert "not JSON arrays" in cfg["Prompt"]
     assert cfg["ModelID"] == ""
     assert cfg["OutputSchema"][0] == {"Name": "raw_output", "Required": True, "Type": 0}
     assert {"Name": "answer", "Required": False, "Type": 0} in cfg["OutputSchema"]
+    assert {"Name": "confidence", "Required": False, "Type": 3} in cfg["OutputSchema"]
+    assert {"Name": "top_indices", "Required": False, "Type": 0} in cfg["OutputSchema"]
 
 
 def test_knowledge_node_uses_api_typename(minimal_binding: HiagentBinding):
@@ -151,7 +162,7 @@ def test_code_emits_code(minimal_binding: HiagentBinding):
     # Hiagent's Go backend expects Language as integer enum (1=python, 2=js).
     assert node["Configs"]["Code"]["Language"] == 1
     # Hiagent uses 'Code' field name, not 'Source'.
-    assert node["Configs"]["Code"]["Code"] == "return {'answer': 'ok'}"
+    assert node["Configs"]["Code"]["Code"] == "def handler(params):\n    return {'answer': 'ok'}"
     assert "Retries" in node["Configs"]["Code"]
     assert "TimeoutSeconds" in node["Configs"]["Code"]
 

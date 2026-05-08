@@ -107,6 +107,17 @@ class _FakeClient:
         self.calls.append(("resolve_dataset", None))
         return "dataset_default"
 
+    def list_workspace_datasets(self) -> list[dict]:
+        self.calls.append(("list_datasets", None))
+        return [
+            {
+                "Id": "dataset_default",
+                "Name": "Default KB",
+                "Description": "Default knowledge base",
+                "Icon": "upload/full/default/icon",
+            }
+        ]
+
     def app_url(self, app_id: str) -> str:
         return f"http://example.test/workspace/ws_1/agent/{app_id}"
 
@@ -301,12 +312,13 @@ def test_hiagent_push_mode_chatflow_calls_correct_actions(tmp_path, monkeypatch)
     )
     assert result.exit_code == 0, result.output
     call_names = [c[0] for c in fake.calls]
-    assert call_names[:5] == [
+    assert call_names[:6] == [
         "check",
         "create",
         "resolve_model",
         "resolve_dataset",
         "get_chatflow",
+        "list_datasets",
     ]
     assert "create_node" in call_names
     assert call_names[-3:] == ["save_chatflow_graph", "save_chatflow", "publish"]
@@ -317,6 +329,17 @@ def test_hiagent_push_mode_chatflow_calls_correct_actions(tmp_path, monkeypatch)
     assert len(nodes) > 1
     assert len(links) > 0
     assert any(n["Type"] == "Knowledge" for n in nodes)
+    knowledge_node = next(n for n in nodes if n["Type"] == "Knowledge")
+    knowledge_config = knowledge_node["NodeConfig"]["KnowledgeNode"]
+    assert knowledge_config["DatasetParamsVariable"] == [
+        {
+            "Name": "dataset_params[0].dataset_id",
+            "RefType": "value",
+            "JsonValue": '"dataset_default"',
+        }
+    ]
+    assert knowledge_config["KnowledgeRange"] == ["dataset_default"]
+    assert knowledge_config["DatabaseInfos"][0]["Name"] == "Default KB"
     start_nodes = [n for n in nodes if n["Type"] == "Start"]
     assert len(start_nodes) == 1
     assert start_nodes[0]["NodeConfig"] == DEFAULT_START_NODE_CONFIG

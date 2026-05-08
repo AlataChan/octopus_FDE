@@ -75,6 +75,25 @@ def test_spec_check_accepts_materialized_valid_shape():
     check_materialized_chatflow_nodes([
         {"Type": "Start", "Code": "start", "NodeConfig": {"StartNode": _start_config()}},
         {
+            "Type": "Knowledge",
+            "Code": "knowledge",
+            "NodeConfig": {
+                "KnowledgeNode": {
+                    "Knowledges": ["dataset_default"],
+                    "DatasetParamsVariable": [
+                        {
+                            "Name": "dataset_params[0].dataset_id",
+                            "RefType": "value",
+                            "JsonValue": '"dataset_default"',
+                        }
+                    ],
+                    "KnowledgeRange": ["dataset_default"],
+                    "DatabaseInfos": [{"ID": "dataset_default", "Name": "Default KB"}],
+                    "ScoreThreshold": 0.5,
+                }
+            },
+        },
+        {
             "Type": "LLM",
             "Code": "llm",
             "NodeConfig": {

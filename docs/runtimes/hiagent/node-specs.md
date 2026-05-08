@@ -37,6 +37,10 @@ Primary sources:
 - Required conceptual fields: model, system prompt, user prompt.
 - `OutputSchema` must always include `raw_output: String` by default.
 - Additional output variables may follow `raw_output` when the IR asks for structured outputs.
+- Numeric/boolean array outputs are not safe as native LLM `Array`: live
+  validation treats generic LLM arrays as `Array<String>`. Emit those fields
+  as `String` and add a prompt contract to serialize the list as text, e.g.
+  `top_indices: "1,3,0"`. `[LIVE]`
 - Output format can be JSON, Text, Markdown, or Custom in the UI. JSON is the compiler default.
 - Text/Markdown output formats should not add custom variables.
 - `MaxTokens` is capped at 4096 for the API path. `[LIVE]`
@@ -48,8 +52,10 @@ Primary sources:
 - Handbook languages: JavaScript / Python.
 - Current live API path accepts the numeric language enum used by server samples: `1=python`, `2=javascript`. `[LIVE]`
 - Required field is code body in `Code`.
+- Python code must define `handler(params)` and return a dict. Bare top-level `return {...}` fails at runtime. `[LIVE]`
 - Outputs are declared in `OutputSchema`.
 - Supported output value types map to String, Integer, Number, Object, Boolean, Array.
+- Live type codes observed in runtime validation and customer samples: `0=String`, `1=Integer`, `2=Boolean`, `3=Number`, `5=Array`, `9=Object`. `[LIVE]`
 - Complex parameters should not exceed five nested levels.
 - Timeout range is 1-180 seconds; default 120.
 
@@ -58,6 +64,7 @@ Primary sources:
 - API node type is `Knowledge`, not `KnowledgeBase`. `[LIVE]`
 - Node config key after materialization is `KnowledgeNode`. `[LIVE]`
 - `KnowledgeIDs` / `Knowledges` must be non-empty when saving to the API. The CLI auto-resolves a workspace dataset before push. `[LIVE]`
+- `DatasetParamsVariable`, `KnowledgeRange`, and `DatabaseInfos` must be emitted with the selected dataset IDs; imported/live server graphs include these and runtime uses them for KB execution. `[LIVE]`
 - `ScoreThreshold` must be greater than 0. `[LIVE]`
 - `TopK` range is 1-10 in the UI; compiler should clamp or source valid IR.
 - Output is a recalled segment list.

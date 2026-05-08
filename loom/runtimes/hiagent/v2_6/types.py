@@ -5,9 +5,9 @@ revised in-place at first real customer import.
 
 Table:
    IR `string`                      -> 0
-   IR `number`                      -> 2 [Hiagent 1 reserved for integer]
-   IR `boolean`                     -> 3
-   IR `object` / `json`             -> 4
+   IR `number`                      -> 3
+   IR `boolean`                     -> 2
+   IR `object` / `json`             -> 9
    IR `string[]` / `number[]` / `json[]` -> 5
    IR `null`                        -> 6
    IR `any` / `chunks` / `file`     -> 0  [string fallback]
@@ -21,10 +21,10 @@ class UnmappableTypeError(ValueError):
 
 _MAP = {
     "string": 0,
-    "number": 2,
-    "boolean": 3,
+    "number": 3,
+    "boolean": 2,
     "null": 6,
-    "json": 4,
+    "json": 9,
     "string[]": 5,
     "number[]": 5,
     "json[]": 5,
