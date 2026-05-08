@@ -1,10 +1,8 @@
-"""IR v0.3 -> Hiagent v2.6 Agent bundle compiler.
+"""IR v0.3 -> Hiagent v2.6 Agent config compiler.
 
-The currently validated Hiagent import path is chat-mode Agent ZIP import:
-root `index.yaml` + `agent/<name>.yaml` and optional model/knowledge sidecars.
-Workflow import remains useful as a reference format, but this compiler now
-emits a single-agent chat app because that is the confirmed customer-importable
-shape.
+The validated production path is TOP-signed API push. `compile_ir` returns an
+in-memory agent bundle for inspection only; API payload helpers below are the
+runtime path used by `loom hiagent push`.
 """
 from __future__ import annotations
 
@@ -18,11 +16,6 @@ if TYPE_CHECKING:
     from loom.ir.models import IRDocument
     from loom.runtimes.hiagent.binding import HiagentBinding
 
-
-_ASSET_PLACEHOLDER_PATH = (
-    "asset/upload/full/00/00/"
-    "0000000000000000000000000000000000000000000000000000000000000000"
-)
 
 _APP_CONFIG_DRAFT_KEYS = {
     "A2aAgentIDs",
@@ -56,10 +49,11 @@ _APP_CONFIG_REQUEST_KEYS = _APP_CONFIG_DRAFT_KEYS | {
 
 
 def compile_ir(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
-    """Compile IR to a Hiagent v2.6 chat-mode Agent bundle.
+    """Compile IR to an in-memory Hiagent v2.6 chat-mode Agent bundle.
 
-    The binding provides workspace_id [required] and optional KB/Model
-    id mappings [missing entries become empty strings in the YAML].
+    This is for inspection only. Production publish uses
+    `build_agent_config_draft` + `build_agent_config_request` through the TOP
+    API client.
     """
     agent_id = gen_id()
     bundle_name = _bundle_dirname(ir)
@@ -80,9 +74,6 @@ def compile_ir(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
         "index.yaml": index_yaml,
         f"agent/{agent_filename}": agent_yaml,
     }
-    files.update(_build_knowledge_files(ir, binding))
-    files.update(_build_model_files(ir, binding))
-    files[_ASSET_PLACEHOLDER_PATH] = b"\x00"
 
     return HiagentBundle(bundle_name=bundle_name, files=files)
 
@@ -367,151 +358,8 @@ def _build_model_map(ir: IRDocument, binding: HiagentBinding) -> dict[str, dict[
     return out
 
 
-def _build_knowledge_files(ir: IRDocument, binding: HiagentBinding) -> dict[str, Any]:
-    files: dict[str, Any] = {}
-    now_ms = int(time.time() * 1000)
-    for ds in ir.registry_ref.datasets:
-        kb_id = binding.resolve_dataset(ds)
-        if not kb_id:
-            continue
-        files[f"knowledge/{ds}.yaml"] = {
-            "DLVersion": "v1.0.0",
-            "Desc": "",
-            "DisplayName": ds,
-            "LogoPath": "",
-            "MetaType": "kbs_dataset",
-            "UniqueName": kb_id,
-            "UpdatedAt": now_ms,
-            "VersionCode": kb_id,
-            "VersionName": "v1.0.0",
-            "data": {
-                "Name": ds,
-                "WorkspaceID": binding.workspace_id,
-                "XID": kb_id,
-            },
-        }
-    if not files:
-        # Hiagent's parser appears to validate UniqueName/VersionCode against
-        # the 20-char base32 ID pattern. "placeholder-kb" violates that and
-        # may trigger the misleading EOCD error. Use real-shape IDs + a
-        # plausible KB display name so import passes structural validation;
-        # customer rebinds in UI after import.
-        kb_id = gen_id()
-        kb_now_ms = int(time.time() * 1000)
-        files["knowledge/default-kb.yaml"] = {
-            "DLVersion": "v1.0.0",
-            "Desc": "",
-            "DisplayName": "default-kb",
-            "LogoPath": "",
-            "MetaType": "kbs_dataset",
-            "UniqueName": kb_id,
-            "UpdatedAt": kb_now_ms,
-            "VersionCode": kb_id,
-            "VersionName": "v1.0.0",
-            "data": {
-                "APISourceID": None,
-                "AsrModelID": None,
-                "CustomQueryInstruction": None,
-                "Description": None,
-                "DirectoryID": "default",
-                "DocumentParse": None,
-                "EmbeddingModelID": None,
-                "EmbeddingModelProvider": "",
-                "EnableExternalElasticsearch": False,
-                "EnableLabelFilter": False,
-                "EnablePermission": False,
-                "EnableVisionEmbedding": False,
-                "ExternalElasticsearchConfig": None,
-                "Icon": "",
-                "IconSha256": "",
-                "IndexingTechnique": 0,
-                "Labels": [],
-                "LlmModelID": None,
-                "Name": "default-kb",
-                "RequestMappings": None,
-                "ResponseMappings": None,
-                "RetrievalRerankModelID": None,
-                "RetrievalSearchMethod": 0,
-                "SpaceType": 1,
-                "TenantID": gen_id(),
-                "WorkspaceID": binding.workspace_id,
-                "XID": kb_id,
-            },
-        }
-    return files
-
-
-def _build_model_files(ir: IRDocument, binding: HiagentBinding) -> dict[str, Any]:
-    files: dict[str, Any] = {}
-    now_ms = int(time.time() * 1000)
-    seen: set[str] = set()
-    for n in ir.nodes:
-        model_handle = getattr(n, "model", None)
-        if not model_handle or model_handle in seen:
-            continue
-        seen.add(model_handle)
-        model_id = binding.resolve_model(model_handle)
-        if not model_id:
-            continue
-        files[f"model/{model_handle}.yaml"] = {
-            "DLVersion": "0.0.1",
-            "DeletedAt": None,
-            "Desc": "",
-            "DisplayName": model_handle,
-            "Implement": "",
-            "IsDefault": True,
-            "IsPublic": True,
-            "Key": model_handle,
-            "LogoPath": "",
-            "MetaType": "Model",
-            "Source": "custom",
-            "SourceTypes": ["Agent"],
-            "TenantId": "",
-            "Type": "text-generation",
-            "UniqueName": model_id,
-            "UpdatedAt": now_ms,
-            "VersionCode": "",
-            "VersionName": "",
-        }
-    if not files:
-        # As with knowledge placeholder: use real-shape 20-char base32 IDs +
-        # a recognizable Hiagent model name so the parser's name+ID validation
-        # passes. "Doubao-Seed-1-6" is a known Hiagent model the customer
-        # workspace likely has; even if not, the structural ID format passes
-        # validation and the customer can rebind in the UI after import.
-        model_id = gen_id()
-        model_now_ms = int(time.time() * 1000)
-        files["model/Doubao-Seed-1-6.yaml"] = {
-            "DLVersion": "0.0.1",
-            "DeletedAt": None,
-            "Desc": "",
-            "DisplayName": "Doubao-Seed-1-6",
-            "Implement": "volcengine",
-            "IsDefault": True,
-            "IsPublic": True,
-            "Key": "doubao-seed-1.6-251015",
-            "LogoPath": "",
-            "MetaType": "Model",
-            "Source": "custom",
-            "SourceTypes": ["Agent"],
-            "TenantId": gen_id(),
-            "Type": "text-generation",
-            "UniqueName": model_id,
-            "UpdatedAt": model_now_ms,
-            "VersionCode": "",
-            "VersionName": "",
-        }
-    return files
-
-
 def _bundle_dirname(ir: IRDocument) -> str:
-    """Generate bundle dir name like '<workflow-name>_v1.0.0_<timestamp>'.
-
-    Spaces in IR metadata.name are replaced with underscores; customer
-    Hiagent samples never use spaces in directory or filenames, and
-    Hiagent's importer can fail on space-containing filenames with a
-    misleading 'No signature found after EOCD record' error.
-    """
+    """Generate an inspection bundle name like '<agent-name>_v1.0.0_<timestamp>'."""
     ts = time.strftime("%Y%m%d%H%M%S")
     safe_name = ir.metadata.name.replace(" ", "_")
     return f"{safe_name}_v1.0.0_{ts}"

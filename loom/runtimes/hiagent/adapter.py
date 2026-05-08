@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any
 
 from loom.runtimes.hiagent.binding import HiagentBinding, HiagentBindingError
 from loom.runtimes.hiagent.v2_6 import HIAGENT_VERSION
-from loom.runtimes.hiagent.v2_6.bundle import HiagentBundle
 from loom.runtimes.hiagent.v2_6.compiler import compile_ir as compile_to_bundle
 
 if TYPE_CHECKING:
@@ -17,6 +16,7 @@ if TYPE_CHECKING:
         PushContext,
         UnrecognizedConstruct,
     )
+    from loom.runtimes.hiagent.v2_6.bundle import HiagentBundle
 
 
 class HiagentAdapter:
@@ -43,31 +43,21 @@ class HiagentAdapter:
             "Hiagent reverse compiler is first-customer-deferred (MVP scope)"
         )
 
-    def canonical_ast_hash(self, dsl: Any) -> str:
-        import hashlib
+    def canonical_ast_hash(self, _dsl: Any) -> str:
+        raise NotImplementedError(
+            "Hiagent canonical AST hashing for API-pushed agents is deferred "
+            "until ChatFlow adapter work"
+        )
 
-        if isinstance(dsl, HiagentBundle):
-            payload = dsl.to_agent_bundle_zip_bytes()
-        elif isinstance(dsl, bytes):
-            payload = dsl
-        else:
-            raise TypeError("canonical_ast_hash needs HiagentBundle or bytes")
-        return hashlib.sha256(payload).hexdigest()
+    def serialize_dsl(self, _dsl: Any) -> bytes:
+        """External ZIP serialization was retired.
 
-    def serialize_dsl(self, dsl: Any) -> bytes:
-        """Serialize as Hiagent Agent-import bundle ZIP bytes.
-
-        Per user direction 2026-05-08, primary import path is Agent Import
-        (zip with multi-file bundle), not Workflow Import (single JSON).
-        Caller writes the result to a .zip file.
+        Hiagent self-hosted accepts server-created app configs through the TOP
+        API. Sub-task D will decide whether the adapter grows a ChatFlow export
+        serializer; callers should use `loom hiagent push` for publishing.
         """
-        if isinstance(dsl, HiagentBundle):
-            return dsl.to_agent_bundle_zip_bytes()
-        if isinstance(dsl, bytes):
-            return dsl
-        raise TypeError(
-            "HiagentAdapter.serialize_dsl expected HiagentBundle or bytes, "
-            f"got {type(dsl).__name__}"
+        raise NotImplementedError(
+            "Hiagent external ZIP serialization is retired; use loom hiagent push"
         )
 
     def parse_dsl(self, raw: str | bytes) -> Any:

@@ -27,10 +27,10 @@ def test_validate_fails_on_missing_rationale(tmp_path):
     assert "schema" in result.output
 
 
-def test_compile_to_hiagent_writes_agent_zip(tmp_path):
-    """Hiagent target with valid --binding produces a .zip agent bundle."""
+def test_compile_to_hiagent_writes_inspection_yaml(tmp_path):
+    """Hiagent compile writes an inspection YAML; API push is the publish path."""
     src = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"
-    out = tmp_path / "out.zip"
+    out = tmp_path / "out.hiagent.yaml"
     binding_path = tmp_path / "bind.yaml"
     binding_path.write_text(
         "customer: test\n"
@@ -39,46 +39,34 @@ def test_compile_to_hiagent_writes_agent_zip(tmp_path):
         "workspace_id: d31pcnoboot936af1tsg\n"
     )
     runner = CliRunner()
-    result = runner.invoke(cli, [
-        "compile", str(src),
-        "--target", "hiagent",
-        "--binding", str(binding_path),
-        "--out", str(out),
-    ])
+    result = runner.invoke(
+        cli,
+        [
+            "compile",
+            str(src),
+            "--target",
+            "hiagent",
+            "--binding",
+            str(binding_path),
+            "--out",
+            str(out),
+        ],
+    )
     assert result.exit_code == 0, result.output
-    # CLI rewrites the filename to Hiagent's export pattern; find the .zip
-    # in the user-given directory.
-    written_zips = list(tmp_path.glob("*.zip"))
-    assert len(written_zips) == 1, written_zips
-    actual_out = written_zips[0]
-    # Filename pattern: <name>_v<X.Y.Z>_<14-digit-ts>.zip
-    import re
-    assert re.match(r".+_v\d+\.\d+\.\d+_\d{14}\.zip$", actual_out.name), actual_out.name
-    assert actual_out.stat().st_size > 0
-
-    import io
-    import zipfile
-
     import yaml
-    with zipfile.ZipFile(io.BytesIO(actual_out.read_bytes())) as zf:
-        names = zf.namelist()
-        # Agent bundle import expects root-relative index.yaml + agent/<n>.yaml.
-        assert names[0] == "index.yaml", names
-        assert any(n.startswith("agent/") for n in names), names
-        assert any(n.startswith("knowledge/") for n in names), names
-        assert any(n.startswith("model/") for n in names), names
-        assert any(n.startswith("asset/upload/full/") for n in names), names
-        assert not any(n.startswith("workflow/") for n in names), names
-        assert len(names) >= 5
-        idx = yaml.safe_load(zf.read("index.yaml"))
-    assert idx["MainMeta"] == "Agent"
-    assert idx["FromWorkspaceID"] == "d31pcnoboot936af1tsg"
+
+    assert out.exists()
+    doc = yaml.safe_load(out.read_text())
+    assert doc["MetaType"] == "Agent"
+    assert doc["AppConfig"]["SingleAgentConfig"]["PrePrompt"]
+    assert "inspection YAML" in result.output
+    assert "loom hiagent push" in result.output
 
 
 def test_compile_hiagent_without_binding_fails(tmp_path):
     """No --binding passed, target is hiagent -> fail-fast clear error."""
     src = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"
-    out = tmp_path / "out.zip"
+    out = tmp_path / "out.hiagent.yaml"
     runner = CliRunner()
     result = runner.invoke(cli, [
         "compile", str(src),
@@ -93,7 +81,7 @@ def test_compile_hiagent_without_binding_fails(tmp_path):
 def test_compile_hiagent_with_invalid_binding_fails(tmp_path):
     """Binding YAML missing workspace_id -> fail-fast."""
     src = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"
-    out = tmp_path / "out.zip"
+    out = tmp_path / "out.hiagent.yaml"
     binding_path = tmp_path / "bad.yaml"
     binding_path.write_text("customer: test\ntarget: hiagent\n")
     runner = CliRunner()
@@ -105,28 +93,6 @@ def test_compile_hiagent_with_invalid_binding_fails(tmp_path):
     ])
     assert result.exit_code == 2
     assert not out.exists()
-
-
-def test_compile_hiagent_unbound_kb_warning(tmp_path):
-    """Binding without dataset_id_map entry -> CLI hints the customer to wire it in UI."""
-    src = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"
-    out = tmp_path / "out.zip"
-    binding_path = tmp_path / "bind.yaml"
-    binding_path.write_text(
-        "customer: test\n"
-        "target: hiagent\n"
-        "target_version: '2.6'\n"
-        "workspace_id: d31pcnoboot936af1tsg\n"
-    )
-    runner = CliRunner()
-    result = runner.invoke(cli, [
-        "compile", str(src),
-        "--target", "hiagent",
-        "--binding", str(binding_path),
-        "--out", str(out),
-    ])
-    assert result.exit_code == 0
-    assert "product_kb" in result.output or "policy_kb" in result.output or "unbound" in result.output.lower()
 
 
 def test_compile_to_dify_writes_yaml(tmp_path):

@@ -43,24 +43,9 @@ def test_bundle_has_index_and_single_agent_only(faq_ir: IRDocument, minimal_bind
     assert "index.yaml" in bundle.files
     assert any(p.startswith("agent/") and p.endswith(".yaml") for p in bundle.files)
     assert not any(p.startswith("workflow/") for p in bundle.files)
-
-
-def test_bundle_has_complete_gold_style_folder_skeleton(
-    faq_ir: IRDocument,
-    minimal_binding: HiagentBinding,
-):
-    bundle = compile_ir(faq_ir, minimal_binding)
-    assert any(p.startswith("agent/") for p in bundle.files)
-    assert any(p.startswith("knowledge/") for p in bundle.files)
-    assert any(p.startswith("model/") for p in bundle.files)
-    assert any(p.startswith("asset/upload/full/") for p in bundle.files)
-
-
-def test_asset_placeholder_is_binary(faq_ir: IRDocument, minimal_binding: HiagentBinding):
-    bundle = compile_ir(faq_ir, minimal_binding)
-    asset_paths = [p for p in bundle.files if p.startswith("asset/upload/full/")]
-    assert len(asset_paths) == 1
-    assert bundle.files[asset_paths[0]] == b"\x00"
+    assert not any(p.startswith("knowledge/") for p in bundle.files)
+    assert not any(p.startswith("model/") for p in bundle.files)
+    assert not any(p.startswith("asset/") for p in bundle.files)
 
 
 def test_bundle_index_has_required_fields(faq_ir: IRDocument, minimal_binding: HiagentBinding):
@@ -136,20 +121,6 @@ def test_compile_with_bound_kb_populates_agent_knowledge_refs(faq_ir: IRDocument
     assert agent["AppDepends"]["KnowledgeMap"][kb_id]["ID"] == kb_id
 
 
-def test_compile_with_bound_kb_emits_knowledge_sidecar(faq_ir: IRDocument):
-    kb_id = "d7jl0000shhcm7cr99hg"
-    binding = HiagentBinding(
-        customer="test",
-        target="hiagent",
-        workspace_id="d31pcnoboot936af1tsg",
-        dataset_id_map={"product_kb": kb_id},
-    )
-    bundle = compile_ir(faq_ir, binding)
-    knowledge_paths = [p for p in bundle.files if p.startswith("knowledge/")]
-    assert knowledge_paths == ["knowledge/product_kb.yaml"]
-    assert bundle.files[knowledge_paths[0]]["UniqueName"] == kb_id
-
-
 def test_compile_with_bound_model_populates_agent_model_refs(faq_ir: IRDocument):
     model_id = "d2s17uicrg32144vrj9g"
     binding = HiagentBinding(
@@ -162,17 +133,3 @@ def test_compile_with_bound_model_populates_agent_model_refs(faq_ir: IRDocument)
     single = agent["AppConfig"]["SingleAgentConfig"]
     assert single["ModelID"] == model_id
     assert agent["AppDepends"]["ModelMap"][model_id]["ID"] == model_id
-
-
-def test_compile_with_bound_model_emits_model_sidecar(faq_ir: IRDocument):
-    model_id = "d2s17uicrg32144vrj9g"
-    binding = HiagentBinding(
-        customer="test",
-        target="hiagent",
-        workspace_id="d31pcnoboot936af1tsg",
-        model_id_map={"configured-planner-model": model_id},
-    )
-    bundle = compile_ir(faq_ir, binding)
-    model_paths = [p for p in bundle.files if p.startswith("model/")]
-    assert model_paths == ["model/configured-planner-model.yaml"]
-    assert bundle.files[model_paths[0]]["UniqueName"] == model_id

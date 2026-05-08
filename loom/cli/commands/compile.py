@@ -3,30 +3,15 @@ from __future__ import annotations
 
 import json
 import sys
-import time
 from pathlib import Path
 from typing import Any, cast
 
 import click
+import yaml  # type: ignore[import-untyped]
 
 from loom.ir.models import IRDocument
 from loom.runtimes import registry as runtime_registry
 from loom.runtimes.hiagent.binding import HiagentBinding, HiagentBindingError
-
-
-def _hiagent_export_filename(ir: IRDocument) -> str:
-    """Return the Hiagent-export-style filename for a Single-mode agent zip:
-    '<safe-name>_v1.0.0_<YYYYMMDDHHMMSS>.zip'.
-
-    Mirrors customer's exported zip naming convention (e.g.,
-    '用户维修方案_v1.0.6_20260508133220.zip',
-    '车联网故障问数_v1.1_20260508130955.zip'). Hiagent's import path appears
-    sensitive to filename pattern; using ad-hoc names like 'loom-demo-agent.zip'
-    can trip its parser.
-    """
-    safe = ir.metadata.name.replace(" ", "_")
-    ts = time.strftime("%Y%m%d%H%M%S")
-    return f"{safe}_v1.0.0_{ts}.zip"
 
 
 @click.command(help="Compile IR to chosen runtime DSL via RuntimeAdapter.")
@@ -68,45 +53,21 @@ def compile_cmd(
             click.echo(f"Binding load failed: {e}", err=True)
             sys.exit(2)
         dsl = cast("Any", adapter).compile(ir, binding=binding)
+        agent_files = dsl.agent_files()
+        if not agent_files:
+            click.echo("Hiagent compile produced no agent inspection YAML", err=True)
+            sys.exit(2)
+        _, agent_yaml = agent_files[0]
+        out_path.write_text(yaml.safe_dump(agent_yaml, sort_keys=False, allow_unicode=True))
+        click.echo(f"wrote {out_path} (hiagent inspection YAML)")
+        click.echo("Next: use `loom hiagent push <ir-file>` to create and publish in Hiagent.")
+        return
     else:
         dsl = adapter.compile(ir)
 
-    serialized: Any = adapter.serialize_dsl(dsl)
-
-    # For hiagent target: rewrite the output filename to match Hiagent's
-    # export convention. Keep the directory the user gave; replace just the
-    # filename. Hiagent's import path is sensitive to the pattern.
-    if target == "hiagent":
-        out_dir = out_path.parent if out_path.suffix else out_path
-        out_path = out_dir / _hiagent_export_filename(ir)
-
+    serialized = adapter.serialize_dsl(dsl)
     if isinstance(serialized, bytes):
         out_path.write_bytes(serialized)
     else:
         out_path.write_text(serialized)
-
-    if target == "hiagent" and binding is not None:
-        unbound = _unbound_summary(ir, binding)
-        if unbound:
-            click.echo(
-                f"wrote {out_path} ({target}) - note: {len(unbound)} reference(s) "
-                f"unbound, customer will wire in Hiagent UI after import: "
-                f"{', '.join(unbound)}"
-            )
-            return
     click.echo(f"wrote {out_path} ({target})")
-
-
-def _unbound_summary(ir: IRDocument, binding: HiagentBinding) -> list[str]:
-    out: list[str] = []
-    for ds in ir.registry_ref.datasets:
-        if not binding.resolve_dataset(ds):
-            out.append(f"dataset[{ds}]")
-    seen: set[str] = set()
-    for n in ir.nodes:
-        model = getattr(n, "model", None)
-        if model and model not in seen:
-            seen.add(model)
-            if not binding.resolve_model(model):
-                out.append(f"model[{model}]")
-    return out
