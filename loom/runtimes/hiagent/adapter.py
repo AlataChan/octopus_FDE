@@ -56,19 +56,19 @@ class HiagentAdapter:
             raise TypeError("canonical_ast_hash needs HiagentBundle, str, or bytes")
         return hashlib.sha256(payload).hexdigest()
 
-    def serialize_dsl(self, dsl: Any) -> str:
-        """Serialize as Hiagent workflow-import JSON string.
+    def serialize_dsl(self, dsl: Any) -> bytes:
+        """Serialize as Hiagent Agent-import bundle ZIP bytes.
 
-        Hiagent's "Import Workflow" accepts a single .json file directly
-        (the workflow document body). Caller writes the result to a .json
-        file with extension matching the import dialog's expectations.
+        Per user direction 2026-05-08, primary import path is Agent Import
+        (zip with multi-file bundle), not Workflow Import (single JSON).
+        Caller writes the result to a .zip file.
         """
         if isinstance(dsl, HiagentBundle):
-            return dsl.to_workflow_json()
-        if isinstance(dsl, str):
+            return dsl.to_agent_bundle_zip_bytes()
+        if isinstance(dsl, bytes):
             return dsl
         raise TypeError(
-            "HiagentAdapter.serialize_dsl expected HiagentBundle or str, "
+            "HiagentAdapter.serialize_dsl expected HiagentBundle or bytes, "
             f"got {type(dsl).__name__}"
         )
 

@@ -48,9 +48,25 @@ def test_bundle_index_has_required_fields(faq_ir: IRDocument, minimal_binding: H
     index = compile_ir(faq_ir, minimal_binding).index
     assert index["DLVersion"] == "0.0.1"
     assert index["FromWorkspaceID"] == minimal_binding.workspace_id
-    assert index["MainMeta"] == "Workflow"
+    assert index["MainMeta"] == "Agent"
     assert index["MainMetaName"] == faq_ir.metadata.name
     assert index["MainUniqueName"]
+
+
+def test_bundle_has_agent_yaml(faq_ir: IRDocument, minimal_binding: HiagentBinding):
+    """Agent bundle must include agent/<n>.yaml with ChatFlow wrapper."""
+    bundle = compile_ir(faq_ir, minimal_binding)
+    agent_paths = [p for p in bundle.files if p.startswith("agent/")]
+    assert len(agent_paths) == 1, f"expected 1 agent yaml, got {agent_paths}"
+    agent_yaml = bundle.files[agent_paths[0]]
+    assert agent_yaml["MetaType"] == "Agent"
+    assert "ChatFlowDetail" in agent_yaml["AppConfig"]
+    chatflow = agent_yaml["AppConfig"]["ChatFlowDetail"]
+    assert chatflow["MetaType"] == "Workflow"
+    assert chatflow["FlowType"] == "Agent"
+    # 3 nodes: Start -> Workflow -> End
+    types = [n["Type"] for n in chatflow["Nodes"]]
+    assert types == ["Start", "Workflow", "End"]
 
 
 def test_workflow_yaml_has_dlversion_v2(faq_ir: IRDocument, minimal_binding: HiagentBinding):

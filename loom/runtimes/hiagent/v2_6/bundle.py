@@ -59,21 +59,53 @@ class HiagentBundle:
     def to_workflow_json(self) -> str:
         """Serialize the primary workflow as a Hiagent workflow-import JSON string.
 
-        Hiagent's "Import Workflow" dialog accepts a .json file directly
-        (verified 2026-05-08 from import-dialog screenshot). The JSON content
-        is the workflow document itself: top-level DLVersion / MetaType:
-        Workflow / FlowType / DisplayName / ID / Nodes[] / Depends / WorkspaceID.
-
-        Returns indented UTF-8 JSON (Hiagent accepts both compact and
-        pretty-printed). Raises ValueError if no workflow entry is present.
+        Used by the Workflow Import path (single .json file). Sub-task D pivots
+        to Agent Import (zip bundle) as the primary path; this method stays for
+        the workflow-import variant.
         """
         import json
 
         wf = self.workflow_files()
         if not wf:
             raise ValueError(
-                "HiagentBundle.to_workflow_json: no workflow in bundle.files; "
-                "expected at least one entry under 'workflow/<name>.yaml'"
+                "HiagentBundle.to_workflow_json: no workflow in bundle.files"
             )
         _, content = wf[0]
         return json.dumps(content, ensure_ascii=False, indent=2)
+
+    def to_agent_bundle_zip_bytes(self) -> bytes:
+        """Render the bundle to a multi-file Agent-import ZIP archive.
+
+        On-disk layout (matches customer 用户维修方案 / 小芸 / 车联网故障问数 samples):
+
+            <bundle_name>/
+            ├── index.yaml
+            ├── agent/<name>.yaml
+            ├── workflow/<name>.yaml
+            └── (model/, knowledge/, asset/upload/ omitted in MVP)
+
+        Each entry's content is dumped as YAML. UTF-8 filename flag set on
+        non-ASCII names (Python's zipfile auto-sets for non-ASCII).
+        Deterministic 1980-01-01 timestamps so equal bundles are byte-identical.
+        """
+        import io
+        import zipfile
+
+        import yaml  # type: ignore[import-untyped]
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for rel_path, content in sorted(self.files.items()):
+                full = f"{self.bundle_name}/{rel_path}"
+                yaml_text = yaml.safe_dump(
+                    content,
+                    sort_keys=False,
+                    allow_unicode=True,
+                    default_flow_style=False,
+                )
+                info = zipfile.ZipInfo(full, date_time=(1980, 1, 1, 0, 0, 0))
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.flag_bits |= 0x800
+                info.external_attr = (0o644 & 0xFFFF) << 16
+                zf.writestr(info, yaml_text.encode("utf-8"))
+        return buf.getvalue()

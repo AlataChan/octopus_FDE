@@ -27,10 +27,10 @@ def test_validate_fails_on_missing_rationale(tmp_path):
     assert "schema" in result.output
 
 
-def test_compile_to_hiagent_writes_workflow_json(tmp_path):
-    """Hiagent target with valid --binding produces a .json workflow file."""
+def test_compile_to_hiagent_writes_agent_zip(tmp_path):
+    """Hiagent target with valid --binding produces a .zip agent bundle."""
     src = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"
-    out = tmp_path / "out.json"
+    out = tmp_path / "out.zip"
     binding_path = tmp_path / "bind.yaml"
     binding_path.write_text(
         "customer: test\n"
@@ -47,11 +47,21 @@ def test_compile_to_hiagent_writes_workflow_json(tmp_path):
     ])
     assert result.exit_code == 0, result.output
     assert out.exists() and out.stat().st_size > 0
-    # File is a Hiagent workflow-import JSON.
-    doc = json.loads(out.read_text())
-    assert doc["MetaType"] == "Workflow"
-    assert doc["DLVersion"] == "v2"
-    assert doc["WorkspaceID"] == "d31pcnoboot936af1tsg"
+
+    import io
+    import zipfile
+
+    import yaml
+    with zipfile.ZipFile(io.BytesIO(out.read_bytes())) as zf:
+        names = zf.namelist()
+        # Agent bundle: must contain index.yaml + agent/<n>.yaml + workflow/<n>.yaml
+        assert any(n.endswith("/index.yaml") for n in names), names
+        assert any("/agent/" in n for n in names), names
+        assert any("/workflow/" in n for n in names), names
+        idx_path = next(n for n in names if n.endswith("/index.yaml"))
+        idx = yaml.safe_load(zf.read(idx_path))
+    assert idx["MainMeta"] == "Agent"
+    assert idx["FromWorkspaceID"] == "d31pcnoboot936af1tsg"
 
 
 def test_compile_hiagent_without_binding_fails(tmp_path):
