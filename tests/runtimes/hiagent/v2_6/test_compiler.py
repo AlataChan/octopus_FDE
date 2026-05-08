@@ -7,7 +7,7 @@ import pytest
 from loom.ir.models import IRDocument
 from loom.runtimes.hiagent.binding import HiagentBinding
 from loom.runtimes.hiagent.v2_6.bundle import HiagentBundle
-from loom.runtimes.hiagent.v2_6.compiler import compile_ir
+from loom.runtimes.hiagent.v2_6.compiler import build_agent_config_request, compile_ir
 
 ROOT = Path(__file__).resolve().parents[4]
 
@@ -100,8 +100,16 @@ def test_single_agent_config_has_required_chat_defaults(
     assert advanced["OpeningConfig"]["OpeningEnabled"] is False
     assert advanced["UploadConfig"]["Enabled"] is False
     assert single["PromptConfig"] == {"PromptMode": "regex"}
-    assert single["ModelConfig"]["Strategy"] == "function_call"
+    assert single["ModelConfig"]["Strategy"] == "react"
     assert single["KnowledgeConfig"]["TopK"] == 20
+
+
+def test_api_agent_config_caps_max_tokens_for_hiagent_publish(
+    faq_ir: IRDocument,
+    minimal_binding: HiagentBinding,
+):
+    config = build_agent_config_request(faq_ir, minimal_binding)
+    assert config["ModelConfig"]["MaxTokens"] == 4096
 
 
 def test_compile_with_unbound_kb_has_empty_knowledge_refs(

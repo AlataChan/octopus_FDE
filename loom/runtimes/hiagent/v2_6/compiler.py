@@ -24,6 +24,36 @@ _ASSET_PLACEHOLDER_PATH = (
     "0000000000000000000000000000000000000000000000000000000000000000"
 )
 
+_APP_CONFIG_DRAFT_KEYS = {
+    "A2aAgentIDs",
+    "AgentIDs",
+    "ChatAdvancedConfig",
+    "DatabaseIDs",
+    "GraphConfig",
+    "GraphIDs",
+    "KnowledgeConfig",
+    "KnowledgeIDs",
+    "ModelConfig",
+    "ModelID",
+    "PrePrompt",
+    "PromptConfig",
+    "QADatasetConfig",
+    "QADatasetIDs",
+    "SummaryModelConfig",
+    "SummaryModelID",
+    "TerminologyConfig",
+    "TerminologyIDs",
+    "ToolIDs",
+    "TriggerConfigs",
+    "VariableConfigs",
+    "WorkflowIDs",
+}
+
+_APP_CONFIG_REQUEST_KEYS = _APP_CONFIG_DRAFT_KEYS | {
+    "Version",
+    "VersionDescription",
+}
+
 
 def compile_ir(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
     """Compile IR to a Hiagent v2.6 chat-mode Agent bundle.
@@ -55,6 +85,28 @@ def compile_ir(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
     files[_ASSET_PLACEHOLDER_PATH] = b"\x00"
 
     return HiagentBundle(bundle_name=bundle_name, files=files)
+
+
+def build_agent_config_draft(ir: IRDocument, binding: HiagentBinding) -> dict[str, Any]:
+    """Return API `app.AppConfigDraftRequest` shape for SaveAppConfigDraft."""
+    agent_yaml = _build_agent_yaml(ir=ir, binding=binding, agent_id=gen_id())
+    single = agent_yaml["AppConfig"]["SingleAgentConfig"]
+    return {
+        key: value
+        for key, value in single.items()
+        if key in _APP_CONFIG_DRAFT_KEYS
+    }
+
+
+def build_agent_config_request(ir: IRDocument, binding: HiagentBinding) -> dict[str, Any]:
+    """Return API `app.AppConfigRequest` shape for PublishAppV2."""
+    agent_yaml = _build_agent_yaml(ir=ir, binding=binding, agent_id=gen_id())
+    single = agent_yaml["AppConfig"]["SingleAgentConfig"]
+    return {
+        key: value
+        for key, value in single.items()
+        if key in _APP_CONFIG_REQUEST_KEYS
+    }
 
 
 def _build_agent_yaml(
@@ -109,9 +161,7 @@ def _build_agent_yaml(
                     "MaxIterations": ir.policy.agent_budget.max_iterations
                     if ir.policy and ir.policy.agent_budget
                     else 10,
-                    "MaxTokens": ir.policy.agent_budget.max_tokens
-                    if ir.policy and ir.policy.agent_budget
-                    else 32768,
+                    "MaxTokens": _hiagent_api_max_tokens(ir),
                     "ModelInteractiveMode": "direct",
                     "RagEnabled": bool(knowledge_ids),
                     "RagNum": 3,
@@ -119,7 +169,7 @@ def _build_agent_yaml(
                     "ReasoningSwitch": True,
                     "ReasoningSwitchType": "enabled",
                     "RoundsReserved": 3,
-                    "Strategy": "function_call",
+                    "Strategy": "react",
                     "Temperature": _primary_temperature(ir),
                     "TopP": 0.9,
                 },
@@ -240,6 +290,13 @@ def _primary_temperature(ir: IRDocument) -> float:
         if temp is not None:
             return float(temp)
     return 0.7
+
+
+def _hiagent_api_max_tokens(ir: IRDocument) -> int:
+    """Hiagent PublishAppV2 validates Chat ModelConfig.MaxTokens as 1..4096."""
+    if ir.policy and ir.policy.agent_budget:
+        return min(max(int(ir.policy.agent_budget.max_tokens), 1), 4096)
+    return 4096
 
 
 def _primary_model_handle(ir: IRDocument, binding: HiagentBinding) -> str:
