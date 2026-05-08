@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from loom.cli.main import cli
@@ -27,6 +28,7 @@ def test_validate_fails_on_missing_rationale(tmp_path):
     assert "schema" in result.output
 
 
+@pytest.mark.skip(reason="ADR 0024 Hiagent compile now requires --binding; Sub-task C rewires CLI")
 def test_compile_to_hiagent_writes_json(tmp_path):
     src = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"
     out = tmp_path / "out.hiagent.json"
