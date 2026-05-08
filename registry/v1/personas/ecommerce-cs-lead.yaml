@@ -1,0 +1,12 @@
+persona_id: ecommerce-cs-lead
+author_role: cs_lead
+vertical: ecommerce
+end_user: buyer
+reviewer:
+  role: ops_manager
+  decision_authority: [publish, refund_above_500_USD, compensation_above_threshold]
+compliance_boundary:
+  pii_class_default: medium
+  regulatory_tags: [GDPR, PIPL]
+  geographies: [CN, EU, US, JP]
+success_criteria: "Order exceptions triaged by priority; refund / compensation flows respect monetary thresholds; queue stays within SLA."

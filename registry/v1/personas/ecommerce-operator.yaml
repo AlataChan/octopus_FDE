@@ -1,0 +1,12 @@
+persona_id: ecommerce-operator
+author_role: operator
+vertical: ecommerce
+end_user: buyer
+reviewer:
+  role: cs_supervisor
+  decision_authority: [publish, refund_threshold]
+compliance_boundary:
+  pii_class_default: medium                   # buyer phone / address / email default to medium
+  regulatory_tags: [GDPR, PIPL]
+  geographies: [CN, EU, US, JP]
+success_criteria: "Buyers receive accurate, channel-appropriate replies; SLA-impacting cases reach a human supervisor; no compensation promises beyond policy."

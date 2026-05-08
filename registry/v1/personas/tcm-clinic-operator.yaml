@@ -1,0 +1,12 @@
+persona_id: tcm-clinic-operator
+author_role: operator
+vertical: tcm_clinic
+end_user: patient
+reviewer:
+  role: clinician
+  decision_authority: [publish, medical_response_approval]
+compliance_boundary:
+  pii_class_default: high                     # patient health data is high pii_class
+  regulatory_tags: [PIPL, PIPL-medical]
+  geographies: [CN]
+success_criteria: "Patient-facing content always reviewed by a clinician; intake summaries reach the right queue; no diagnosis/prescription/treatment claims auto-published."
