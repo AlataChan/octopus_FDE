@@ -5,7 +5,6 @@ import json as json_lib
 from typing import TYPE_CHECKING, Any
 
 from loom.runtimes.hiagent.v2_6 import HIAGENT_VERSION
-from loom.runtimes.hiagent.v2_6.compiler import compile_ir as compile_to_json
 
 if TYPE_CHECKING:
     from loom.ir.models import IRDocument
@@ -22,8 +21,11 @@ class HiagentAdapter:
     target = "hiagent"
     version = HIAGENT_VERSION
 
-    def compile(self, ir: IRDocument) -> str:
-        return compile_to_json(ir)  # JSON string
+    def compile(self, ir: IRDocument) -> Any:
+        raise NotImplementedError(
+            "Hiagent compile requires a customer binding file after ADR 0024; "
+            "Sub-task C wires CLI --binding and bundle serialization"
+        )
 
     def reverse(self, dsl: Any) -> tuple[IRDocument, list[UnrecognizedConstruct]]:
         raise NotImplementedError(
