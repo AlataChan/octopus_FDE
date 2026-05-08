@@ -334,23 +334,51 @@ def _build_knowledge_files(ir: IRDocument, binding: HiagentBinding) -> dict[str,
             },
         }
     if not files:
-        files["knowledge/placeholder.yaml"] = {
+        # Hiagent's parser appears to validate UniqueName/VersionCode against
+        # the 20-char base32 ID pattern. "placeholder-kb" violates that and
+        # may trigger the misleading EOCD error. Use real-shape IDs + a
+        # plausible KB display name so import passes structural validation;
+        # customer rebinds in UI after import.
+        kb_id = gen_id()
+        kb_now_ms = int(time.time() * 1000)
+        files["knowledge/default-kb.yaml"] = {
             "DLVersion": "v1.0.0",
             "Desc": "",
-            "DisplayName": "placeholder-kb",
+            "DisplayName": "default-kb",
             "LogoPath": "",
             "MetaType": "kbs_dataset",
-            "UniqueName": "placeholder-kb",
-            "UpdatedAt": 0,
-            "VersionCode": "placeholder-kb",
+            "UniqueName": kb_id,
+            "UpdatedAt": kb_now_ms,
+            "VersionCode": kb_id,
             "VersionName": "v1.0.0",
             "data": {
+                "APISourceID": None,
+                "AsrModelID": None,
+                "CustomQueryInstruction": None,
                 "Description": None,
                 "DirectoryID": "default",
-                "Name": "placeholder-kb",
+                "DocumentParse": None,
+                "EmbeddingModelID": None,
+                "EmbeddingModelProvider": "",
+                "EnableExternalElasticsearch": False,
+                "EnableLabelFilter": False,
+                "EnablePermission": False,
+                "EnableVisionEmbedding": False,
+                "ExternalElasticsearchConfig": None,
+                "Icon": "",
+                "IconSha256": "",
+                "IndexingTechnique": 0,
+                "Labels": [],
+                "LlmModelID": None,
+                "Name": "default-kb",
+                "RequestMappings": None,
+                "ResponseMappings": None,
+                "RetrievalRerankModelID": None,
+                "RetrievalSearchMethod": 0,
                 "SpaceType": 1,
+                "TenantID": gen_id(),
                 "WorkspaceID": binding.workspace_id,
-                "XID": "placeholder-kb",
+                "XID": kb_id,
             },
         }
     return files
@@ -389,23 +417,30 @@ def _build_model_files(ir: IRDocument, binding: HiagentBinding) -> dict[str, Any
             "VersionName": "",
         }
     if not files:
-        files["model/placeholder.yaml"] = {
+        # As with knowledge placeholder: use real-shape 20-char base32 IDs +
+        # a recognizable Hiagent model name so the parser's name+ID validation
+        # passes. "Doubao-Seed-1-6" is a known Hiagent model the customer
+        # workspace likely has; even if not, the structural ID format passes
+        # validation and the customer can rebind in the UI after import.
+        model_id = gen_id()
+        model_now_ms = int(time.time() * 1000)
+        files["model/Doubao-Seed-1-6.yaml"] = {
             "DLVersion": "0.0.1",
             "DeletedAt": None,
             "Desc": "",
-            "DisplayName": "placeholder-model",
-            "Implement": "custom",
-            "IsDefault": False,
-            "IsPublic": False,
-            "Key": "placeholder-model",
+            "DisplayName": "Doubao-Seed-1-6",
+            "Implement": "volcengine",
+            "IsDefault": True,
+            "IsPublic": True,
+            "Key": "doubao-seed-1.6-251015",
             "LogoPath": "",
             "MetaType": "Model",
             "Source": "custom",
             "SourceTypes": ["Agent"],
-            "TenantId": "placeholder",
+            "TenantId": gen_id(),
             "Type": "text-generation",
-            "UniqueName": "placeholder-model",
-            "UpdatedAt": 0,
+            "UniqueName": model_id,
+            "UpdatedAt": model_now_ms,
             "VersionCode": "",
             "VersionName": "",
         }
