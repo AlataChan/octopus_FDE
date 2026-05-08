@@ -15,3 +15,7 @@ dist/
 # AI tooling local state
 .ccb/
 .cursor/
+
+# Customer Bindings - real customer files [keep example committed]
+config/customers/*.yaml
+!config/customers/example.*.yaml

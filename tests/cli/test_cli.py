@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 from click.testing import CliRunner
 
 from loom.cli.main import cli
@@ -28,17 +27,86 @@ def test_validate_fails_on_missing_rationale(tmp_path):
     assert "schema" in result.output
 
 
-@pytest.mark.skip(reason="ADR 0024 Hiagent compile now requires --binding; Sub-task C rewires CLI")
-def test_compile_to_hiagent_writes_json(tmp_path):
+def test_compile_to_hiagent_writes_zip(tmp_path):
+    """Hiagent target with valid --binding produces a zip file that contains index.yaml."""
     src = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"
-    out = tmp_path / "out.hiagent.json"
+    out = tmp_path / "out.zip"
+    binding_path = tmp_path / "bind.yaml"
+    binding_path.write_text(
+        "customer: test\n"
+        "target: hiagent\n"
+        "target_version: '2.6'\n"
+        "workspace_id: d31pcnoboot936af1tsg\n"
+    )
     runner = CliRunner()
-    result = runner.invoke(cli, ["compile", str(src), "--target", "hiagent", "--out", str(out)])
+    result = runner.invoke(cli, [
+        "compile", str(src),
+        "--target", "hiagent",
+        "--binding", str(binding_path),
+        "--out", str(out),
+    ])
     assert result.exit_code == 0, result.output
-    assert out.exists()
-    text = out.read_text()
-    # Hiagent emits JSON; "app" key must be present
-    assert '"app"' in text
+    assert out.exists() and out.stat().st_size > 0
+
+    import io
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(out.read_bytes())) as zf:
+        names = zf.namelist()
+    assert any(n.endswith("/index.yaml") for n in names)
+
+
+def test_compile_hiagent_without_binding_fails(tmp_path):
+    """No --binding passed, target is hiagent -> fail-fast clear error."""
+    src = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"
+    out = tmp_path / "out.zip"
+    runner = CliRunner()
+    result = runner.invoke(cli, [
+        "compile", str(src),
+        "--target", "hiagent",
+        "--out", str(out),
+    ])
+    assert result.exit_code == 2
+    assert "binding" in result.output.lower() or "binding" in (result.stderr_bytes or b"").decode()
+    assert not out.exists()
+
+
+def test_compile_hiagent_with_invalid_binding_fails(tmp_path):
+    """Binding YAML missing workspace_id -> fail-fast."""
+    src = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"
+    out = tmp_path / "out.zip"
+    binding_path = tmp_path / "bad.yaml"
+    binding_path.write_text("customer: test\ntarget: hiagent\n")
+    runner = CliRunner()
+    result = runner.invoke(cli, [
+        "compile", str(src),
+        "--target", "hiagent",
+        "--binding", str(binding_path),
+        "--out", str(out),
+    ])
+    assert result.exit_code == 2
+    assert not out.exists()
+
+
+def test_compile_hiagent_unbound_kb_warning(tmp_path):
+    """Binding without dataset_id_map entry -> CLI hints the customer to wire it in UI."""
+    src = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"
+    out = tmp_path / "out.zip"
+    binding_path = tmp_path / "bind.yaml"
+    binding_path.write_text(
+        "customer: test\n"
+        "target: hiagent\n"
+        "target_version: '2.6'\n"
+        "workspace_id: d31pcnoboot936af1tsg\n"
+    )
+    runner = CliRunner()
+    result = runner.invoke(cli, [
+        "compile", str(src),
+        "--target", "hiagent",
+        "--binding", str(binding_path),
+        "--out", str(out),
+    ])
+    assert result.exit_code == 0
+    assert "product_kb" in result.output or "policy_kb" in result.output or "unbound" in result.output.lower()
 
 
 def test_compile_to_dify_writes_yaml(tmp_path):
