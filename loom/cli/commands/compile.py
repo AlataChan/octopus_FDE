@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any, cast
 
@@ -11,6 +12,21 @@ import click
 from loom.ir.models import IRDocument
 from loom.runtimes import registry as runtime_registry
 from loom.runtimes.hiagent.binding import HiagentBinding, HiagentBindingError
+
+
+def _hiagent_export_filename(ir: IRDocument) -> str:
+    """Return the Hiagent-export-style filename for a Single-mode agent zip:
+    '<safe-name>_v1.0.0_<YYYYMMDDHHMMSS>.zip'.
+
+    Mirrors customer's exported zip naming convention (e.g.,
+    '用户维修方案_v1.0.6_20260508133220.zip',
+    '车联网故障问数_v1.1_20260508130955.zip'). Hiagent's import path appears
+    sensitive to filename pattern; using ad-hoc names like 'loom-demo-agent.zip'
+    can trip its parser.
+    """
+    safe = ir.metadata.name.replace(" ", "_")
+    ts = time.strftime("%Y%m%d%H%M%S")
+    return f"{safe}_v1.0.0_{ts}.zip"
 
 
 @click.command(help="Compile IR to chosen runtime DSL via RuntimeAdapter.")
@@ -56,6 +72,14 @@ def compile_cmd(
         dsl = adapter.compile(ir)
 
     serialized: Any = adapter.serialize_dsl(dsl)
+
+    # For hiagent target: rewrite the output filename to match Hiagent's
+    # export convention. Keep the directory the user gave; replace just the
+    # filename. Hiagent's import path is sensitive to the pattern.
+    if target == "hiagent":
+        out_dir = out_path.parent if out_path.suffix else out_path
+        out_path = out_dir / _hiagent_export_filename(ir)
+
     if isinstance(serialized, bytes):
         out_path.write_bytes(serialized)
     else:

@@ -46,13 +46,21 @@ def test_compile_to_hiagent_writes_agent_zip(tmp_path):
         "--out", str(out),
     ])
     assert result.exit_code == 0, result.output
-    assert out.exists() and out.stat().st_size > 0
+    # CLI rewrites the filename to Hiagent's export pattern; find the .zip
+    # in the user-given directory.
+    written_zips = list(tmp_path.glob("*.zip"))
+    assert len(written_zips) == 1, written_zips
+    actual_out = written_zips[0]
+    # Filename pattern: <name>_v<X.Y.Z>_<14-digit-ts>.zip
+    import re
+    assert re.match(r".+_v\d+\.\d+\.\d+_\d{14}\.zip$", actual_out.name), actual_out.name
+    assert actual_out.stat().st_size > 0
 
     import io
     import zipfile
 
     import yaml
-    with zipfile.ZipFile(io.BytesIO(out.read_bytes())) as zf:
+    with zipfile.ZipFile(io.BytesIO(actual_out.read_bytes())) as zf:
         names = zf.namelist()
         # Agent bundle import expects root-relative index.yaml + agent/<n>.yaml.
         assert names[0] == "index.yaml", names
