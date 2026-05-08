@@ -50,9 +50,16 @@ def test_compile_to_hiagent_writes_zip(tmp_path):
 
     import io
     import zipfile
+
+    import yaml
     with zipfile.ZipFile(io.BytesIO(out.read_bytes())) as zf:
         names = zf.namelist()
-    assert any(n.endswith("/index.yaml") for n in names)
+        # Hiagent workflow-import format: single yaml at zip root, no subdirs.
+        assert len(names) == 1, f"expected single entry, got {names}"
+        assert names[0].endswith(".yaml") and "/" not in names[0]
+        doc = yaml.safe_load(zf.read(names[0]))
+    assert doc["MetaType"] == "Workflow"
+    assert doc["DLVersion"] == "v2"
 
 
 def test_compile_hiagent_without_binding_fails(tmp_path):
