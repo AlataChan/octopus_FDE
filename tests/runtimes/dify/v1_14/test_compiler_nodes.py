@@ -23,5 +23,5 @@ def test_ecommerce_faq_emits_yaml():
 def test_ecommerce_order_exception_emits_yaml():
     ir = _load("05-ecommerce-order-exception.json")
     yaml_text = compile_ir(ir)
-    assert "http" in yaml_text or "tool" in yaml_text
-    assert "llm" in yaml_text
+    assert "code" in yaml_text
+    assert "if-else" in yaml_text
