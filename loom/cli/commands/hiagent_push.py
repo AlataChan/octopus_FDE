@@ -212,6 +212,13 @@ def _materialize_chatflow_graph(
             server_nodes.append(server_node)
 
     links = _server_links(generated_nodes, server_by_generated_code)
+    _remap_node_field_refs(
+        server_nodes,
+        {
+            generated_code: str(server_node.get("Code") or "")
+            for generated_code, server_node in server_by_generated_code.items()
+        },
+    )
     _normalize_sys_refs(server_nodes)
     check_materialized_chatflow_nodes(server_nodes)
     client.save_chatflow(app_id, nodes=server_nodes, links=links)
@@ -424,11 +431,15 @@ def _patch_chatflow_node_config(
     elif generated_type == "End":
         end = configs.get("End")
         if isinstance(end, dict):
+            input_variables = end.get("InputVariables", [])
             _set_node_config(
                 server_node,
                 "EndNode",
                 {
-                    "OutputType": "Content",
+                    "OutputType": end.get("OutputType", "Content"),
+                    "Input": input_variables,
+                    "InputVariables": input_variables,
+                    "OutputSchema": end.get("OutputSchema", []),
                     "Template": end.get("Template", ""),
                     "StreamOutput": end.get("StreamOutput", True),
                 },
@@ -442,6 +453,19 @@ def _set_node_config(
 ) -> None:
     if isinstance(value, dict):
         server_node["NodeConfig"] = {key: value}
+
+
+def _remap_node_field_refs(value: object, generated_to_server_code: dict[str, str]) -> None:
+    if isinstance(value, dict):
+        if value.get("RefType") == "node_field":
+            node_code = value.get("NodeCode")
+            if isinstance(node_code, str) and node_code in generated_to_server_code:
+                value["NodeCode"] = generated_to_server_code[node_code]
+        for child in value.values():
+            _remap_node_field_refs(child, generated_to_server_code)
+    elif isinstance(value, list):
+        for child in value:
+            _remap_node_field_refs(child, generated_to_server_code)
 
 
 def _dataset_infos_by_id(client: HiagentAPIClient) -> dict[str, dict[str, object]]:

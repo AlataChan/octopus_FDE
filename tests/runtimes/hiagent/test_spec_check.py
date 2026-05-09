@@ -71,6 +71,23 @@ def test_end_node_output_type_variable_has_node_code():
         ])
 
 
+def test_spec_check_catches_unresolved_template_in_end_output():
+    with pytest.raises(HiagentSpecError, match="unresolved IR template ref"):
+        check_materialized_chatflow_nodes([
+            {"Type": "Start", "Code": "start", "NodeConfig": {"StartNode": _start_config()}},
+            {
+                "Type": "End",
+                "Code": "end",
+                "NodeConfig": {
+                    "EndNode": {
+                        "OutputType": "Content",
+                        "Template": "answer: ${some.field}",
+                    }
+                },
+            },
+        ])
+
+
 def test_spec_check_accepts_materialized_valid_shape():
     check_materialized_chatflow_nodes([
         {"Type": "Start", "Code": "start", "NodeConfig": {"StartNode": _start_config()}},

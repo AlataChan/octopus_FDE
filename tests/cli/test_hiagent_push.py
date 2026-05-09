@@ -349,6 +349,45 @@ def test_hiagent_push_mode_chatflow_calls_correct_actions(tmp_path, monkeypatch)
         field.get("Name") == "raw_output"
         for field in llm_nodes[0]["NodeConfig"]["LLMNode"]["OutputSchema"]
     )
+    end_nodes = [n for n in nodes if n["Type"] == "End"]
+    assert len(end_nodes) == 1
+    end_config = end_nodes[0]["NodeConfig"]["EndNode"]
+    answer_node_code = next(
+        n["Code"]
+        for n in nodes
+        if n["Type"] == "LLM"
+        and {"answer", "sources"} <= _output_names(n["NodeConfig"]["LLMNode"]["OutputSchema"])
+    )
+    rerank_node_code = next(
+        n["Code"]
+        for n in nodes
+        if n["Type"] == "LLM"
+        and "confidence" in _output_names(n["NodeConfig"]["LLMNode"]["OutputSchema"])
+    )
+    assert "${" not in end_config["Template"]
+    assert end_config["Template"] == "answer: {{answer}}\nsources: {{sources}}\nconfidence: {{confidence}}"
+    expected_input_refs = [
+        {
+            "Name": "answer",
+            "RefType": "node_field",
+            "NodeCode": answer_node_code,
+            "Path": "answer",
+        },
+        {
+            "Name": "sources",
+            "RefType": "node_field",
+            "NodeCode": answer_node_code,
+            "Path": "sources",
+        },
+        {
+            "Name": "confidence",
+            "RefType": "node_field",
+            "NodeCode": rerank_node_code,
+            "Path": "confidence",
+        },
+    ]
+    assert end_config["Input"] == expected_input_refs
+    assert end_config["InputVariables"] == expected_input_refs
     config_save_call = next(c for c in fake.calls if c[0] == "save_chatflow")
     _, (_, chatflow_config) = config_save_call
     assert chatflow_config["MetaType"] == "Workflow"
@@ -360,6 +399,10 @@ def test_hiagent_push_mode_chatflow_calls_correct_actions(tmp_path, monkeypatch)
     assert publish_chatflow_config == chatflow_config
     assert agent_mode == ""
     assert "Saving chatflow config draft" in result.output
+
+
+def _output_names(schema: list[dict]) -> set[str]:
+    return {str(item.get("Name")) for item in schema}
 
 
 def test_chatflow_input_refs_normalize_to_server_start_defaults():

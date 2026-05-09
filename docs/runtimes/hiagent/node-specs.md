@@ -20,6 +20,8 @@ Primary sources:
 - Multiple End nodes are rejected by `SaveChatflow`; multi-output IR graphs are merged into the single server End in the API adapter. `[LIVE]`
 - Downstream references to Start fields must be `RefType=node_field`; `RefType=sys` is rejected by `SaveChatflow`. `[LIVE]`
 - Generated nodes must be validated by `loom.runtimes.hiagent.spec_check` before save/publish.
+- Raw IR template strings such as `${node.field}` must not appear in End node API payloads.
+  End output variables are materialized as node-field refs before `SaveChatflow`. `[LIVE]`
 
 ## Start Node [Server Fixed]
 
@@ -81,6 +83,15 @@ Primary sources:
 - A ChatFlow app has one server-owned End node. `[LIVE]`
 - API adapter merges multiple IR End nodes into that single server End. `[LIVE]`
 - `OutputType=Content` may return template text.
+- Handbook: End supports two reply modes, configured content or returning variables;
+  when inputs are added, each input parameter value may be a reference to a previous
+  node or a literal input.
+- For configured content with variables, live samples use
+  `InputVariables: [{Name, NodeCode, Path, RefType: node_field}]` plus a template
+  such as `{{answer}}`. Do not send raw `${answer.answer}` strings in `Template`. `[LIVE]`
+- The live ChatFlow API stores End input refs under `EndNode.Input`; `InputVariables`
+  appears in bundle exports but is ignored by `SaveChatflow` on its own. Send `Input`
+  for API materialization. `[LIVE]`
 - `OutputType=Variable` requires node-field references with `NodeCode`; missing `NodeCode` is rejected. `[LIVE]`
 
 ## Reply Node

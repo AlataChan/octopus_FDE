@@ -327,9 +327,11 @@ def _output(
 ) -> dict[str, Any]:
     # Spec: docs/runtimes/hiagent/node-specs.md#end-node
     out = _base(n, "End", node_code_map, positions)
+    input_variables, template = _end_inputs_and_template(n.bindings, node_code_map)
     out["Configs"]["End"] = {
         "OutputType": "Content",
-        "Template": _template_from_bindings(n.bindings),
+        "InputVariables": input_variables,
+        "Template": template,
         "OutputSchema": [_port_schema(p) for p in ir.outputs],
         "StreamOutput": True,
     }
@@ -499,8 +501,18 @@ def _ref_object(
     }
 
 
-def _template_from_bindings(bindings: dict[str, str]) -> str:
-    lines = []
+def _end_inputs_and_template(
+    bindings: dict[str, str],
+    node_code_map: dict[str, str],
+) -> tuple[list[dict[str, Any]], str]:
+    input_variables: list[dict[str, Any]] = []
+    lines: list[str] = []
     for name, value in bindings.items():
-        lines.append(f"{name}: {value}")
-    return "\n".join(lines)
+        try:
+            node_id, path = parse_varref(value)
+        except VarRefParseError:
+            lines.append(f"{name}: {value}")
+            continue
+        input_variables.append(_ref_object(name, node_id, path, node_code_map))
+        lines.append(f"{name}: {{{{{name}}}}}")
+    return input_variables, "\n".join(lines)

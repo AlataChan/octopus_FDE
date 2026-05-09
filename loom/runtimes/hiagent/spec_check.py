@@ -15,6 +15,7 @@ class HiagentSpecError(ValueError):
 
 
 _INTENT_PORT_RE = re.compile(r"^(class\d{2}|class_other)$")
+_IR_TEMPLATE_RE = re.compile(r"\$\{[^}]+\}")
 _START_FIELDS = {"query", "files", "chat_histories"}
 
 
@@ -142,6 +143,16 @@ def _check_intent(config: Mapping[str, Any], *, require_query_variable: bool) ->
 
 
 def _check_end(config: Mapping[str, Any], loc: str) -> None:
+    _check_no_unresolved_templates(config, loc)
+    for field_name in ("Input", "InputVariables"):
+        input_variables = config.get(field_name)
+        if not isinstance(input_variables, list):
+            continue
+        for index, item in enumerate(input_variables):
+            if not isinstance(item, Mapping):
+                raise HiagentSpecError(f"{loc}.{field_name}[{index}] must be a mapping")
+            if item.get("RefType") == "node_field" and not item.get("NodeCode"):
+                raise HiagentSpecError(f"{loc}.{field_name}[{index}] requires NodeCode")
     if config.get("OutputType") != "Variable":
         return
     refs = list(_iter_ref_dicts(config))
@@ -150,6 +161,20 @@ def _check_end(config: Mapping[str, Any], loc: str) -> None:
     for ref in refs:
         if ref.get("RefType") == "node_field" and not ref.get("NodeCode"):
             raise HiagentSpecError(f"{loc} OutputType=Variable references require NodeCode")
+
+
+def _check_no_unresolved_templates(value: Any, loc: str) -> None:
+    if isinstance(value, str):
+        if _IR_TEMPLATE_RE.search(value):
+            raise HiagentSpecError(
+                f"unresolved IR template ref leaked into {loc}: {value!r}"
+            )
+    elif isinstance(value, Mapping):
+        for key, child in value.items():
+            _check_no_unresolved_templates(child, f"{loc}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _check_no_unresolved_templates(child, f"{loc}[{index}]")
 
 
 def _check_no_sys_refs(value: Any, loc: str) -> None:
