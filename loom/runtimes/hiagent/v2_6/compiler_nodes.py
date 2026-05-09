@@ -430,16 +430,68 @@ def _json_type_to_hiagent_type(schema: dict[str, Any]) -> int:
 
 
 def _llm_prompt(prompt: str, schema: dict[str, Any] | None) -> str:
+    augmented = prompt
+    contract = _strict_json_contract(schema)
+    if contract:
+        augmented = augmented + "\n\n" + contract
     stringified_arrays = _stringified_array_fields(schema)
-    if not stringified_arrays:
-        return prompt
-    fields = ", ".join(sorted(stringified_arrays))
+    if stringified_arrays:
+        fields = ", ".join(sorted(stringified_arrays))
+        augmented += (
+            "\n\nHiagent output contract: these fields must be strings, not JSON arrays, "
+            + f"because Hiagent v2.6 validates generic LLM arrays as Array<String>: {fields}. "
+            + "Use a comma-separated string such as \"1,3,0\" for numeric index lists."
+        )
+    return augmented
+
+
+def _strict_json_contract(schema: dict[str, Any] | None) -> str:
+    if not schema:
+        return ""
+    properties = schema.get("properties")
+    if not isinstance(properties, dict) or not properties:
+        return ""
+    lines: list[str] = []
+    for name, prop in sorted(properties.items()):
+        if not isinstance(name, str) or not isinstance(prop, dict):
+            continue
+        lines.append(f"  - {name}: {_describe_field_type(prop)}")
+    if not lines:
+        return ""
     return (
-        prompt
-        + "\n\nHiagent output contract: these fields must be strings, not JSON arrays, "
-        + f"because Hiagent v2.6 validates generic LLM arrays as Array<String>: {fields}. "
-        + "Use a comma-separated string such as \"1,3,0\" for numeric index lists."
+        "Output strict JSON with EXACTLY these top-level keys (no synonyms, no additions, "
+        "do NOT rename or pluralize):\n"
+        + "\n".join(lines)
     )
+
+
+def _describe_field_type(prop: dict[str, Any]) -> str:
+    typ = prop.get("type")
+    if typ == "array":
+        items = prop.get("items") if isinstance(prop.get("items"), dict) else {}
+        item_type = items.get("type") if isinstance(items, dict) else None
+        if item_type == "string":
+            return 'array of strings (each item must be a JSON string with quotes, e.g. ["a","b"])'
+        if item_type in {"integer", "number"}:
+            return 'comma-separated string of numbers (e.g. "1,2,3"), not a JSON array'
+        if item_type == "boolean":
+            return 'comma-separated string of true/false (e.g. "true,false"), not a JSON array'
+        return "array"
+    if typ == "string":
+        return "string"
+    if typ == "integer":
+        return "integer"
+    if typ == "number":
+        rng = ""
+        lo, hi = prop.get("minimum"), prop.get("maximum")
+        if lo is not None and hi is not None:
+            rng = f" between {lo} and {hi}"
+        return f"number{rng}"
+    if typ == "boolean":
+        return "boolean"
+    if typ == "object":
+        return "object"
+    return str(typ) if typ else "value"
 
 
 def _stringified_array_fields(schema: dict[str, Any] | None) -> list[str]:
