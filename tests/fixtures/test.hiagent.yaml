@@ -1,0 +1,12 @@
+customer: test
+target: hiagent
+target_version: "2.6"
+workspace_id: ws_test_synthetic
+dataset_id_map:
+  product_kb: ds_test_001
+  policy_kb: ds_test_002
+model_id_map:
+  configured-small-model: model_test_small
+  configured-planner-model: model_test_planner
+rerank_model_id: model_test_rerank
+tool_id_map: {}

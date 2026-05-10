@@ -52,32 +52,62 @@ _APP_CONFIG_REQUEST_KEYS = _APP_CONFIG_DRAFT_KEYS | {
 
 
 def compile_ir(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
-    """Compile IR to an in-memory Hiagent v2.6 chat-mode Agent bundle.
+    """Compile IR to a Hiagent v2.6 chat-mode Agent bundle.
 
-    This is for inspection only. Production publish uses
-    `build_agent_config_draft` + `build_agent_config_request` through the TOP
-    API client.
+    The ZIP import shape is documented in
+    `docs/runtimes/hiagent/zip-import-format.md`.
     """
     agent_id = gen_id()
     bundle_name = _bundle_dirname(ir)
-    safe_name = ir.metadata.name.replace(" ", "_")
-    agent_filename = f"{safe_name}.yaml"
+    agent_filename = f"{ir.metadata.name}.yaml"
 
     agent_yaml = _build_agent_yaml(ir=ir, binding=binding, agent_id=agent_id)
 
-    index_yaml: dict[str, Any] = {
-        "DLVersion": "0.0.1",
-        "FromWorkspaceID": binding.workspace_id,
-        "MainMeta": "Agent",
-        "MainMetaName": ir.metadata.name,
-        "MainUniqueName": agent_id,
-    }
-
+    index_yaml = _build_index_yaml(ir=ir, binding=binding, agent_id=agent_id)
     files: dict[str, Any] = {
         "index.yaml": index_yaml,
         f"agent/{agent_filename}": agent_yaml,
     }
+    files.update(_build_sidecar_files(agent_yaml["AppDepends"], binding))
 
+    return HiagentBundle(bundle_name=bundle_name, files=files)
+
+
+def compile_ir_chatflow(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
+    """Compile IR to a Hiagent v2.6 ChatFlow Agent bundle.
+
+    The ZIP import shape is documented in
+    `docs/runtimes/hiagent/zip-import-format.md`.
+    """
+    agent_id = gen_id()
+    bundle_name = _bundle_dirname(ir)
+    agent_filename = f"{ir.metadata.name}.yaml"
+    agent_yaml = _build_agent_yaml(ir=ir, binding=binding, agent_id=agent_id)
+    chatflow_detail = build_chatflow_config_draft(ir, binding)
+    single = agent_yaml["AppConfig"]["SingleAgentConfig"]
+    single["ModelID"] = ""
+    single["ModelName"] = ""
+    single["KnowledgeIDs"] = []
+    single["ToolIDs"] = []
+    single["WorkflowIDs"] = []
+    single["ChatFlowConfig"] = {
+        "ChatAdvancedConfig": _chat_advanced_config(),
+        "RoundsReserved": 23,
+        "Version": "v1.0.0",
+        "WorkflowID": chatflow_detail["ID"],
+        "WorkflowPublishID": "",
+    }
+    agent_yaml["AppConfig"]["AgentMode"] = ""
+    agent_yaml["AppConfig"]["ChatFlowDetail"] = chatflow_detail
+    agent_yaml["AppInfo"]["AgentMode"] = ""
+    agent_yaml["AppInfo"]["AppType"] = "ChatFlow"
+
+    index_yaml = _build_index_yaml(ir=ir, binding=binding, agent_id=agent_id)
+    files: dict[str, Any] = {
+        "index.yaml": index_yaml,
+        f"agent/{agent_filename}": agent_yaml,
+    }
+    files.update(_build_sidecar_files(agent_yaml["AppDepends"], binding))
     return HiagentBundle(bundle_name=bundle_name, files=files)
 
 
@@ -403,6 +433,109 @@ def _build_app_depends(ir: IRDocument, binding: HiagentBinding) -> dict[str, Any
         "TermDatasetMap": {},
         "ToolMap": {},
         "WorkflowMap": {},
+    }
+
+
+def _build_index_yaml(
+    *,
+    ir: IRDocument,
+    binding: HiagentBinding,
+    agent_id: str,
+) -> dict[str, Any]:
+    return {
+        "DLVersion": "0.0.1",
+        "FromWorkspaceID": binding.workspace_id,
+        "MainMeta": "Agent",
+        "MainMetaName": ir.metadata.name,
+        "MainUniqueName": agent_id,
+    }
+
+
+def _build_sidecar_files(
+    app_depends: dict[str, Any],
+    binding: HiagentBinding,
+) -> dict[str, Any]:
+    files: dict[str, Any] = {}
+    model_map = app_depends.get("ModelMap")
+    if isinstance(model_map, dict):
+        for model_id, entry in model_map.items():
+            if isinstance(model_id, str) and isinstance(entry, dict):
+                name = str(entry["Name"])
+                files[f"model/{name}.yaml"] = _build_model_sidecar(
+                    model_id=model_id,
+                    name=name,
+                    binding=binding,
+                )
+    knowledge_map = app_depends.get("KnowledgeMap")
+    if isinstance(knowledge_map, dict):
+        for dataset_id, entry in knowledge_map.items():
+            if isinstance(dataset_id, str) and isinstance(entry, dict):
+                name = str(entry["Name"])
+                files[f"knowledge/{name}.yaml"] = _build_knowledge_sidecar(
+                    dataset_id=dataset_id,
+                    name=name,
+                    binding=binding,
+                )
+    return files
+
+
+def _build_model_sidecar(
+    *,
+    model_id: str,
+    name: str,
+    binding: HiagentBinding,
+) -> dict[str, Any]:
+    return {
+        "DLVersion": "0.0.1",
+        "DeletedAt": None,
+        "Desc": "",
+        "DisplayName": name,
+        "Implement": "custom",
+        "IsDefault": False,
+        "IsPublic": False,
+        "Key": name,
+        "LogoPath": "",
+        "MetaType": "Model",
+        "Source": "custom",
+        "SourceTypes": ["Agent"],
+        "TenantId": binding.workspace_id,
+        "Type": "text-generation",
+        "UniqueName": model_id,
+        "UpdatedAt": int(time.time() * 1000),
+        "VersionCode": "",
+        "VersionName": "",
+    }
+
+
+def _build_knowledge_sidecar(
+    *,
+    dataset_id: str,
+    name: str,
+    binding: HiagentBinding,
+) -> dict[str, Any]:
+    return {
+        "DLVersion": "v1.0.0",
+        "Desc": "",
+        "DisplayName": name,
+        "LogoPath": "",
+        "MetaType": "kbs_dataset",
+        "UniqueName": dataset_id,
+        "UpdatedAt": int(time.time() * 1000),
+        "VersionCode": dataset_id,
+        "VersionName": "v1.0.0",
+        "data": {
+            "Description": None,
+            "DirectoryID": "default",
+            "EmbeddingModelID": "",
+            "IconSha256": "",
+            "IndexingTechnique": 0,
+            "Name": name,
+            "RetrievalSearchMethod": 0,
+            "SpaceType": 1,
+            "TenantID": binding.workspace_id,
+            "WorkspaceID": binding.workspace_id,
+            "XID": dataset_id,
+        },
     }
 
 
