@@ -147,6 +147,40 @@ def test_cli_rejects_yaml_extension(tmp_path):
     assert not out.exists()
 
 
+def test_cli_warns_for_empty_hiagent_bindings_but_writes_zip(tmp_path):
+    src = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"
+    out = tmp_path / "chat.zip"
+    binding_path = tmp_path / "empty.hiagent.yaml"
+    binding_path.write_text(
+        "customer: test\n"
+        "target: hiagent\n"
+        "target_version: '2.6'\n"
+        "workspace_id: d31pcnoboot936af1tsg\n"
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli,
+        [
+            "compile",
+            str(src),
+            "--target",
+            "hiagent",
+            "--mode",
+            "chat",
+            "--binding",
+            str(binding_path),
+            "--out",
+            str(out),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert out.exists()
+    assert "warning: no model bound" in result.output
+    assert "warning: no knowledge bound" in result.output
+
+
 def test_compile_hiagent_without_binding_fails(tmp_path):
     """No --binding passed, target is hiagent -> fail-fast clear error."""
     src = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"

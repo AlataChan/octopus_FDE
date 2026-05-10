@@ -78,18 +78,23 @@ def test_bundle_index_has_required_fields(faq_ir: IRDocument, minimal_binding: H
     assert index["MainUniqueName"] == agent["UniqueName"] == agent["AppConfig"]["AppID"]
 
 
-def test_agent_filename_preserves_spaces(minimal_binding: HiagentBinding):
+@pytest.mark.parametrize("name", ["Foo Bar Baz", "电商 客服 FAQ"])
+def test_agent_filename_preserves_metadata_name_verbatim(
+    minimal_binding: HiagentBinding,
+    name: str,
+):
     ir = IRDocument.model_validate(
         json.loads((ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json").read_text())
     )
     data = ir.model_dump(by_alias=True)
-    data["metadata"]["name"] = "Foo Bar Baz"
+    data["metadata"]["name"] = name
     renamed = IRDocument.model_validate(data)
 
     bundle = compile_ir(renamed, minimal_binding)
 
-    assert "agent/Foo Bar Baz.yaml" in bundle.files
-    assert "agent/Foo_Bar_Baz.yaml" not in bundle.files
+    assert f"agent/{name}.yaml" in bundle.files
+    assert bundle.index["MainMetaName"] == name
+    assert f"agent/{name.replace(' ', '_')}.yaml" not in bundle.files
 
 
 def test_agent_yaml_has_single_chat_mode(faq_ir: IRDocument, minimal_binding: HiagentBinding):

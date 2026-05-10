@@ -6,11 +6,13 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml  # type: ignore[import-untyped]
 
 from loom.ir.models import IRDocument
 from loom.runtimes.hiagent.binding import HiagentBinding
-from loom.runtimes.hiagent.v2_6.compiler import compile_ir
+from loom.runtimes.hiagent.v2_6.bundle import HiagentBundle
+from loom.runtimes.hiagent.v2_6.compiler import compile_ir, compile_ir_chatflow
 
 ROOT = Path(__file__).resolve().parents[4]
 
@@ -44,7 +46,16 @@ def _zip_yaml(raw: bytes, path: str) -> dict[str, Any]:
 def test_zip_format_hard_rules():
     bundle = compile_ir(_load_ir(), _test_binding())
     raw = bundle.to_zip_bytes()
+    _assert_zip_hard_rules(bundle, raw)
 
+
+def test_chatflow_zip_format_hard_rules():
+    bundle = compile_ir_chatflow(_load_ir(), _test_binding())
+    raw = bundle.to_zip_bytes()
+    _assert_zip_hard_rules(bundle, raw)
+
+
+def _assert_zip_hard_rules(bundle: HiagentBundle, raw: bytes) -> None:
     names = _zip_names(raw)
     assert names
     for name in names:
@@ -55,6 +66,22 @@ def test_zip_format_hard_rules():
 
     assert re.fullmatch(r"[0-9a-f]{32}", _zip_trailer(raw))
     assert hashlib.md5(_zip_payload(raw)).hexdigest() == _zip_trailer(raw)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "",
+        "/index.yaml",
+        "agent/../index.yaml",
+        "agent\\bad.yaml",
+    ],
+)
+def test_zip_rejects_unsafe_entry_paths(path: str):
+    bundle = HiagentBundle(bundle_name="bundle", files={path: {"bad": True}})
+
+    with pytest.raises(ValueError, match="unsafe Hiagent zip entry path"):
+        bundle.to_zip_bytes()
 
 
 def test_zip_contains_index_agent_model_and_knowledge_sidecars():

@@ -485,6 +485,9 @@ def _build_model_sidecar(
     name: str,
     binding: HiagentBinding,
 ) -> dict[str, Any]:
+    # Model sidecar schema is tracked in docs/runtimes/hiagent/zip-import-format.md.
+    # Current live samples accept TenantId=workspace_id. If a future sample proves
+    # tenant and workspace diverge, add tenant_id to HiagentBinding and wire it here.
     return {
         "DLVersion": "0.0.1",
         "DeletedAt": None,

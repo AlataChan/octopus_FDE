@@ -1,8 +1,8 @@
-"""HiagentBundle data structure.
+"""HiagentBundle data structure for the live-verified ZIP import path.
 
-The validated customer path is TOP-signed API push. This bundle remains a
-small in-memory carrier for inspection and tests; it does not serialize to the
-retired external ZIP import format.
+This bundle is the in-memory carrier for the Hiagent ZIP format documented in
+`docs/runtimes/hiagent/zip-import-format.md`; the TOP API push path remains a
+separate runtime integration.
 """
 from __future__ import annotations
 
@@ -46,6 +46,7 @@ class HiagentBundle:
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for rel_path, content in self.files.items():
+                _validate_zip_entry_path(rel_path)
                 if isinstance(content, bytes):
                     payload = content
                 else:
@@ -59,3 +60,14 @@ class HiagentBundle:
         zip_body = buf.getvalue()
         trailer = hashlib.md5(zip_body).hexdigest().encode("ascii")
         return zip_body + trailer
+
+
+def _validate_zip_entry_path(path: str) -> None:
+    parts = path.split("/")
+    if (
+        not path
+        or path.startswith("/")
+        or "\\" in path
+        or ".." in parts
+    ):
+        raise ValueError(f"unsafe Hiagent zip entry path: {path!r}")
