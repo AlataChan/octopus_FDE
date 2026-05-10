@@ -103,8 +103,7 @@ class SessionStore:
         user_message: str,
         ir_before: str | None,
     ) -> TurnRow:
-        session = self.require_session(session_id, actor_id=actor_id)
-        new_state = transition(session.state, "turn_started").value
+        self.require_session(session_id, actor_id=actor_id)
         turn_id = uuid4()
         now = _now()
         with self._connect() as con:
@@ -117,10 +116,6 @@ class SessionStore:
                 VALUES (?, ?, ?, ?, ?, ?, 'running', ?)
                 """,
                 (str(turn_id), str(session_id), actor_id, user_message, ir_before, "[]", now),
-            )
-            con.execute(
-                "UPDATE sessions SET state = ?, updated_at = ? WHERE session_id = ? AND actor_id = ?",
-                (new_state, now, str(session_id), actor_id),
             )
         row = self.get_turn(turn_id, actor_id=actor_id)
         assert row is not None
@@ -166,8 +161,7 @@ class SessionStore:
         error_kind: str,
         validation_errors: list[str],
     ) -> TurnRow:
-        turn = self.require_turn(turn_id, actor_id=actor_id)
-        now = _now()
+        self.require_turn(turn_id, actor_id=actor_id)
         with self._connect() as con:
             con.execute(
                 """
@@ -176,14 +170,6 @@ class SessionStore:
                 WHERE turn_id = ? AND actor_id = ?
                 """,
                 (error_kind, json.dumps(validation_errors), str(turn_id), actor_id),
-            )
-            con.execute(
-                """
-                UPDATE sessions
-                SET state = ?, updated_at = ?
-                WHERE session_id = ? AND actor_id = ?
-                """,
-                (SessionState.LLM_CONFIG_SET.value, now, str(turn.session_id), actor_id),
             )
         row = self.get_turn(turn_id, actor_id=actor_id)
         assert row is not None

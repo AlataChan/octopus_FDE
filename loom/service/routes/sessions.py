@@ -381,11 +381,18 @@ def list_bindings(request: Request, actor: ActorDep) -> list[dict[str, str]]:
     binding_dir: Path = request.app.state.settings.binding_dir
     if not binding_dir.exists():
         return []
-    rows = []
-    for path in sorted(binding_dir.glob("*.hiagent.yaml")):
-        handle = path.name.removesuffix(".hiagent.yaml")
-        rows.append({"handle": handle, "display_name": handle})
-    return rows
+    rows: list[dict[str, str]] = []
+    suffixes = {
+        ".dify.yaml": "dify",
+        ".hiagent.yaml": "hiagent",
+    }
+    for path in sorted(binding_dir.glob("*.yaml")):
+        for suffix, target in suffixes.items():
+            if path.name.endswith(suffix):
+                handle = path.name.removesuffix(suffix)
+                rows.append({"handle": handle, "target": target, "display_name": handle})
+                break
+    return sorted(rows, key=lambda row: (row["handle"], row["target"]))
 
 
 @router.get("/archive/sessions/{session_id}")

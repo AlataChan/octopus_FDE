@@ -35,9 +35,30 @@ def test_session_llm_key_is_encrypted(tmp_path):
 def test_failed_turn_does_not_advance_latest_ir(tmp_path):
     store = SessionStore(tmp_path / "sessions.db")
     session = store.create_session(actor_id="fde")
-    store.update_latest_ir(session.session_id, actor_id="fde", ir_json='{"ir_version":"0.3"}')
+    fernet = Fernet(Fernet.generate_key())
+    store.set_llm_config(
+        session.session_id,
+        actor_id="fde",
+        api_key="sk-secret",
+        base_url="https://api.example.com/v1",
+        model="deepseek-v4-flash",
+        fernet=fernet,
+    )
+    first_turn = store.create_turn(
+        session.session_id,
+        actor_id="fde",
+        user_message="good edit",
+        ir_before=None,
+    )
+    store.finish_turn_succeeded(
+        first_turn.turn_id,
+        actor_id="fde",
+        planner_reply="ok",
+        ir_after='{"ir_version":"0.3"}',
+    )
     before = store.get_session(session.session_id, actor_id="fde")
     assert before is not None
+    assert before.state == "validated"
 
     turn = store.create_turn(
         session.session_id,
@@ -55,6 +76,7 @@ def test_failed_turn_does_not_advance_latest_ir(tmp_path):
     after = store.get_session(session.session_id, actor_id="fde")
     assert after is not None
     assert after.latest_ir_sha256 == before.latest_ir_sha256
+    assert after.state == before.state
 
 
 def test_artifact_lookup_requires_session_and_artifact_ids(tmp_path):

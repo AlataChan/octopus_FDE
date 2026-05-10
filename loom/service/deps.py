@@ -27,10 +27,10 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> Settings:
-        app_env = os.environ.get("APP_ENV", "dev")
+        app_env = os.environ.get("APP_ENV", "prod")
         key = os.environ.get("LOOM_FERNET_KEY")
         if app_env != "dev" and not key:
-            raise RuntimeError("LOOM_FERNET_KEY is required when APP_ENV is prod")
+            raise RuntimeError("LOOM_FERNET_KEY is required when APP_ENV is prod or unset")
         if app_env == "dev" and not key:
             key = Fernet.generate_key().decode("ascii")
             LOGGER.warning("LOOM_FERNET_KEY missing in dev; using an ephemeral per-process key")

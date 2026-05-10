@@ -25,6 +25,15 @@ def test_prod_requires_fernet_key(tmp_path, monkeypatch):
         Settings.from_env()
 
 
+def test_unset_app_env_requires_fernet_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("LOOM_FERNET_KEY", raising=False)
+    monkeypatch.setenv("LOOM_DATA_DIR", str(tmp_path))
+
+    with pytest.raises(RuntimeError, match="LOOM_FERNET_KEY"):
+        Settings.from_env()
+
+
 def test_data_dir_created_private(tmp_path):
     settings = Settings(data_dir=tmp_path / "data", app_env="dev", fernet_key=Fernet.generate_key().decode())
     settings.ensure_data_dir()

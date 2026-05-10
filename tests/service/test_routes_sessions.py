@@ -22,6 +22,7 @@ def _client(tmp_path, planner=None) -> TestClient:
     bindings = tmp_path / "bindings"
     bindings.mkdir()
     (bindings / "test.hiagent.yaml").write_text((ROOT / "tests" / "fixtures" / "test.hiagent.yaml").read_text())
+    (bindings / "demo.dify.yaml").write_text("customer: demo\n")
     settings = Settings(
         data_dir=tmp_path / "data",
         app_env="dev",
@@ -96,12 +97,16 @@ def test_turn_failure_keeps_latest_ir_pointer(tmp_path):
         json={"api_key": "sk-secret", "base_url": "https://api.example.com/v1", "model": "deepseek-v4-flash"},
     )
     client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "ok"})
-    before = client.get(f"/v1/sessions/{sid}").json()["latest_ir_sha256"]
+    before_session = client.get(f"/v1/sessions/{sid}").json()
+    before = before_session["latest_ir_sha256"]
+    assert before_session["state"] == "validated"
 
     failed = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "fail"}).json()
-    after = client.get(f"/v1/sessions/{sid}").json()["latest_ir_sha256"]
+    after_session = client.get(f"/v1/sessions/{sid}").json()
+    after = after_session["latest_ir_sha256"]
     assert failed["status"] == "failed"
     assert after == before
+    assert after_session["state"] == before_session["state"]
 
 
 def test_artifact_path_traversal_is_not_part_of_api(tmp_path):
@@ -114,5 +119,8 @@ def test_artifact_path_traversal_is_not_part_of_api(tmp_path):
 def test_bindings_route_returns_handles_not_raw_yaml(tmp_path):
     client = _client(tmp_path)
     rows = client.get("/v1/bindings").json()
-    assert rows == [{"handle": "test", "display_name": "test"}]
+    assert rows == [
+        {"handle": "demo", "target": "dify", "display_name": "demo"},
+        {"handle": "test", "target": "hiagent", "display_name": "test"},
+    ]
     assert "workspace_id" not in rows[0]
