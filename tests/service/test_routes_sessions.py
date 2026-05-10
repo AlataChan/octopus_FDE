@@ -1,0 +1,118 @@
+import hashlib
+import json
+from pathlib import Path
+
+from cryptography.fernet import Fernet
+from fastapi.testclient import TestClient
+
+from loom.ir.models import IRDocument
+from loom.service.app import create_app
+from loom.service.deps import Settings
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _sample_ir() -> IRDocument:
+    return IRDocument.model_validate(
+        json.loads((ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json").read_text())
+    )
+
+
+def _client(tmp_path, planner=None) -> TestClient:
+    bindings = tmp_path / "bindings"
+    bindings.mkdir()
+    (bindings / "test.hiagent.yaml").write_text((ROOT / "tests" / "fixtures" / "test.hiagent.yaml").read_text())
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        app_env="dev",
+        fernet_key=Fernet.generate_key().decode(),
+        binding_dir=bindings,
+    )
+    return TestClient(create_app(settings=settings, planner=planner))
+
+
+def test_session_turn_compile_download_archive_and_registry_round_trip(tmp_path):
+    ir = _sample_ir()
+
+    def planner(*, user_message: str, **kwargs):
+        assert user_message == "build faq"
+        return ir
+
+    client = _client(tmp_path, planner=planner)
+    session = client.post("/v1/sessions", json={}).json()
+    sid = session["session_id"]
+
+    llm = client.patch(
+        f"/v1/sessions/{sid}/llm-config",
+        json={"api_key": "sk-secret", "base_url": "https://api.example.com/v1", "model": "deepseek-v4-flash"},
+    )
+    assert llm.status_code == 200
+
+    turn = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "build faq"}).json()
+    assert turn["status"] == "succeeded"
+
+    compiled = client.post(
+        f"/v1/sessions/{sid}/compile",
+        json={"target": "hiagent", "mode": "chatflow", "binding": "test"},
+    ).json()
+    artifact_id = compiled["artifact_id"]
+    assert compiled["sha256"]
+
+    downloaded = client.get(f"/v1/sessions/{sid}/artifacts/{artifact_id}")
+    assert downloaded.status_code == 200
+    assert hashlib.sha256(downloaded.content).hexdigest() == compiled["sha256"]
+
+    registry_rows = client.get("/v1/registry/workflows").json()
+    assert len(registry_rows) == 1
+    assert registry_rows[0]["artifact_sha256"] == compiled["sha256"]
+
+    archive = client.get(f"/v1/archive/sessions/{sid}").text
+    assert "session.created" in archive
+    assert "turn.succeeded" in archive
+    assert "compile.produced" in archive
+    assert "artifact.downloaded" in archive
+    app = client.app
+    events = app.state.archive_writer.validate_chain(sid)
+    produced = next(e for e in events if e.event_type == "compile.produced")
+    artifact_downloaded = next(e for e in events if e.event_type == "artifact.downloaded")
+    assert produced.payload["artifact_sha256"] == registry_rows[0]["artifact_sha256"]
+    assert artifact_downloaded.occurred_at > produced.occurred_at
+
+
+def test_turn_failure_keeps_latest_ir_pointer(tmp_path):
+    ir = _sample_ir()
+    calls = {"n": 0}
+
+    def planner(*, user_message: str, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return ir
+        raise RuntimeError("planner exploded")
+
+    client = _client(tmp_path, planner=planner)
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+    client.patch(
+        f"/v1/sessions/{sid}/llm-config",
+        json={"api_key": "sk-secret", "base_url": "https://api.example.com/v1", "model": "deepseek-v4-flash"},
+    )
+    client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "ok"})
+    before = client.get(f"/v1/sessions/{sid}").json()["latest_ir_sha256"]
+
+    failed = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "fail"}).json()
+    after = client.get(f"/v1/sessions/{sid}").json()["latest_ir_sha256"]
+    assert failed["status"] == "failed"
+    assert after == before
+
+
+def test_artifact_path_traversal_is_not_part_of_api(tmp_path):
+    client = _client(tmp_path, planner=lambda **kwargs: _sample_ir())
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+    resp = client.get(f"/v1/sessions/{sid}/artifacts/../../pyproject.toml")
+    assert resp.status_code in {404, 422}
+
+
+def test_bindings_route_returns_handles_not_raw_yaml(tmp_path):
+    client = _client(tmp_path)
+    rows = client.get("/v1/bindings").json()
+    assert rows == [{"handle": "test", "display_name": "test"}]
+    assert "workspace_id" not in rows[0]
