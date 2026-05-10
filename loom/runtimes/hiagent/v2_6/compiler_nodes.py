@@ -106,16 +106,55 @@ def _trigger(
     positions: dict[str, tuple[float, float]],
 ) -> dict[str, Any]:
     # Spec: docs/runtimes/hiagent/node-specs.md#start-node-server-fixed
-    """Hiagent Start node only has InputSchema + OutputSchema (verified via
-    customer's 小芸维修专家 sample). IR's mode/schedule/webhook fields are
-    not represented in the v2.6 graph node — they live elsewhere in the
-    Agent's chat config or trigger metadata."""
+    """Hiagent ChatFlow Start node has a fixed canonical InputSchema /
+    OutputSchema: query (string) + files (Array<File>) + chat_histories
+    (Array<Object>). The chat shell feeds these three fields automatically
+    from user input — IR's custom inputs do not fit and will fail server
+    validation if substituted. Verified against customer's 小芸 ChatFlow
+    sample (matches byte-for-byte)."""
     out = _base(n, "Start", node_code_map, positions)
     out["Configs"]["Start"] = {
-        "InputSchema": [_port_schema_minimal(p) for p in ir.inputs],
-        "OutputSchema": [_port_schema_minimal(p) for p in ir.inputs],
+        "InputSchema": _CHATFLOW_START_SCHEMA,
+        "OutputSchema": _CHATFLOW_START_SCHEMA,
     }
     return out
+
+
+_CHATFLOW_START_SCHEMA: list[dict[str, Any]] = [
+    {
+        "Desc": "用户输入的原始内容",
+        "Name": "query",
+        "Required": True,
+        "Type": 0,  # String
+    },
+    {
+        "Desc": "对话附件",
+        "Name": "files",
+        "SubParameters": [
+            {"Desc": "文件名", "Name": "name", "Required": True, "Type": 0},
+            {"Desc": "文件链接", "Name": "url", "Required": True, "Type": 0},
+        ],
+        "Type": 11,  # Array<File>
+    },
+    {
+        "Desc": "用户与应用的对话历史",
+        "Name": "chat_histories",
+        "SubParameters": [
+            {"Desc": "历史对话问题", "Name": "query", "Type": 0},
+            {"Desc": "历史对话回答", "Name": "answer", "Type": 0},
+            {
+                "Desc": "对话附件",
+                "Name": "files",
+                "SubParameters": [
+                    {"Desc": "文件名", "Name": "name", "Required": True, "Type": 0},
+                    {"Desc": "文件链接", "Name": "url", "Required": True, "Type": 0},
+                ],
+                "Type": 11,
+            },
+        ],
+        "Type": 9,  # Array<Object>
+    },
+]
 
 
 def _llm(
@@ -161,7 +200,7 @@ def _retrieval(
         "TopK": n.top_k,
         "MatchType": "vector",
         "RerankID": binding.rerank_model_id,
-        "RetrievalSearchMethod": "semantic",
+        "RetrievalSearchMethod": 0,
         "Similarity": 0.5,
         "QueryVariable": _to_ref("query", n.query, node_code_map),
         "OutputSchema": [{"Name": "chunks", "Required": True, "Type": 5}],
