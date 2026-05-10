@@ -1,4 +1,5 @@
 import json
+import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -28,16 +29,10 @@ def test_validate_fails_on_missing_rationale(tmp_path):
 
 
 def test_compile_to_hiagent_writes_inspection_yaml(tmp_path):
-    """Hiagent compile writes an inspection YAML; API push is the publish path."""
+    """--inspect preserves the legacy single-agent YAML inspection path."""
     src = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"
     out = tmp_path / "out.hiagent.yaml"
-    binding_path = tmp_path / "bind.yaml"
-    binding_path.write_text(
-        "customer: test\n"
-        "target: hiagent\n"
-        "target_version: '2.6'\n"
-        "workspace_id: d31pcnoboot936af1tsg\n"
-    )
+    binding_path = ROOT / "tests" / "fixtures" / "test.hiagent.yaml"
     runner = CliRunner()
     result = runner.invoke(
         cli,
@@ -46,6 +41,7 @@ def test_compile_to_hiagent_writes_inspection_yaml(tmp_path):
             str(src),
             "--target",
             "hiagent",
+            "--inspect",
             "--binding",
             str(binding_path),
             "--out",
@@ -60,7 +56,129 @@ def test_compile_to_hiagent_writes_inspection_yaml(tmp_path):
     assert doc["MetaType"] == "Agent"
     assert doc["AppConfig"]["SingleAgentConfig"]["PrePrompt"]
     assert "inspection YAML" in result.output
-    assert "loom hiagent push" in result.output
+
+
+def test_cli_chat_smoke(tmp_path):
+    src = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"
+    out = tmp_path / "chat.zip"
+    binding_path = ROOT / "tests" / "fixtures" / "test.hiagent.yaml"
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli,
+        [
+            "compile",
+            str(src),
+            "--target",
+            "hiagent",
+            "--mode",
+            "chat",
+            "--binding",
+            str(binding_path),
+            "--out",
+            str(out),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "导入智能体" in result.output
+    assert out.exists()
+    with zipfile.ZipFile(out) as zf:
+        names = zf.namelist()
+    assert "index.yaml" in names
+    assert "agent/Ecommerce Customer FAQ.yaml" in names
+    assert "model/configured-small-model.yaml" in names
+
+
+def test_cli_chatflow_smoke(tmp_path):
+    src = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"
+    out = tmp_path / "chatflow.zip"
+    binding_path = ROOT / "tests" / "fixtures" / "test.hiagent.yaml"
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli,
+        [
+            "compile",
+            str(src),
+            "--target",
+            "hiagent",
+            "--mode",
+            "chatflow",
+            "--binding",
+            str(binding_path),
+            "--out",
+            str(out),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    with zipfile.ZipFile(out) as zf:
+        names = zf.namelist()
+    assert "index.yaml" in names
+    assert "agent/Ecommerce Customer FAQ.yaml" in names
+    assert "model/configured-small-model.yaml" in names
+
+
+def test_cli_rejects_yaml_extension(tmp_path):
+    src = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"
+    out = tmp_path / "chatflow.yml"
+    binding_path = ROOT / "tests" / "fixtures" / "test.hiagent.yaml"
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli,
+        [
+            "compile",
+            str(src),
+            "--target",
+            "hiagent",
+            "--mode",
+            "chatflow",
+            "--binding",
+            str(binding_path),
+            "--out",
+            str(out),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "use `--inspect` for yaml inspection mode, or pass a .zip path" in result.output
+    assert not out.exists()
+
+
+def test_cli_warns_for_empty_hiagent_bindings_but_writes_zip(tmp_path):
+    src = ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json"
+    out = tmp_path / "chat.zip"
+    binding_path = tmp_path / "empty.hiagent.yaml"
+    binding_path.write_text(
+        "customer: test\n"
+        "target: hiagent\n"
+        "target_version: '2.6'\n"
+        "workspace_id: d31pcnoboot936af1tsg\n"
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli,
+        [
+            "compile",
+            str(src),
+            "--target",
+            "hiagent",
+            "--mode",
+            "chat",
+            "--binding",
+            str(binding_path),
+            "--out",
+            str(out),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert out.exists()
+    assert "warning: no model bound" in result.output
+    assert "warning: no knowledge bound" in result.output
 
 
 def test_compile_hiagent_without_binding_fails(tmp_path):

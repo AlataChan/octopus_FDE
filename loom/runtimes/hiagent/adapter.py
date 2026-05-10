@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from loom.runtimes.hiagent.binding import HiagentBinding, HiagentBindingError
 from loom.runtimes.hiagent.v2_6 import HIAGENT_VERSION
+from loom.runtimes.hiagent.v2_6.bundle import HiagentBundle
 from loom.runtimes.hiagent.v2_6.compiler import compile_ir as compile_to_bundle
 
 if TYPE_CHECKING:
@@ -16,7 +17,6 @@ if TYPE_CHECKING:
         PushContext,
         UnrecognizedConstruct,
     )
-    from loom.runtimes.hiagent.v2_6.bundle import HiagentBundle
 
 
 class HiagentAdapter:
@@ -49,16 +49,13 @@ class HiagentAdapter:
             "until ChatFlow adapter work"
         )
 
-    def serialize_dsl(self, _dsl: Any) -> bytes:
-        """External ZIP serialization was retired.
-
-        Hiagent self-hosted accepts server-created app configs through the TOP
-        API. Sub-task D will decide whether the adapter grows a ChatFlow export
-        serializer; callers should use `loom hiagent push` for publishing.
-        """
-        raise NotImplementedError(
-            "Hiagent external ZIP serialization is retired; use loom hiagent push"
-        )
+    def serialize_dsl(self, dsl: Any) -> bytes:
+        """Serialize a HiagentBundle to the verified zip-import format."""
+        if not isinstance(dsl, HiagentBundle):
+            raise TypeError(
+                f"HiagentAdapter.serialize_dsl expected HiagentBundle, got {type(dsl).__name__}"
+            )
+        return dsl.to_zip_bytes()
 
     def parse_dsl(self, raw: str | bytes) -> Any:
         raise NotImplementedError(
