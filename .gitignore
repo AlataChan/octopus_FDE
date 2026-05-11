@@ -12,6 +12,8 @@ dist/
 /env
 /.env
 .loom-data/
+.smoke-data/
+.plans/
 /web/node_modules/
 /web/dist/
 
