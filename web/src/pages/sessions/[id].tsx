@@ -1,20 +1,22 @@
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
-import { ChatPanel } from "../../components/console/ChatPanel";
-import { CompileBar } from "../../components/console/CompileBar";
-import { IRDiffView } from "../../components/console/IRDiffView";
-import { IRView } from "../../components/console/IRView";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { ArrowLeft, RotateCcw } from "lucide-react";
+import { ChatColumn } from "../../components/console/ChatColumn";
+import { CompileColumn } from "../../components/console/CompileColumn";
+import { IRColumn } from "../../components/console/IRColumn";
 import { LLMConfigModal } from "../../components/console/LLMConfigModal";
-import { ValidatorPanel } from "../../components/console/ValidatorPanel";
 import { Button } from "../../components/ui/Button";
-import { Card, CardHeader } from "../../components/ui/Card";
 import { Chip, type ChipVariant } from "../../components/ui/Chip";
 import { downloadArtifact } from "../../lib/api";
 import type { Artifact, CompileInput, LLMConfigInput, MarkImportedInput } from "../../lib/types";
 import { useCompileSession, useIRDiff, useMarkImported, useSession, useSetLLMConfig } from "../../hooks/useSession";
 import { usePlannerTurn } from "../../hooks/usePlannerTurn";
+import { useIsXl } from "../../hooks/useIsXl";
 import { useState } from "react";
+
+const PANEL_GROUP_AUTOSAVE_ID = "fde-session-panels-v1";
+const PANEL_STORAGE_KEY = `react-resizable-panels:${PANEL_GROUP_AUTOSAVE_ID}`;
 
 export default function SessionDetailPage() {
   const { t } = useTranslation();
@@ -22,11 +24,14 @@ export default function SessionDetailPage() {
   const sessionId = params.id || "";
   const { bindings, ir, session, turns, workflows } = useSession(sessionId);
   const [highlightedPath, setHighlightedPath] = useState<string | null>(null);
+  const [layoutResetVersion, setLayoutResetVersion] = useState(0);
+  const isXl = useIsXl();
   const setConfig = useSetLLMConfig(sessionId);
   const plannerTurn = usePlannerTurn(sessionId);
   const compile = useCompileSession(sessionId);
   const markImported = useMarkImported();
   const needsConfig = Boolean(session.data && !session.data.llm_model);
+  const errors = ir.data?.validation_errors || [];
   const successfulTurns = (turns.data || []).filter((turn) => turn.status === "succeeded");
   const fromTurn =
     successfulTurns.length >= 2 ? successfulTurns[successfulTurns.length - 2].turn_id : null;
@@ -56,6 +61,45 @@ export default function SessionDetailPage() {
     markImported.mutate({ input, workflowId });
   }
 
+  function resetLayout() {
+    try {
+      window.localStorage.removeItem(PANEL_STORAGE_KEY);
+    } catch {
+      // localStorage may be unavailable in restricted browser contexts.
+    }
+    setLayoutResetVersion((version) => version + 1);
+  }
+
+  const chatCol = (
+    <ChatColumn
+      isSending={plannerTurn.isPending}
+      turns={turns.data || []}
+      onSend={(message) => plannerTurn.mutate(message)}
+    />
+  );
+  const irCol = (
+    <IRColumn
+      diff={diff.data || null}
+      errors={errors}
+      highlightedPath={highlightedPath}
+      ir={ir.data?.ir || null}
+      status={ir.data?.validator_status || t("session.noIr")}
+      onSelectPath={setHighlightedPath}
+    />
+  );
+  const compileCol = (
+    <CompileColumn
+      artifacts={session.data?.artifacts || []}
+      bindings={bindings.data || []}
+      isCompiling={compile.isPending}
+      markingWorkflowId={markImported.variables?.workflowId || null}
+      workflows={workflows.data || []}
+      onCompile={runCompile}
+      onDownload={(artifact) => void download(artifact)}
+      onMarkImported={mark}
+    />
+  );
+
   return (
     <section className="min-h-[calc(100vh-56px)] px-4 py-5 sm:px-6 lg:px-8">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -72,59 +116,58 @@ export default function SessionDetailPage() {
           <h1 className="mt-3 truncate font-mono text-lg font-semibold text-fg">{sessionId}</h1>
           <p className="mt-1 text-sm text-fg-muted">{t("session.subtitle")}</p>
         </div>
-        <Chip variant={chipForState(session.data?.state || "draft")}>
-          {session.data?.state || t("session.loading")}
-        </Chip>
-      </div>
-      <div className="grid gap-4 md:grid-cols-8 xl:grid-cols-12">
-        <div className="md:col-span-8 xl:col-span-4">
-          <ChatPanel
-            isSending={plannerTurn.isPending}
-            turns={turns.data || []}
-            onSend={(message) => plannerTurn.mutate(message)}
-          />
-        </div>
-        <Card className="min-w-0 md:col-span-5 xl:col-span-6">
-          <CardHeader
-            action={
-              <Chip
-                variant={(ir.data?.validation_errors || []).length ? "failed" : ir.data?.ir ? "ok" : "draft"}
-              >
-                {(ir.data?.validation_errors || []).length
-                  ? t("validator.issueCount", { count: ir.data?.validation_errors.length || 0 })
-                  : ir.data?.ir
-                    ? t("validator.ok")
-                    : t("session.noIr")}
-              </Chip>
-            }
-            subtitle={t("ir.panelSubtitle")}
-            title={t("ir.panelTitle")}
-          />
-          <IRView
-            errors={ir.data?.validation_errors || []}
-            highlightedPath={highlightedPath}
-            ir={ir.data?.ir || null}
-            status={ir.data?.validator_status || t("session.noIr")}
-          />
-          <ValidatorPanel
-            errors={ir.data?.validation_errors || []}
-            onSelectPath={setHighlightedPath}
-          />
-          <IRDiffView diff={diff.data || null} onSelectPath={setHighlightedPath} />
-        </Card>
-        <div className="md:col-span-3 xl:col-span-2">
-          <CompileBar
-            artifacts={session.data?.artifacts || []}
-            bindings={bindings.data || []}
-            isCompiling={compile.isPending}
-            markingWorkflowId={markImported.variables?.workflowId || null}
-            workflows={workflows.data || []}
-            onCompile={runCompile}
-            onDownload={(artifact) => void download(artifact)}
-            onMarkImported={mark}
-          />
+        <div className="flex shrink-0 items-center gap-2">
+          {isXl ? (
+            <Button
+              icon={<RotateCcw aria-hidden className="h-4 w-4" />}
+              size="sm"
+              variant="ghost"
+              onClick={resetLayout}
+            >
+              {t("layout.reset")}
+            </Button>
+          ) : null}
+          <Chip variant={chipForState(session.data?.state || "draft")}>
+            {session.data?.state || t("session.loading")}
+          </Chip>
         </div>
       </div>
+      {isXl ? (
+        <PanelGroup
+          autoSaveId={PANEL_GROUP_AUTOSAVE_ID}
+          className="w-full"
+          direction="horizontal"
+          key={layoutResetVersion}
+        >
+          <Panel className="min-w-0 overflow-auto" defaultSize={36} id="chat" minSize={20} order={1}>
+            {chatCol}
+          </Panel>
+          <PanelResizeHandle
+            aria-label={t("layout.resizeChatIr")}
+            className="group relative w-2 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border/45 transition-colors group-hover:bg-accent/60 group-data-[resize-handle-state=drag]:bg-accent" />
+          </PanelResizeHandle>
+          <Panel className="min-w-0 overflow-auto" defaultSize={36} id="ir" minSize={20} order={2}>
+            {irCol}
+          </Panel>
+          <PanelResizeHandle
+            aria-label={t("layout.resizeIrCompile")}
+            className="group relative w-2 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border/45 transition-colors group-hover:bg-accent/60 group-data-[resize-handle-state=drag]:bg-accent" />
+          </PanelResizeHandle>
+          <Panel className="min-w-0 overflow-auto" defaultSize={28} id="compile" minSize={20} order={3}>
+            {compileCol}
+          </Panel>
+        </PanelGroup>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-8">
+          <div className="md:col-span-8">{chatCol}</div>
+          <div className="md:col-span-5">{irCol}</div>
+          <div className="md:col-span-3">{compileCol}</div>
+        </div>
+      )}
       <LLMConfigModal
         isSaving={setConfig.isPending}
         open={needsConfig}
