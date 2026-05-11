@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   compileSession,
+  getIRDiff,
   getIR,
   getSession,
   listBindings,
@@ -71,5 +72,13 @@ export function useMarkImported() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["workflows"] });
     }
+  });
+}
+
+export function useIRDiff(sessionId: string, fromTurnId: string | null, toTurnId: string | null) {
+  return useQuery({
+    enabled: Boolean(fromTurnId && toTurnId),
+    queryKey: ["ir-diff", sessionId, fromTurnId, toTurnId],
+    queryFn: () => getIRDiff(sessionId, fromTurnId!, toTurnId!)
   });
 }
