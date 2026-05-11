@@ -16,7 +16,7 @@ Repositioned the product around the **FDE role** rather than the IR/compiler mec
 
 ### Previous change log: v0.2 → v0.3
 
-Patches applied after a Plan Review pass (Codex) and a market/design pass (Gemini). Net change: tighter contracts at the IR↔Dify boundary, governance-first positioning, and a more honest Phase 2.
+Patches applied after plan review and market/design review passes. Net change: tighter contracts at the IR↔Dify boundary, governance-first positioning, and a more honest Phase 2.
 
 - **§1, §2** — Added governance framing as the *primary* outcome (productivity is the lure, governance is the buyer). Added "Terraform for AI workflows" analogy.
 - **§3** — Clarified that Author/Reviewer are *roles*, not necessarily distinct people. Publish rights + audit trail enforce the role boundary even when one person plays both.

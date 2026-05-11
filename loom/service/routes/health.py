@@ -7,5 +7,6 @@ router = APIRouter()
 
 
 @router.get("/health")
+@router.get("/v1/health")
 def health() -> dict[str, bool]:
     return {"ok": True}

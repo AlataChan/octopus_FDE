@@ -1,0 +1,9 @@
+{
+  "app.title": "FDE Web Console",
+  "app.subtitle": "浏览器中的 AI 驻场流程工程师",
+  "language.switch": "Switch to English",
+  "health.title": "后端健康检查",
+  "health.loading": "正在连接后端...",
+  "health.error": "无法连接后端",
+  "actor.title": "当前操作者"
+}

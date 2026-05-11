@@ -1,0 +1,9 @@
+{
+  "app.title": "FDE Web Console",
+  "app.subtitle": "Field workflow engineering in the browser",
+  "language.switch": "切换到中文",
+  "health.title": "Backend health",
+  "health.loading": "Connecting to backend...",
+  "health.error": "Backend is unreachable",
+  "actor.title": "Current actor"
+}
