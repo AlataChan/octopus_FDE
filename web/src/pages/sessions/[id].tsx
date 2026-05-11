@@ -1,11 +1,15 @@
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 import { ChatPanel } from "../../components/console/ChatPanel";
 import { CompileBar } from "../../components/console/CompileBar";
 import { IRDiffView } from "../../components/console/IRDiffView";
 import { IRView } from "../../components/console/IRView";
 import { LLMConfigModal } from "../../components/console/LLMConfigModal";
 import { ValidatorPanel } from "../../components/console/ValidatorPanel";
+import { Button } from "../../components/ui/Button";
+import { Card, CardHeader } from "../../components/ui/Card";
+import { Chip, type ChipVariant } from "../../components/ui/Chip";
 import { downloadArtifact } from "../../lib/api";
 import type { Artifact, CompileInput, LLMConfigInput, MarkImportedInput } from "../../lib/types";
 import { useCompileSession, useIRDiff, useMarkImported, useSession, useSetLLMConfig } from "../../hooks/useSession";
@@ -53,36 +57,62 @@ export default function SessionDetailPage() {
   }
 
   return (
-    <section className="min-h-[calc(100vh-56px)]">
-      <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
-        <div>
-          <Link className="text-xs font-medium text-slate-500 underline" to="/">
-            {t("session.back")}
+    <section className="min-h-[calc(100vh-56px)] px-4 py-5 sm:px-6 lg:px-8">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <Link className="inline-flex" to="/">
+            <Button
+              icon={<ArrowLeft aria-hidden className="h-4 w-4" />}
+              size="sm"
+              variant="ghost"
+            >
+              {t("session.back")}
+            </Button>
           </Link>
-          <h1 className="mt-1 font-mono text-sm font-semibold text-slate-950">{sessionId}</h1>
+          <h1 className="mt-3 truncate font-mono text-lg font-semibold text-fg">{sessionId}</h1>
+          <p className="mt-1 text-sm text-fg-muted">{t("session.subtitle")}</p>
         </div>
-        <span className="rounded-md bg-slate-100 px-3 py-1 text-xs text-slate-700">
+        <Chip variant={chipForState(session.data?.state || "draft")}>
           {session.data?.state || t("session.loading")}
-        </span>
+        </Chip>
       </div>
-      <div className="grid min-h-[calc(100vh-112px)] grid-cols-1 lg:grid-cols-[360px_1fr]">
-        <ChatPanel
-          isSending={plannerTurn.isPending}
-          turns={turns.data || []}
-          onSend={(message) => plannerTurn.mutate(message)}
-        />
-        <main className="flex min-w-0 flex-col">
+      <div className="grid gap-4 md:grid-cols-8 xl:grid-cols-12">
+        <div className="md:col-span-8 xl:col-span-4">
+          <ChatPanel
+            isSending={plannerTurn.isPending}
+            turns={turns.data || []}
+            onSend={(message) => plannerTurn.mutate(message)}
+          />
+        </div>
+        <Card className="min-w-0 md:col-span-5 xl:col-span-6">
+          <CardHeader
+            action={
+              <Chip
+                variant={(ir.data?.validation_errors || []).length ? "failed" : ir.data?.ir ? "ok" : "draft"}
+              >
+                {(ir.data?.validation_errors || []).length
+                  ? t("validator.issueCount", { count: ir.data?.validation_errors.length || 0 })
+                  : ir.data?.ir
+                    ? t("validator.ok")
+                    : t("session.noIr")}
+              </Chip>
+            }
+            subtitle={t("ir.panelSubtitle")}
+            title={t("ir.panelTitle")}
+          />
           <IRView
             errors={ir.data?.validation_errors || []}
             highlightedPath={highlightedPath}
             ir={ir.data?.ir || null}
             status={ir.data?.validator_status || t("session.noIr")}
           />
-          <IRDiffView diff={diff.data || null} onSelectPath={setHighlightedPath} />
           <ValidatorPanel
             errors={ir.data?.validation_errors || []}
             onSelectPath={setHighlightedPath}
           />
+          <IRDiffView diff={diff.data || null} onSelectPath={setHighlightedPath} />
+        </Card>
+        <div className="md:col-span-3 xl:col-span-2">
           <CompileBar
             artifacts={session.data?.artifacts || []}
             bindings={bindings.data || []}
@@ -93,7 +123,7 @@ export default function SessionDetailPage() {
             onDownload={(artifact) => void download(artifact)}
             onMarkImported={mark}
           />
-        </main>
+        </div>
       </div>
       <LLMConfigModal
         isSaving={setConfig.isPending}
@@ -102,4 +132,17 @@ export default function SessionDetailPage() {
       />
     </section>
   );
+}
+
+function chipForState(state: string): ChipVariant {
+  if (state === "compiled") {
+    return "compiled";
+  }
+  if (state === "validated") {
+    return "validated";
+  }
+  if (state === "llm_config_set") {
+    return "llm_config_set";
+  }
+  return "draft";
 }

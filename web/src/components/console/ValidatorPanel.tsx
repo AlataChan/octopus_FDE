@@ -1,5 +1,8 @@
 import { useTranslation } from "react-i18next";
+import { AlertTriangle, Copy } from "lucide-react";
 import type { ValidationFailure } from "../../lib/types";
+import { Button } from "../ui/Button";
+import { Chip } from "../ui/Chip";
 
 type Props = {
   errors: ValidationFailure[];
@@ -19,39 +22,43 @@ export function ValidatorPanel({ errors, onSelectPath }: Props) {
   }
 
   return (
-    <section className="border-t border-slate-200 bg-white px-4 py-3">
-      <h2 className="text-sm font-semibold text-slate-950">{t("validator.title")}</h2>
+    <section className="border-t border-border/30 bg-bg-surface px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold text-fg">{t("validator.title")}</h2>
+        <Chip variant="failed">{t("validator.issueCount", { count: errors.length })}</Chip>
+      </div>
       <div className="mt-3 grid gap-2">
         {errors.map((error, index) => {
           const location = error.location || "-";
           return (
-            <article className="rounded-md border border-rose-200 bg-rose-50 p-3" key={`${location}-${index}`}>
+            <article className="rounded-lg border border-destructive/30 bg-destructive/10 p-3" key={`${location}-${index}`}>
               <div className="flex items-start gap-3">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-rose-600 text-xs font-bold text-white">
-                  !
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-destructive/15 text-red-200 ring-1 ring-destructive/30">
+                  <AlertTriangle aria-hidden className="h-4 w-4" />
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded bg-white px-2 py-1 text-xs font-medium text-rose-700">
+                    <span className="rounded-full bg-bg-app/60 px-2 py-1 text-xs font-medium text-red-100 ring-1 ring-destructive/25">
                       {error.bucket}
                     </span>
-                    <button
-                      className="font-mono text-xs text-slate-950 underline"
-                      type="button"
+                    <Button
+                      className="h-7 px-2 font-mono"
+                      size="sm"
+                      variant="ghost"
                       onClick={() => onSelectPath(location)}
                     >
                       {location}
-                    </button>
+                    </Button>
                   </div>
-                  <p className="mt-2 text-sm text-slate-800">{friendlyMessage(error.detail)}</p>
+                  <p className="mt-2 text-sm leading-6 text-red-50">{friendlyMessage(error.detail)}</p>
                 </div>
-                <button
-                  className="rounded-md border border-rose-200 bg-white px-2 py-1 text-xs font-medium text-rose-700"
-                  type="button"
+                <Button
+                  aria-label={t("validator.copy")}
+                  icon={<Copy aria-hidden className="h-4 w-4" />}
+                  size="sm"
+                  variant="ghost"
                   onClick={() => void copy(`${location}: ${error.detail}`)}
-                >
-                  {t("validator.copy")}
-                </button>
+                />
               </div>
             </article>
           );

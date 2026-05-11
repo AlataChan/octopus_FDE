@@ -1,0 +1,70 @@
+import { useQuery } from "@tanstack/react-query";
+import { Activity, Languages, ShieldCheck } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { Link, useLocation } from "react-router-dom";
+import { getHealth } from "../../lib/api";
+import { useActor } from "../../lib/useActor";
+import { Button } from "../ui/Button";
+import { Chip } from "../ui/Chip";
+
+export function TopBar() {
+  const { i18n, t } = useTranslation();
+  const actor = useActor();
+  const location = useLocation();
+  const health = useQuery({
+    queryKey: ["health"],
+    queryFn: getHealth
+  });
+  const nextLanguage = i18n.language === "zh" ? "en" : "zh";
+  const sessionId = location.pathname.startsWith("/sessions/")
+    ? location.pathname.split("/")[2]
+    : null;
+
+  return (
+    <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border/40 bg-bg-muted/95 px-4 backdrop-blur">
+      <div className="flex min-w-0 items-center gap-4">
+        <Link
+          aria-label={t("app.title")}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-sm font-black tracking-tight text-slate-950 shadow-[0_0_28px_rgba(34,197,94,0.22)]"
+          to="/"
+        >
+          FDE
+        </Link>
+        <nav aria-label={t("topbar.breadcrumb")} className="min-w-0">
+          <ol className="flex min-w-0 items-center gap-2 text-sm">
+            <li>
+              <Link className="font-medium text-fg-muted hover:text-fg" to="/">
+                {t("topbar.sessions")}
+              </Link>
+            </li>
+            {sessionId ? (
+              <>
+                <li className="text-fg-muted/60">/</li>
+                <li className="min-w-0 truncate font-mono text-xs text-fg">{sessionId.slice(0, 8)}</li>
+              </>
+            ) : null}
+          </ol>
+        </nav>
+        <Chip variant={health.isError ? "failed" : health.isPending ? "running" : "ok"} pulse={health.isPending}>
+          {health.isPending ? t("health.loading") : health.isError ? t("health.error") : t("health.ok")}
+        </Chip>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <span className="hidden items-center gap-1.5 rounded-full border border-border/50 bg-bg-app/50 px-3 py-1.5 text-xs font-medium text-fg-muted sm:inline-flex">
+          <ShieldCheck aria-hidden className="h-3.5 w-3.5 text-accent" />
+          {actor.id} / {actor.role}
+        </span>
+        <Button
+          aria-label={t("language.switch")}
+          icon={<Languages aria-hidden className="h-4 w-4" />}
+          size="sm"
+          variant="ghost"
+          onClick={() => void i18n.changeLanguage(nextLanguage)}
+        >
+          <span className="hidden sm:inline">{t("language.short")}</span>
+        </Button>
+        <Activity aria-hidden className="hidden h-4 w-4 text-accent/70 md:block" />
+      </div>
+    </header>
+  );
+}
