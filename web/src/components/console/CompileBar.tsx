@@ -187,12 +187,13 @@ function ArtifactCard({
           </p>
         </div>
         <Button
-          aria-label={t("compile.download")}
           icon={<Download aria-hidden className="h-4 w-4" />}
           size="sm"
           variant="ghost"
           onClick={() => onDownload(artifact)}
-        />
+        >
+          {t("compile.download")}
+        </Button>
       </div>
       <form className="mt-3 grid gap-2" onSubmit={submit}>
         <Input
