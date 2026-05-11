@@ -1,0 +1,14 @@
+services:
+  fde:
+    build: .
+    image: fde-console:local
+    environment:
+      APP_ENV: prod
+      LOOM_DATA_DIR: /data
+      LOOM_BINDING_DIR: /app/config/customers
+      LOOM_FERNET_KEY: ${LOOM_FERNET_KEY:?Set LOOM_FERNET_KEY before running docker compose}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ${LOOM_DATA_DIR:-./.loom-data}:/data
+      - ./config/customers:/app/config/customers:ro
