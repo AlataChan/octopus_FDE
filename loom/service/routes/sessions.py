@@ -4,12 +4,13 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 
+from loom.diff.ir_diff import diff_ir
 from loom.ir.canonicalize import canonical_ir_hash
 from loom.ir.models import IRDocument
 from loom.registry.models import WorkflowRecord
@@ -239,13 +240,17 @@ def get_ir_diff(
     request: Request,
     actor: ActorDep,
 ) -> dict[str, object]:
-    del session_id
     store = request.app.state.session_store
     before = store.get_turn(from_turn, actor_id=actor.id)
     after = store.get_turn(to_turn, actor_id=actor.id)
-    if before is None or after is None:
+    if before is None or after is None or before.session_id != session_id or after.session_id != session_id:
         raise not_found("turn not found")
-    return {"from": str(from_turn), "to": str(to_turn), "changed": before.ir_after != after.ir_after}
+    before_snapshot = _turn_snapshot(before)
+    after_snapshot = _turn_snapshot(after)
+    if before_snapshot is None or after_snapshot is None:
+        raise not_found("turn snapshot not found")
+    payload = diff_ir(json.loads(before_snapshot), json.loads(after_snapshot))
+    return {"from": str(from_turn), "to": str(to_turn), **payload}
 
 
 @router.post("/sessions/{session_id}/compile")
@@ -438,6 +443,10 @@ def _turn_response(row: Any) -> dict[str, object]:
         "errors": row.validation_errors,
         "ir_diff": None,
     }
+
+
+def _turn_snapshot(row: Any) -> str | None:
+    return cast("str | None", row.ir_after or row.ir_before)
 
 
 def _sha256_text(text: str) -> str:

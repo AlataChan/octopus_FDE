@@ -77,6 +77,44 @@ export type ValidationFailure = {
   location?: string | null;
 };
 
+export type IRDiffFieldChange = {
+  path: string;
+  before: unknown;
+  after: unknown;
+};
+
+export type IRDiffChange =
+  | {
+      scope: "node";
+      kind: "added" | "removed" | "renamed";
+      node_id: string;
+      before?: unknown;
+      after?: unknown;
+    }
+  | {
+      scope: "node";
+      kind: "config-changed";
+      node_id: string;
+      fields: IRDiffFieldChange[];
+    }
+  | {
+      scope: "edge";
+      kind: "added" | "removed";
+      from: string;
+      to: string;
+    };
+
+export type IRDiffResponse = {
+  from: string;
+  to: string;
+  changes: IRDiffChange[];
+  summary: {
+    nodes: number;
+    edges: number;
+    total: number;
+  };
+};
+
 export type IRResponse = {
   ir: unknown | null;
   latest_ir_sha256: string | null;

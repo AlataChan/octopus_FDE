@@ -2,23 +2,33 @@ import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router-dom";
 import { ChatPanel } from "../../components/console/ChatPanel";
 import { CompileBar } from "../../components/console/CompileBar";
+import { IRDiffView } from "../../components/console/IRDiffView";
 import { IRView } from "../../components/console/IRView";
 import { LLMConfigModal } from "../../components/console/LLMConfigModal";
+import { ValidatorPanel } from "../../components/console/ValidatorPanel";
 import { downloadArtifact } from "../../lib/api";
 import type { Artifact, CompileInput, LLMConfigInput, MarkImportedInput } from "../../lib/types";
-import { useCompileSession, useMarkImported, useSession, useSetLLMConfig } from "../../hooks/useSession";
+import { useCompileSession, useIRDiff, useMarkImported, useSession, useSetLLMConfig } from "../../hooks/useSession";
 import { usePlannerTurn } from "../../hooks/usePlannerTurn";
+import { useState } from "react";
 
 export default function SessionDetailPage() {
   const { t } = useTranslation();
   const params = useParams();
   const sessionId = params.id || "";
   const { bindings, ir, session, turns, workflows } = useSession(sessionId);
+  const [highlightedPath, setHighlightedPath] = useState<string | null>(null);
   const setConfig = useSetLLMConfig(sessionId);
   const plannerTurn = usePlannerTurn(sessionId);
   const compile = useCompileSession(sessionId);
   const markImported = useMarkImported();
   const needsConfig = Boolean(session.data && !session.data.llm_model);
+  const successfulTurns = (turns.data || []).filter((turn) => turn.status === "succeeded");
+  const fromTurn =
+    successfulTurns.length >= 2 ? successfulTurns[successfulTurns.length - 2].turn_id : null;
+  const toTurn =
+    successfulTurns.length >= 2 ? successfulTurns[successfulTurns.length - 1].turn_id : null;
+  const diff = useIRDiff(sessionId, fromTurn, toTurn);
 
   function saveConfig(input: LLMConfigInput) {
     setConfig.mutate(input);
@@ -64,8 +74,14 @@ export default function SessionDetailPage() {
         <main className="flex min-w-0 flex-col">
           <IRView
             errors={ir.data?.validation_errors || []}
+            highlightedPath={highlightedPath}
             ir={ir.data?.ir || null}
             status={ir.data?.validator_status || t("session.noIr")}
+          />
+          <IRDiffView diff={diff.data || null} onSelectPath={setHighlightedPath} />
+          <ValidatorPanel
+            errors={ir.data?.validation_errors || []}
+            onSelectPath={setHighlightedPath}
           />
           <CompileBar
             artifacts={session.data?.artifacts || []}

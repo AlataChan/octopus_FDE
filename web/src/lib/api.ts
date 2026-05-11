@@ -3,6 +3,7 @@ import type {
   BindingSummary,
   CompileInput,
   CompileResponse,
+  IRDiffResponse,
   IRResponse,
   LLMConfigInput,
   MarkImportedInput,
@@ -87,6 +88,15 @@ export function createTurn(sessionId: string, userMessage: string): Promise<Turn
 
 export function getIR(sessionId: string): Promise<IRResponse> {
   return apiFetch<IRResponse>(`/v1/sessions/${sessionId}/ir`);
+}
+
+export function getIRDiff(
+  sessionId: string,
+  fromTurn: string,
+  toTurn: string
+): Promise<IRDiffResponse> {
+  const params = new URLSearchParams({ from_turn: fromTurn, to_turn: toTurn });
+  return apiFetch<IRDiffResponse>(`/v1/sessions/${sessionId}/ir/diff?${params.toString()}`);
 }
 
 export function listBindings(): Promise<BindingSummary[]> {
