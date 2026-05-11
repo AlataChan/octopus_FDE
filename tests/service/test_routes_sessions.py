@@ -58,6 +58,7 @@ def test_session_turn_compile_download_archive_and_registry_round_trip(tmp_path)
     ).json()
     artifact_id = compiled["artifact_id"]
     assert compiled["sha256"]
+    assert compiled["workflow_id"]
 
     downloaded = client.get(f"/v1/sessions/{sid}/artifacts/{artifact_id}")
     assert downloaded.status_code == 200
@@ -66,6 +67,7 @@ def test_session_turn_compile_download_archive_and_registry_round_trip(tmp_path)
     registry_rows = client.get("/v1/registry/workflows").json()
     assert len(registry_rows) == 1
     assert registry_rows[0]["artifact_sha256"] == compiled["sha256"]
+    assert registry_rows[0]["workflow_id"] == compiled["workflow_id"]
 
     archive = client.get(f"/v1/archive/sessions/{sid}").text
     assert "session.created" in archive
