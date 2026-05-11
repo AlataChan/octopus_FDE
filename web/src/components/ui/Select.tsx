@@ -8,7 +8,7 @@ export function Select({ children, className, ...props }: SelectHTMLAttributes<H
       <select
         className={cn(
           "h-10 w-full appearance-none rounded-lg border border-border/70 bg-bg-app/70 px-3 pr-9 text-sm text-fg",
-          "outline-none transition focus:border-accent/70 disabled:cursor-not-allowed disabled:text-slate-500",
+          "outline-none transition focus:border-ring/70 disabled:cursor-not-allowed disabled:text-fg-muted/60",
           className
         )}
         {...props}

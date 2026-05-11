@@ -71,7 +71,7 @@ function ChangeRow({
       <article className="rounded-lg border border-warning/25 bg-warning/5 px-3 py-2 text-sm">
         <div>
           <KindIcon kind={change.kind} />
-          <span className="ml-2 font-semibold text-amber-100">{t("diff.kind.config-changed")}</span>
+          <span className="ml-2 font-semibold text-fg">{t("diff.kind.config-changed")}</span>
           <span className="ml-2 font-mono text-xs text-fg-muted">{change.node_id}</span>
         </div>
         <ul className="mt-2 space-y-1">

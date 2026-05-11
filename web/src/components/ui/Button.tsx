@@ -2,7 +2,7 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { cn } from "../../lib/cn";
 
-type ButtonVariant = "primary" | "secondary" | "ghost";
+type ButtonVariant = "accent" | "primary" | "secondary" | "ghost";
 type ButtonSize = "sm" | "md" | "lg";
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -13,11 +13,13 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 const variants: Record<ButtonVariant, string> = {
+  accent:
+    "bg-accent text-primary dark:text-bg-app shadow-[0_0_24px_rgb(var(--accent)/0.18)] hover:bg-accent/90 disabled:bg-bg-muted disabled:text-fg-muted",
   primary:
-    "bg-accent text-slate-950 shadow-[0_0_24px_rgba(34,197,94,0.18)] hover:bg-green-400 disabled:bg-slate-700 disabled:text-slate-400",
+    "bg-primary text-primary-fg hover:bg-primary/90 disabled:bg-bg-muted disabled:text-fg-muted",
   secondary:
-    "bg-bg-muted text-fg ring-1 ring-border/60 hover:bg-slate-700 disabled:bg-bg-muted/60 disabled:text-slate-500",
-  ghost: "bg-transparent text-fg-muted hover:bg-bg-muted hover:text-fg disabled:text-slate-600"
+    "bg-bg-muted text-fg ring-1 ring-border/60 hover:bg-border/20 disabled:bg-bg-muted/60 disabled:text-fg-muted/60",
+  ghost: "bg-transparent text-fg-muted hover:bg-bg-muted hover:text-fg disabled:text-fg-muted/60"
 };
 
 const sizes: Record<ButtonSize, string> = {
@@ -41,7 +43,7 @@ export function Button({
     <button
       className={cn(
         "inline-flex shrink-0 items-center justify-center rounded-lg font-semibold tracking-[0.01em]",
-        "transition duration-150 active:translate-y-px disabled:cursor-not-allowed",
+        "transition duration-200 active:translate-y-px disabled:cursor-not-allowed",
         variants[variant],
         sizes[size],
         className

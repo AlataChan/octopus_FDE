@@ -51,7 +51,7 @@ export default function SessionListPage() {
           </Card>
         ) : sessions.isError ? (
           <Card>
-            <CardBody className="text-sm text-red-200">{t("sessions.error")}</CardBody>
+            <CardBody className="text-sm text-destructive">{t("sessions.error")}</CardBody>
           </Card>
         ) : sessions.data.length === 0 ? (
           <Card>

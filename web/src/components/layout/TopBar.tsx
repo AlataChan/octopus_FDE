@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { Activity, Languages, ShieldCheck } from "lucide-react";
+import { Activity, Languages, Moon, ShieldCheck, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
+import { useTheme } from "../../hooks/useTheme";
 import { getHealth } from "../../lib/api";
 import { useActor } from "../../lib/useActor";
 import { Button } from "../ui/Button";
@@ -11,6 +12,7 @@ export function TopBar() {
   const { i18n, t } = useTranslation();
   const actor = useActor();
   const location = useLocation();
+  const { isDark, toggleTheme } = useTheme();
   const health = useQuery({
     queryKey: ["health"],
     queryFn: getHealth
@@ -25,7 +27,7 @@ export function TopBar() {
       <div className="flex min-w-0 items-center gap-4">
         <Link
           aria-label={t("app.title")}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-sm font-black tracking-tight text-slate-950 shadow-[0_0_28px_rgba(34,197,94,0.22)]"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-sm font-black tracking-tight text-primary dark:text-bg-app shadow-[0_0_28px_rgb(var(--accent)/0.22)]"
           to="/"
         >
           FDE
@@ -62,6 +64,23 @@ export function TopBar() {
           onClick={() => void i18n.changeLanguage(nextLanguage)}
         >
           <span className="hidden sm:inline">{t("language.short")}</span>
+        </Button>
+        <Button
+          aria-label={isDark ? t("theme.aria.switch_to_light") : t("theme.aria.switch_to_dark")}
+          icon={
+            isDark ? (
+              <Sun aria-hidden className="h-4 w-4" />
+            ) : (
+              <Moon aria-hidden className="h-4 w-4" />
+            )
+          }
+          size="sm"
+          variant="ghost"
+          onClick={toggleTheme}
+        >
+          <span className="hidden sm:inline">
+            {isDark ? t("theme.toggle.light") : t("theme.toggle.dark")}
+          </span>
         </Button>
         <Activity aria-hidden className="hidden h-4 w-4 text-accent/70 md:block" />
       </div>

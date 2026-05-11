@@ -32,7 +32,7 @@ export function Modal({ children, labelledBy, onOpenChange, open }: ModalProps) 
     <div
       aria-labelledby={labelledBy}
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgb(0_0_0/0.6)] px-4"
       role="dialog"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
