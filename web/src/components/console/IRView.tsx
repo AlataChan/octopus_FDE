@@ -13,7 +13,8 @@ export function IRView({ errors, highlightedPath, ir, status }: Props) {
   const { t } = useTranslation();
   const text = ir ? toDisplayYaml(ir) : t("ir.empty");
   const lines = text.split("\n");
-  const highlightKey = highlightedPath ? highlightedPath.split(".").at(-1)?.replace(/\[\d+\]/g, "") : null;
+  const pathParts = highlightedPath ? highlightedPath.split(".") : [];
+  const highlightKey = pathParts.length ? pathParts[pathParts.length - 1].replace(/\[\d+\]/g, "") : null;
   return (
     <section className="flex min-h-[480px] flex-col bg-slate-950 text-slate-50">
       <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">

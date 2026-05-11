@@ -1,4 +1,7 @@
-.PHONY: phase0-gate test lint type all web-dev web-build serve
+.PHONY: phase0-gate test lint type all web-dev web-build serve ship docker-up docker-down
+
+IMAGE ?= fde-console
+TAG ?= $(shell git rev-parse --short HEAD)
 
 all: lint type test
 
@@ -24,3 +27,16 @@ web-build:
 
 serve:
 	APP_ENV=$${APP_ENV:-dev} .venv/bin/uvicorn loom.service.app:app --host 127.0.0.1 --port 8000
+
+ship:
+	docker build -t $(IMAGE):$(TAG) -t fde-console:latest .
+	@echo "Built $(IMAGE):$(TAG)"
+	@echo "Generate key: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+	@echo "Then: export LOOM_FERNET_KEY=<key> && docker compose up -d"
+	@echo "Open http://localhost:8000 after the service is healthy."
+
+docker-up:
+	docker compose up -d --build
+
+docker-down:
+	docker compose down
