@@ -126,3 +126,40 @@ def test_bindings_route_returns_handles_not_raw_yaml(tmp_path):
         {"handle": "test", "target": "hiagent", "display_name": "test"},
     ]
     assert "workspace_id" not in rows[0]
+
+
+def test_download_artifact_with_non_ascii_filename(tmp_path):
+    """artifact_name 含中文（planner 真实场景）下载不应 500，且 Content-Disposition 须遵循 RFC 5987 双形式。"""
+    from urllib.parse import quote
+
+    base_ir = _sample_ir()
+    cn_name = "玉柴发动机维修保养咨询"
+    cn_metadata = base_ir.metadata.model_copy(update={"name": cn_name})
+    cn_ir = base_ir.model_copy(update={"metadata": cn_metadata})
+
+    def planner(**_kwargs):
+        return cn_ir
+
+    client = _client(tmp_path, planner=planner)
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+    client.patch(
+        f"/v1/sessions/{sid}/llm-config",
+        json={"api_key": "sk", "base_url": "https://x/v1", "model": "m"},
+    )
+    client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "build"})
+    compiled = client.post(
+        f"/v1/sessions/{sid}/compile",
+        json={"target": "dify", "binding": "demo"},
+    ).json()
+
+    resp = client.get(f"/v1/sessions/{sid}/artifacts/{compiled['artifact_id']}")
+    assert resp.status_code == 200
+    disposition = resp.headers["content-disposition"]
+    assert 'filename="' in disposition  # ASCII fallback exists
+    assert "filename*=UTF-8''" in disposition  # RFC 5987 form exists
+    assert quote(f"{cn_name}.yaml", safe="") in disposition  # CN name percent-encoded
+    # 全 ASCII 字符在 fallback 中没有中文残留
+    fallback_start = disposition.index('filename="') + len('filename="')
+    fallback_end = disposition.index('"', fallback_start)
+    fallback = disposition[fallback_start:fallback_end]
+    fallback.encode("ascii")  # 不抛即通过

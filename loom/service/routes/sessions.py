@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Annotated, Any, Literal, cast
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -377,8 +378,18 @@ def download_artifact(
     return Response(
         content=raw,
         media_type=media_type,
-        headers={"content-disposition": f'attachment; filename="{artifact.artifact_name}"'},
+        headers={"content-disposition": _content_disposition(artifact.artifact_name)},
     )
+
+
+def _content_disposition(filename: str) -> str:
+    # RFC 5987: HTTP headers must be latin-1; non-ASCII filenames need a percent-encoded
+    # filename* alongside an ASCII fallback so old + new browsers both pick a sane name.
+    ascii_fallback = filename.encode("ascii", "ignore").decode("ascii").replace('"', "").strip()
+    if not ascii_fallback or ascii_fallback.startswith("."):
+        ascii_fallback = f"artifact{ascii_fallback}"
+    encoded = quote(filename, safe="")
+    return f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded}'
 
 
 @router.get("/bindings")
