@@ -12,6 +12,8 @@ dist/
 /env
 /.env
 .loom-data/
+/web/node_modules/
+/web/dist/
 
 # AI tooling local state
 .ccb/

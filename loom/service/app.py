@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from loom.archive.jsonl import ArchiveWriter
 from loom.planner.client import PlannerClient
@@ -54,6 +57,13 @@ def create_app(
     settings = settings or Settings.from_env()
     settings.ensure_data_dir()
     app = FastAPI(title="FDE Web Console API", version="0.1.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.state.settings = settings
     app.state.fernet = settings.fernet()
     app.state.session_store = SessionStore(settings.data_dir / "sessions.db")
@@ -63,6 +73,9 @@ def create_app(
     app.include_router(health_router)
     app.include_router(sessions_router)
     app.include_router(registry_router)
+    web_dist = Path(__file__).resolve().parents[2] / "web" / "dist"
+    if web_dist.exists():
+        app.mount("/", StaticFiles(directory=web_dist, html=True), name="web")
     return app
 
 
