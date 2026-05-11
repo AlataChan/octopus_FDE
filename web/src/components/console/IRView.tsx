@@ -1,6 +1,8 @@
 import { useTranslation } from "react-i18next";
 import type { ValidationFailure } from "../../lib/types";
 import { toDisplayYaml } from "../../lib/yaml";
+import { Badge } from "../ui/Badge";
+import { Chip } from "../ui/Chip";
 
 type Props = {
   errors: ValidationFailure[];
@@ -16,31 +18,35 @@ export function IRView({ errors, highlightedPath, ir, status }: Props) {
   const pathParts = highlightedPath ? highlightedPath.split(".") : [];
   const highlightKey = pathParts.length ? pathParts[pathParts.length - 1].replace(/\[\d+\]/g, "") : null;
   return (
-    <section className="flex min-h-[480px] flex-col bg-slate-950 text-slate-50">
-      <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold">{t("ir.title")}</h2>
-          <p className="mt-1 text-xs text-slate-400">{t("ir.status", { status })}</p>
-        </div>
-        <span className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300">
+    <section className="flex min-h-[520px] flex-col bg-slate-950/80 text-slate-50">
+      <div className="flex items-center justify-between gap-3 border-b border-border/30 px-4 py-3">
+        <p className="text-xs text-fg-muted">{t("ir.status", { status })}</p>
+        <Chip variant={errors.length ? "failed" : "ok"}>
           {errors.length ? t("ir.errors", { count: errors.length }) : t("ir.valid")}
-        </span>
+        </Chip>
       </div>
       {highlightedPath ? (
-        <div className="border-b border-amber-300/20 bg-amber-300/10 px-4 py-2 text-xs text-amber-100">
+        <div className="border-b border-warning/20 bg-warning/10 px-4 py-2 text-xs text-amber-100">
           {t("ir.highlightedPath", { path: highlightedPath })}
         </div>
       ) : null}
-      <pre className="flex-1 overflow-auto p-4 font-mono text-xs leading-5">
+      <pre className="flex-1 overflow-auto p-0 font-mono text-xs leading-5">
         {lines.map((line, index) => {
           const isHighlighted =
             Boolean(highlightKey) && line.trimStart().startsWith(`${highlightKey}:`);
           return (
             <span
-              className={isHighlighted ? "block bg-amber-300/20 text-amber-50" : "block"}
+              className={
+                isHighlighted
+                  ? "grid grid-cols-[3rem_1fr] bg-warning/15 text-amber-50"
+                  : "grid grid-cols-[3rem_1fr]"
+              }
               key={`${index}-${line}`}
             >
-              {line || " "}
+              <Badge className="mr-3 justify-end rounded-none border-0 bg-transparent pr-3 font-mono text-[10px] text-slate-500 ring-0">
+                {index + 1}
+              </Badge>
+              <span className="min-w-0 border-l border-slate-800/80 px-3 py-0.5">{line || " "}</span>
             </span>
           );
         })}

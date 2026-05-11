@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FileCode2, MoreVertical, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
+import { Button } from "../../components/ui/Button";
+import { Card, CardBody } from "../../components/ui/Card";
+import { Chip, type ChipVariant } from "../../components/ui/Chip";
 import { createSession, listSessions } from "../../lib/api";
+import type { SessionSummary } from "../../lib/types";
 
 export default function SessionListPage() {
   const { t } = useTranslation();
@@ -20,59 +25,127 @@ export default function SessionListPage() {
   });
 
   return (
-    <section className="mx-auto max-w-5xl px-6 py-8">
-      <div className="flex items-center justify-between gap-4">
+    <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-950">{t("sessions.title")}</h1>
-          <p className="mt-1 text-sm text-slate-600">{t("sessions.subtitle")}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent/80">
+            {t("sessions.kicker")}
+          </p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-fg">{t("sessions.title")}</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-fg-muted">{t("sessions.subtitle")}</p>
         </div>
-        <button
-          className="rounded-md bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+        <Button
+          icon={<Plus aria-hidden className="h-4 w-4" />}
+          loading={create.isPending}
+          variant="primary"
           disabled={create.isPending}
-          type="button"
           onClick={() => create.mutate()}
         >
           {create.isPending ? t("sessions.creating") : t("sessions.create")}
-        </button>
+        </Button>
       </div>
-      <div className="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white">
+      <div className="mt-7">
         {sessions.isPending ? (
-          <p className="p-4 text-sm text-slate-500">{t("sessions.loading")}</p>
+          <Card>
+            <CardBody className="text-sm text-fg-muted">{t("sessions.loading")}</CardBody>
+          </Card>
         ) : sessions.isError ? (
-          <p className="p-4 text-sm text-rose-600">{t("sessions.error")}</p>
+          <Card>
+            <CardBody className="text-sm text-red-200">{t("sessions.error")}</CardBody>
+          </Card>
         ) : sessions.data.length === 0 ? (
-          <p className="p-4 text-sm text-slate-500">{t("sessions.empty")}</p>
+          <Card>
+            <CardBody className="text-sm text-fg-muted">{t("sessions.empty")}</CardBody>
+          </Card>
         ) : (
-          <table className="w-full border-collapse text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-              <tr>
-                <th className="px-4 py-3">{t("sessions.id")}</th>
-                <th className="px-4 py-3">{t("sessions.state")}</th>
-                <th className="px-4 py-3">{t("sessions.ir")}</th>
-                <th className="px-4 py-3">{t("sessions.updated")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.data.map((session) => (
-                <tr className="border-t border-slate-200" key={session.session_id}>
-                  <td className="px-4 py-3 font-mono text-xs">
-                    <Link className="text-slate-950 underline" to={`/sessions/${session.session_id}`}>
-                      {session.session_id}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-slate-700">{session.state}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-slate-500">
-                    {session.latest_ir_sha256?.slice(0, 12) || t("sessions.noIr")}
-                  </td>
-                  <td className="px-4 py-3 text-slate-500">
-                    {new Date(session.updated_at).toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+            {sessions.data.map((session) => (
+              <SessionCard key={session.session_id} session={session} />
+            ))}
+          </div>
         )}
       </div>
     </section>
   );
+}
+
+function SessionCard({ session }: { session: SessionSummary }) {
+  const { i18n, t } = useTranslation();
+  const hasIr = Boolean(session.latest_ir_sha256);
+  return (
+    <Link
+      className="group block rounded-lg outline-none"
+      to={`/sessions/${session.session_id}`}
+    >
+      <Card className="h-full transition-transform duration-150 hover:-translate-y-0.5 hover:ring-accent/30">
+        <CardBody className="flex h-full flex-col gap-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <FileCode2 aria-hidden className="h-4 w-4 text-accent" />
+                <h2 className="truncate font-mono text-sm font-semibold text-fg">
+                  {session.session_id.slice(0, 12)}
+                </h2>
+              </div>
+              <p className="mt-2 line-clamp-2 text-sm leading-6 text-fg-muted">
+                {hasIr ? t("sessions.card.hasIr") : t("sessions.card.noTurns")}
+              </p>
+            </div>
+            <button
+              aria-label={t("sessions.card.menu")}
+              className="rounded-md p-1 text-fg-muted opacity-80 hover:bg-bg-muted hover:text-fg"
+              type="button"
+              onClick={(event) => event.preventDefault()}
+            >
+              <MoreVertical aria-hidden className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="mt-auto flex flex-wrap items-center gap-2">
+            <Chip variant={chipForState(session.state)}>{session.state}</Chip>
+            <span className="rounded-full bg-bg-app/70 px-2.5 py-1 text-xs font-medium text-fg-muted ring-1 ring-border/40">
+              {session.state === "compiled"
+                ? t("sessions.card.artifactsPlus")
+                : t("sessions.card.artifacts", { count: 0 })}
+            </span>
+          </div>
+          <div className="flex items-center justify-between border-t border-border/30 pt-3 text-xs text-fg-muted">
+            <span className="font-mono">{session.latest_ir_sha256?.slice(0, 12) || t("sessions.noIr")}</span>
+            <span>{relativeTime(session.updated_at, i18n.language)}</span>
+          </div>
+        </CardBody>
+      </Card>
+    </Link>
+  );
+}
+
+function chipForState(state: string): ChipVariant {
+  if (state === "compiled") {
+    return "compiled";
+  }
+  if (state === "validated") {
+    return "validated";
+  }
+  if (state === "llm_config_set") {
+    return "llm_config_set";
+  }
+  return "draft";
+}
+
+function relativeTime(value: string, language: string): string {
+  const deltaMs = Date.now() - new Date(value).getTime();
+  const minutes = Math.max(0, Math.round(deltaMs / 60000));
+  const formatter = new Intl.RelativeTimeFormat(language.startsWith("zh") ? "zh" : "en", {
+    numeric: "auto"
+  });
+  if (minutes < 1) {
+    return formatter.format(0, "minute");
+  }
+  if (minutes < 60) {
+    return formatter.format(-minutes, "minute");
+  }
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) {
+    return formatter.format(-hours, "hour");
+  }
+  return formatter.format(-Math.round(hours / 24), "day");
 }

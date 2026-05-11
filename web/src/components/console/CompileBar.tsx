@@ -1,4 +1,5 @@
 import { FormEvent, useMemo, useState } from "react";
+import { Download, PackageCheck, Rocket } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type {
   Artifact,
@@ -9,6 +10,11 @@ import type {
   MarkImportedInput,
   WorkflowRecord
 } from "../../lib/types";
+import { Button } from "../ui/Button";
+import { Card, CardBody, CardHeader } from "../ui/Card";
+import { Chip } from "../ui/Chip";
+import { Input } from "../ui/Input";
+import { Select } from "../ui/Select";
 
 type Props = {
   artifacts: Artifact[];
@@ -51,12 +57,22 @@ export function CompileBar({
   }
 
   return (
-    <section className="border-t border-slate-200 bg-white">
-      <form className="grid gap-3 px-4 py-3 md:grid-cols-[160px_160px_1fr_160px]" onSubmit={submit}>
-        <label className="text-xs font-medium text-slate-600">
+    <Card className="sticky top-[76px] overflow-hidden">
+      <CardHeader
+        action={
+          <Chip pulse={isCompiling} variant={isCompiling ? "running" : "compiled"}>
+            {isCompiling ? t("compile.compiling") : t("compile.ready")}
+          </Chip>
+        }
+        subtitle={t("compile.subtitle")}
+        title={t("compile.title")}
+      />
+      <CardBody>
+        <form className="grid gap-3" onSubmit={submit}>
+          <label className="text-xs font-medium text-fg-muted">
           {t("compile.target")}
-          <select
-            className="mt-1 w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
+          <Select
+            className="mt-1"
             value={target}
             onChange={(event) => {
               setTarget(event.target.value as CompileTarget);
@@ -65,24 +81,24 @@ export function CompileBar({
           >
             <option value="hiagent">{t("compile.targetHiagent")}</option>
             <option value="dify">{t("compile.targetDify")}</option>
-          </select>
+          </Select>
         </label>
-        <label className="text-xs font-medium text-slate-600">
+        <label className="text-xs font-medium text-fg-muted">
           {t("compile.mode")}
-          <select
-            className="mt-1 w-full rounded-md border border-slate-300 px-2 py-2 text-sm disabled:bg-slate-100"
+          <Select
+            className="mt-1"
             disabled={target !== "hiagent"}
             value={mode}
             onChange={(event) => setMode(event.target.value as CompileMode)}
           >
             <option value="chatflow">{t("compile.modeChatflow")}</option>
             <option value="chat">{t("compile.modeChat")}</option>
-          </select>
+          </Select>
         </label>
-        <label className="text-xs font-medium text-slate-600">
+        <label className="text-xs font-medium text-fg-muted">
           {t("compile.binding")}
-          <select
-            className="mt-1 w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
+          <Select
+            className="mt-1"
             value={selectedBinding}
             onChange={(event) => setBinding(event.target.value)}
           >
@@ -95,19 +111,25 @@ export function CompileBar({
             ) : (
               <option value="test">{t("compile.bindingFallback")}</option>
             )}
-          </select>
+          </Select>
         </label>
-        <button
-          className="self-end rounded-md bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+        <Button
+          className="w-full"
           disabled={isCompiling}
+          icon={<Rocket aria-hidden className="h-4 w-4" />}
+          loading={isCompiling}
           type="submit"
+          variant="primary"
         >
           {isCompiling ? t("compile.compiling") : t("compile.action")}
-        </button>
+        </Button>
       </form>
-      <div className="grid gap-3 border-t border-slate-200 px-4 py-3 lg:grid-cols-2">
+      </CardBody>
+      <div className="grid gap-3 border-t border-border/30 p-4">
         {artifacts.length === 0 ? (
-          <p className="text-sm text-slate-500">{t("compile.noArtifacts")}</p>
+          <p className="rounded-lg border border-dashed border-border/50 bg-bg-app/40 p-3 text-sm leading-6 text-fg-muted">
+            {t("compile.noArtifacts")}
+          </p>
         ) : (
           artifacts.map((artifact) => {
             const workflow = workflows.find((row) => row.workflow_id === artifact.workflow_id);
@@ -124,7 +146,7 @@ export function CompileBar({
           })
         )}
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -156,42 +178,43 @@ function ArtifactCard({
   }
 
   return (
-    <article className="rounded-md border border-slate-200 p-3">
+    <article className="rounded-lg border border-border/50 bg-bg-app/45 p-3">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-950">{artifact.artifact_name}</h3>
-          <p className="mt-1 text-xs text-slate-500">
+        <div className="min-w-0">
+          <h3 className="truncate text-sm font-semibold text-fg">{artifact.artifact_name}</h3>
+          <p className="mt-1 break-all font-mono text-[11px] leading-5 text-fg-muted">
             {artifact.target} / {artifact.mode || artifact.artifact_kind} / {artifact.sha256.slice(0, 12)}
           </p>
         </div>
-        <button
-          className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-          type="button"
+        <Button
+          aria-label={t("compile.download")}
+          icon={<Download aria-hidden className="h-4 w-4" />}
+          size="sm"
+          variant="ghost"
           onClick={() => onDownload(artifact)}
-        >
-          {t("compile.download")}
-        </button>
+        />
       </div>
-      <form className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]" onSubmit={submit}>
-        <input
-          className="rounded-md border border-slate-300 px-2 py-2 text-xs"
+      <form className="mt-3 grid gap-2" onSubmit={submit}>
+        <Input
           placeholder={t("compile.platformAppId")}
           value={platformAppId}
           onChange={(event) => setPlatformAppId(event.target.value)}
         />
-        <input
-          className="rounded-md border border-slate-300 px-2 py-2 text-xs"
+        <Input
           placeholder={t("compile.deploymentNote")}
           value={note}
           onChange={(event) => setNote(event.target.value)}
         />
-        <button
-          className="rounded-md bg-slate-800 px-3 py-2 text-xs font-semibold text-white disabled:bg-slate-400"
+        <Button
+          icon={<PackageCheck aria-hidden className="h-4 w-4" />}
+          loading={marking}
+          size="sm"
           disabled={marking}
           type="submit"
+          variant="secondary"
         >
           {marking ? t("compile.marking") : t("compile.markImported")}
-        </button>
+        </Button>
       </form>
     </article>
   );
