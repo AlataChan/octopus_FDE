@@ -1,0 +1,69 @@
+"""FastAPI application factory for the FDE web console backend."""
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+
+from fastapi import FastAPI
+
+from loom.archive.jsonl import ArchiveWriter
+from loom.planner.client import PlannerClient
+from loom.planner.retry import plan as plan_intent
+from loom.planner.types import IntentRequest
+from loom.registry.store import WorkflowRegistryStore
+from loom.service.deps import Settings
+from loom.service.routes.health import router as health_router
+from loom.service.routes.registry import router as registry_router
+from loom.service.routes.sessions import router as sessions_router
+from loom.state.store import SessionStore
+
+PlannerCallable = Callable[..., Any]
+
+if TYPE_CHECKING:
+    from loom.ir.models import IRDocument
+
+
+def _default_planner(**kwargs: object) -> IRDocument:
+    user_message = str(kwargs["user_message"])
+    llm_config = kwargs["llm_config"]
+    if not isinstance(llm_config, dict):
+        raise RuntimeError("planner llm_config missing")
+    api_key = str(llm_config.get("api_key") or "")
+    if not api_key:
+        raise RuntimeError("session LLM API key is not configured")
+    client = PlannerClient(
+        api_key=api_key,
+        base_url=str(llm_config.get("base_url") or ""),
+        model=str(llm_config.get("model") or ""),
+    )
+    result = plan_intent(
+        IntentRequest(intent=user_message, scope="ecommerce/kb", target="hiagent"),
+        client=client,
+    )
+    if not result.ok or result.ir is None:
+        details = "; ".join(f.detail for f in result.failures) or "planner failed"
+        raise RuntimeError(details)
+    return result.ir
+
+
+def create_app(
+    *,
+    settings: Settings | None = None,
+    planner: PlannerCallable | None = None,
+) -> FastAPI:
+    settings = settings or Settings.from_env()
+    settings.ensure_data_dir()
+    app = FastAPI(title="FDE Web Console API", version="0.1.0")
+    app.state.settings = settings
+    app.state.fernet = settings.fernet()
+    app.state.session_store = SessionStore(settings.data_dir / "sessions.db")
+    app.state.registry_store = WorkflowRegistryStore(settings.data_dir / "workflow_registry.db")
+    app.state.archive_writer = ArchiveWriter(settings.data_dir)
+    app.state.planner = planner or _default_planner
+    app.include_router(health_router)
+    app.include_router(sessions_router)
+    app.include_router(registry_router)
+    return app
+
+
+app = create_app()
