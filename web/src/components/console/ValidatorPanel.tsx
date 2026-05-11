@@ -33,12 +33,12 @@ export function ValidatorPanel({ errors, onSelectPath }: Props) {
           return (
             <article className="rounded-lg border border-destructive/30 bg-destructive/10 p-3" key={`${location}-${index}`}>
               <div className="flex items-start gap-3">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-destructive/15 text-red-200 ring-1 ring-destructive/30">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-destructive/15 text-destructive ring-1 ring-destructive/30">
                   <AlertTriangle aria-hidden className="h-4 w-4" />
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-full bg-bg-app/60 px-2 py-1 text-xs font-medium text-red-100 ring-1 ring-destructive/25">
+                    <span className="rounded-full bg-bg-app/60 px-2 py-1 text-xs font-medium text-fg ring-1 ring-destructive/25">
                       {error.bucket}
                     </span>
                     <Button
@@ -50,7 +50,7 @@ export function ValidatorPanel({ errors, onSelectPath }: Props) {
                       {location}
                     </Button>
                   </div>
-                  <p className="mt-2 text-sm leading-6 text-red-50">{friendlyMessage(error.detail)}</p>
+                  <p className="mt-2 text-sm leading-6 text-fg">{friendlyMessage(error.detail)}</p>
                 </div>
                 <Button
                   aria-label={t("validator.copy")}

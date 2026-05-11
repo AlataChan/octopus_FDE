@@ -91,7 +91,7 @@ function TurnBubble({ turn }: { turn: Turn }) {
       <div
         className={
           isFailed
-            ? "rounded-lg bg-destructive/10 p-3 text-sm leading-6 text-red-100 ring-1 ring-destructive/30"
+            ? "rounded-lg bg-destructive/10 p-3 text-sm leading-6 text-fg ring-1 ring-destructive/30"
             : "rounded-lg bg-bg-app/60 p-3 text-sm leading-6 text-fg ring-1 ring-accent/15"
         }
       >

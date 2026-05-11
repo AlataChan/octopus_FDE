@@ -16,17 +16,17 @@ export type ChipVariant =
   | "warning";
 
 const styles: Record<ChipVariant, string> = {
-  compiled: "border-accent/35 bg-accent/10 text-green-200",
-  downloaded: "border-sky-400/35 bg-sky-400/10 text-sky-200",
-  draft: "border-slate-500/35 bg-slate-500/10 text-slate-200",
-  failed: "border-destructive/40 bg-destructive/10 text-red-200",
-  init: "border-slate-500/35 bg-slate-500/10 text-slate-200",
-  llm_config_set: "border-cyan-400/35 bg-cyan-400/10 text-cyan-200",
-  ok: "border-accent/35 bg-accent/10 text-green-200",
-  running: "border-warning/40 bg-warning/10 text-amber-200",
-  succeeded: "border-accent/35 bg-accent/10 text-green-200",
-  validated: "border-emerald-400/35 bg-emerald-400/10 text-emerald-200",
-  warning: "border-warning/40 bg-warning/10 text-amber-200"
+  compiled: "border-accent/35 bg-accent/10 text-fg",
+  downloaded: "border-border/45 bg-bg-muted text-fg",
+  draft: "border-border/45 bg-bg-muted text-fg-muted",
+  failed: "border-destructive/40 bg-destructive/10 text-fg",
+  init: "border-border/45 bg-bg-muted text-fg-muted",
+  llm_config_set: "border-border/45 bg-bg-muted text-fg",
+  ok: "border-accent/35 bg-accent/10 text-fg",
+  running: "border-warning/40 bg-warning/10 text-fg",
+  succeeded: "border-accent/35 bg-accent/10 text-fg",
+  validated: "border-accent/35 bg-accent/10 text-fg",
+  warning: "border-warning/40 bg-warning/10 text-fg"
 };
 
 export function Chip({

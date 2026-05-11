@@ -119,7 +119,7 @@ export function CompileBar({
           icon={<Rocket aria-hidden className="h-4 w-4" />}
           loading={isCompiling}
           type="submit"
-          variant="primary"
+          variant="accent"
         >
           {isCompiling ? t("compile.compiling") : t("compile.action")}
         </Button>
