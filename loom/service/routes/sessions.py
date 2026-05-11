@@ -330,6 +330,7 @@ def compile_session(
     )
     return {
         "artifact_id": str(artifact.artifact_id),
+        "workflow_id": str(workflow_id),
         "artifact_name": artifact_name,
         "artifact_size": len(artifact_bytes),
         "sha256": digest,
