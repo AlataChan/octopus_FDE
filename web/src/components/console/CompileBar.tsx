@@ -57,7 +57,7 @@ export function CompileBar({
   }
 
   return (
-    <Card className="sticky top-[76px] overflow-hidden">
+    <Card className="flex h-full min-h-0 flex-col overflow-hidden">
       <CardHeader
         action={
           <Chip pulse={isCompiling} variant={isCompiling ? "running" : "compiled"}>
@@ -67,7 +67,7 @@ export function CompileBar({
         subtitle={t("compile.subtitle")}
         title={t("compile.title")}
       />
-      <CardBody>
+      <CardBody className="shrink-0">
         <form className="grid gap-3" onSubmit={submit}>
           <label className="text-xs font-medium text-fg-muted">
           {t("compile.target")}
@@ -125,7 +125,7 @@ export function CompileBar({
         </Button>
       </form>
       </CardBody>
-      <div className="grid gap-3 border-t border-border/30 p-4">
+      <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto border-t border-border/30 p-4">
         {artifacts.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border/50 bg-bg-app/40 p-3 text-sm leading-6 text-fg-muted">
             {t("compile.noArtifacts")}

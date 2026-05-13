@@ -26,7 +26,7 @@ export function IRColumn({
   const { t } = useTranslation();
 
   return (
-    <Card className="min-w-0">
+    <Card className="flex h-full min-h-0 min-w-0 flex-col">
       <CardHeader
         action={
           <Chip variant={errors.length ? "failed" : ir ? "ok" : "draft"}>

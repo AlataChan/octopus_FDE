@@ -101,7 +101,7 @@ export default function SessionDetailPage() {
   );
 
   return (
-    <section className="min-h-[calc(100vh-56px)] px-4 py-5 sm:px-6 lg:px-8">
+    <section className="min-h-[calc(100vh-56px)] px-4 py-5 sm:px-6 lg:px-8 xl:flex xl:h-[calc(100dvh-56px)] xl:flex-col xl:overflow-hidden">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <Link className="inline-flex" to="/">
@@ -133,38 +133,41 @@ export default function SessionDetailPage() {
         </div>
       </div>
       {isXl ? (
-        <PanelGroup
-          autoSaveId={PANEL_GROUP_AUTOSAVE_ID}
-          className="w-full"
-          direction="horizontal"
-          key={layoutResetVersion}
-        >
-          <Panel className="min-w-0 overflow-auto" defaultSize={36} id="chat" minSize={20} order={1}>
-            {chatCol}
-          </Panel>
-          <PanelResizeHandle
-            aria-label={t("layout.resizeChatIr")}
-            className="group relative w-2 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        <div className="min-h-0 flex-1">
+          {/* The xl workbench needs a complete h-full/min-h-0 chain so panels scroll internally. */}
+          <PanelGroup
+            autoSaveId={PANEL_GROUP_AUTOSAVE_ID}
+            className="h-full w-full"
+            direction="horizontal"
+            key={layoutResetVersion}
           >
-            <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border/45 transition-colors group-hover:bg-accent/60 group-data-[resize-handle-state=drag]:bg-accent" />
-          </PanelResizeHandle>
-          <Panel className="min-w-0 overflow-auto" defaultSize={36} id="ir" minSize={20} order={2}>
-            {irCol}
-          </Panel>
-          <PanelResizeHandle
-            aria-label={t("layout.resizeIrCompile")}
-            className="group relative w-2 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border/45 transition-colors group-hover:bg-accent/60 group-data-[resize-handle-state=drag]:bg-accent" />
-          </PanelResizeHandle>
-          <Panel className="min-w-0 overflow-auto" defaultSize={28} id="compile" minSize={20} order={3}>
-            {compileCol}
-          </Panel>
-        </PanelGroup>
+            <Panel className="flex min-h-0 min-w-0 flex-col overflow-hidden" defaultSize={36} id="chat" minSize={20} order={1}>
+              {chatCol}
+            </Panel>
+            <PanelResizeHandle
+              aria-label={t("layout.resizeChatIr")}
+              className="group relative w-2 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border/45 transition-colors group-hover:bg-accent/60 group-data-[resize-handle-state=drag]:bg-accent" />
+            </PanelResizeHandle>
+            <Panel className="flex min-h-0 min-w-0 flex-col overflow-hidden" defaultSize={36} id="ir" minSize={20} order={2}>
+              {irCol}
+            </Panel>
+            <PanelResizeHandle
+              aria-label={t("layout.resizeIrCompile")}
+              className="group relative w-2 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border/45 transition-colors group-hover:bg-accent/60 group-data-[resize-handle-state=drag]:bg-accent" />
+            </PanelResizeHandle>
+            <Panel className="flex min-h-0 min-w-0 flex-col overflow-hidden" defaultSize={28} id="compile" minSize={20} order={3}>
+              {compileCol}
+            </Panel>
+          </PanelGroup>
+        </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-8">
           <div className="md:col-span-8">{chatCol}</div>
-          <div className="md:col-span-5">{irCol}</div>
+          <div className="max-h-[70vh] overflow-auto md:col-span-5">{irCol}</div>
           <div className="md:col-span-3">{compileCol}</div>
         </div>
       )}
