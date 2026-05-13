@@ -125,7 +125,7 @@ export function CompileBar({
         </Button>
       </form>
       </CardBody>
-      <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto border-t border-border/30 p-4">
+      <div className="scroll-mask-y grid min-h-0 flex-1 gap-3 overflow-y-auto border-t border-border/30 p-4">
         {artifacts.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border/50 bg-bg-app/40 p-3 text-sm leading-6 text-fg-muted">
             {t("compile.noArtifacts")}

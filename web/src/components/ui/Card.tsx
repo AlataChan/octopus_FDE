@@ -26,7 +26,7 @@ export function CardHeader({
   return (
     <div
       className={cn(
-        "flex min-h-14 items-start justify-between gap-3 border-b border-border/30 px-4 py-3",
+        "flex min-h-14 items-start justify-between gap-3 border-b border-border/30 px-4 py-2.5",
         className
       )}
     >

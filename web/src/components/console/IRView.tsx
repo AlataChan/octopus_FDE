@@ -30,7 +30,7 @@ export function IRView({ errors, highlightedPath, ir, status }: Props) {
           {t("ir.highlightedPath", { path: highlightedPath })}
         </div>
       ) : null}
-      <pre className="min-h-0 flex-1 overflow-auto p-0 font-mono text-xs leading-5 tabular-nums">
+      <pre className="scroll-mask-y min-h-0 flex-1 overflow-auto p-0 font-mono text-xs leading-5 tabular-nums">
         {lines.map((line, index) => {
           const linePath = line.match(/^\s*([A-Za-z0-9_-]+):/)?.[1];
           const isHighlighted =

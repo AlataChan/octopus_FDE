@@ -65,7 +65,7 @@ function DiffContent({
   const { t } = useTranslation();
 
   return (
-    <div className={`h-full min-h-0 space-y-2 overflow-y-auto px-4 py-3 ${className}`}>
+    <div className={`scroll-mask-y h-full min-h-0 space-y-2 overflow-y-auto px-4 py-3 ${className}`}>
       {!diff ? (
         <p className="text-sm text-fg-muted">{t("diff.empty")}</p>
       ) : !hasChanges ? (

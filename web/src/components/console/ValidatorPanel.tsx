@@ -32,7 +32,7 @@ export function ValidatorPanel({ errors, onSelectPath, variant = "default" }: Pr
     <section
       className={
         variant === "embedded"
-          ? "h-full min-h-0 overflow-y-auto bg-bg-surface px-4 py-3"
+          ? "scroll-mask-y h-full min-h-0 overflow-y-auto bg-bg-surface px-4 py-3"
           : "border-t border-border/30 bg-bg-surface px-4 py-3"
       }
     >

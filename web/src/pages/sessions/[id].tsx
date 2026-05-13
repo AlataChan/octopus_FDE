@@ -146,18 +146,18 @@ export default function SessionDetailPage() {
             </Panel>
             <PanelResizeHandle
               aria-label={t("layout.resizeChatIr")}
-              className="group relative w-2 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="group relative w-3 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border/45 transition-colors group-hover:bg-accent/60 group-data-[resize-handle-state=drag]:bg-accent" />
+              <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border/45 transition-colors group-hover:bg-accent/80 group-data-[resize-handle-state=drag]:bg-accent" />
             </PanelResizeHandle>
             <Panel className="flex min-h-0 min-w-0 flex-col overflow-hidden" defaultSize={36} id="ir" minSize={20} order={2}>
               {irCol}
             </Panel>
             <PanelResizeHandle
               aria-label={t("layout.resizeIrCompile")}
-              className="group relative w-2 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="group relative w-3 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border/45 transition-colors group-hover:bg-accent/60 group-data-[resize-handle-state=drag]:bg-accent" />
+              <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border/45 transition-colors group-hover:bg-accent/80 group-data-[resize-handle-state=drag]:bg-accent" />
             </PanelResizeHandle>
             <Panel className="flex min-h-0 min-w-0 flex-col overflow-hidden" defaultSize={28} id="compile" minSize={20} order={3}>
               {compileCol}
