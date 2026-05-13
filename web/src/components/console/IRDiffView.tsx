@@ -6,13 +6,22 @@ import { Button } from "../ui/Button";
 
 type Props = {
   diff: IRDiffResponse | null;
+  mode?: "collapsible" | "embedded";
   onSelectPath: (path: string) => void;
 };
 
-export function IRDiffView({ diff, onSelectPath }: Props) {
+export function IRDiffView({ diff, mode = "collapsible", onSelectPath }: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const hasChanges = Boolean(diff && diff.summary.total > 0);
+
+  if (mode === "embedded") {
+    return (
+      <section className="h-full min-h-0 bg-bg-surface">
+        <DiffContent diff={diff} hasChanges={hasChanges} onSelectPath={onSelectPath} />
+      </section>
+    );
+  }
 
   return (
     <section className="border-t border-border/30 bg-bg-surface">
@@ -31,19 +40,42 @@ export function IRDiffView({ diff, onSelectPath }: Props) {
         </span>
       </button>
       {open ? (
-        <div className="space-y-2 border-t border-border/30 px-4 py-3">
-          {!diff ? (
-            <p className="text-sm text-fg-muted">{t("diff.empty")}</p>
-          ) : !hasChanges ? (
-            <p className="text-sm text-fg-muted">{t("diff.noChanges")}</p>
-          ) : (
-            diff.changes.map((change, index) => (
-              <ChangeRow change={change} key={index} onSelectPath={onSelectPath} />
-            ))
-          )}
-        </div>
+        <DiffContent
+          className="border-t border-border/30"
+          diff={diff}
+          hasChanges={hasChanges}
+          onSelectPath={onSelectPath}
+        />
       ) : null}
     </section>
+  );
+}
+
+function DiffContent({
+  className = "",
+  diff,
+  hasChanges,
+  onSelectPath
+}: {
+  className?: string;
+  diff: IRDiffResponse | null;
+  hasChanges: boolean;
+  onSelectPath: (path: string) => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className={`h-full min-h-0 space-y-2 overflow-y-auto px-4 py-3 ${className}`}>
+      {!diff ? (
+        <p className="text-sm text-fg-muted">{t("diff.empty")}</p>
+      ) : !hasChanges ? (
+        <p className="text-sm text-fg-muted">{t("diff.noChanges")}</p>
+      ) : (
+        diff.changes.map((change, index) => (
+          <ChangeRow change={change} key={index} onSelectPath={onSelectPath} />
+        ))
+      )}
+    </div>
   );
 }
 

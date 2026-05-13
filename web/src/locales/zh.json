@@ -49,6 +49,9 @@
   "ir.status": "Validator: {{status}}",
   "ir.panelSubtitle": "只读 YAML 视图、validator 状态和最近 turn 的语义 diff。",
   "ir.panelTitle": "IR 工作台",
+  "ir.tab.diff": "Diff",
+  "ir.tab.issues": "问题",
+  "ir.tab.yaml": "YAML",
   "ir.title": "当前 IR",
   "ir.valid": "OK",
   "language.switch": "Switch to English",
@@ -96,6 +99,7 @@
   "turn.status.succeeded": "成功",
   "validator.copy": "复制",
   "validator.issueCount": "{{count}} 个问题",
+  "validator.noIssues": "暂无校验问题。",
   "validator.ok": "校验通过",
   "validator.title": "Validator 错误"
 }
