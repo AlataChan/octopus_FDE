@@ -49,6 +49,9 @@
   "ir.status": "Validator: {{status}}",
   "ir.panelSubtitle": "Read-only YAML view, validator status, and semantic diff from recent turns.",
   "ir.panelTitle": "IR workspace",
+  "ir.tab.diff": "Diff",
+  "ir.tab.issues": "Issues",
+  "ir.tab.yaml": "YAML",
   "ir.title": "Current IR",
   "ir.valid": "OK",
   "language.switch": "切换到中文",
@@ -96,6 +99,7 @@
   "turn.status.succeeded": "Succeeded",
   "validator.copy": "Copy",
   "validator.issueCount": "{{count}} issues",
+  "validator.noIssues": "No validation issues.",
   "validator.ok": "Valid",
   "validator.title": "Validator errors"
 }

@@ -28,7 +28,7 @@ export function ChatPanel({ isSending, onSend, turns }: Props) {
   }
 
   return (
-    <Card className="flex min-h-[680px] flex-col">
+    <Card className="flex h-full min-h-0 flex-col">
       <CardHeader
         action={
           <Chip pulse={isSending} variant={isSending ? "running" : "draft"}>
@@ -39,7 +39,7 @@ export function ChatPanel({ isSending, onSend, turns }: Props) {
         title={t("chat.title")}
       />
       <CardBody className="flex min-h-0 flex-1 flex-col p-0">
-        <div className="flex-1 space-y-3 overflow-y-auto p-4">
+        <div className="scroll-mask-y flex-1 space-y-3 overflow-y-auto p-4">
           {turns.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border/60 bg-bg-app/35 p-4 text-sm leading-6 text-fg-muted">
               {t("chat.empty")}
@@ -48,7 +48,7 @@ export function ChatPanel({ isSending, onSend, turns }: Props) {
             turns.map((turn) => <TurnBubble key={turn.turn_id} turn={turn} />)
           )}
         </div>
-        <form className="border-t border-border/30 p-4" onSubmit={submit}>
+        <form className="shrink-0 border-t border-border/30 p-4" onSubmit={submit}>
           <Textarea
             className="h-28 resize-none"
             placeholder={t("chat.placeholder")}

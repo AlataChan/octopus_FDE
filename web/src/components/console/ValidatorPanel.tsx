@@ -7,12 +7,19 @@ import { Chip } from "../ui/Chip";
 type Props = {
   errors: ValidationFailure[];
   onSelectPath: (path: string) => void;
+  variant?: "default" | "embedded";
 };
 
-export function ValidatorPanel({ errors, onSelectPath }: Props) {
+export function ValidatorPanel({ errors, onSelectPath, variant = "default" }: Props) {
   const { t } = useTranslation();
   if (errors.length === 0) {
-    return null;
+    return variant === "embedded" ? (
+      <section className="flex h-full min-h-0 items-start bg-bg-surface px-4 py-3">
+        <p className="rounded-lg border border-dashed border-border/50 bg-bg-app/40 p-3 text-sm leading-6 text-fg-muted">
+          {t("validator.noIssues")}
+        </p>
+      </section>
+    ) : null;
   }
 
   async function copy(text: string) {
@@ -22,7 +29,13 @@ export function ValidatorPanel({ errors, onSelectPath }: Props) {
   }
 
   return (
-    <section className="border-t border-border/30 bg-bg-surface px-4 py-3">
+    <section
+      className={
+        variant === "embedded"
+          ? "scroll-mask-y h-full min-h-0 overflow-y-auto bg-bg-surface px-4 py-3"
+          : "border-t border-border/30 bg-bg-surface px-4 py-3"
+      }
+    >
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-fg">{t("validator.title")}</h2>
         <Chip variant="failed">{t("validator.issueCount", { count: errors.length })}</Chip>
