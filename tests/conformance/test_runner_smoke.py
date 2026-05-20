@@ -14,6 +14,7 @@ def test_matrix_covers_all_prd_cells():
         "node_timeout",
         "http_idempotency",
         "condition_truthiness",
+        "v04_policy_audit_smoke",
     }
     actual = {row.id for row in MATRIX}
     assert actual == expected

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated, Any, Literal, cast
 from urllib.parse import quote
@@ -18,6 +19,7 @@ from loom.registry.models import WorkflowRecord
 from loom.runtimes.dify.v1_14.compiler import compile_ir as compile_dify
 from loom.runtimes.hiagent.binding import HiagentBinding
 from loom.runtimes.hiagent.v2_6.compiler import compile_ir, compile_ir_chatflow
+from loom.runtimes.warnings import CompileWarning
 from loom.service.deps import Actor, get_actor
 from loom.service.errors import bad_request, conflict, not_found
 from loom.validator.validate import validate
@@ -28,6 +30,8 @@ ActorDep = Annotated[Actor, Depends(get_actor)]
 
 class CreateSessionRequest(BaseModel):
     actor: str | None = None
+    template_id: str | None = None
+    scope: str | None = None
 
 
 class LLMConfigRequest(BaseModel):
@@ -74,6 +78,14 @@ def create_session(
         event_type="session.created",
         payload={"actor_id": actor_id},
     )
+    if body.template_id:
+        session = _seed_session_from_template(
+            request,
+            session.session_id,
+            actor_id=actor_id,
+            template_id=body.template_id,
+            scope=body.scope,
+        )
     return {"session_id": str(session.session_id), "state": session.state}
 
 
@@ -163,7 +175,11 @@ def create_turn(
             ensure_ascii=False,
             sort_keys=True,
         )
-        failures = validate(json.loads(ir_json), scope="ecommerce/kb")
+        failures = validate(
+            json.loads(ir_json),
+            scope="ecommerce/kb",
+            audit_max_retention_days=request.app.state.settings.audit_max_retention_days,
+        )
         if failures:
             raise ValueError("; ".join(f.detail for f in failures))
         row = store.finish_turn_succeeded(
@@ -221,7 +237,15 @@ def get_ir(
     if session is None:
         raise not_found("session not found")
     doc = json.loads(session.latest_ir_json) if session.latest_ir_json else None
-    failures = validate(doc, scope="ecommerce/kb") if doc else []
+    failures = (
+        validate(
+            doc,
+            scope="ecommerce/kb",
+            audit_max_retention_days=request.app.state.settings.audit_max_retention_days,
+        )
+        if doc
+        else []
+    )
     return {
         "ir": doc,
         "latest_ir_sha256": session.latest_ir_sha256,
@@ -264,10 +288,13 @@ def compile_session(
     session = request.app.state.session_store.get_session(session_id, actor_id=actor.id)
     if session is None:
         raise not_found("session not found")
+    if session.state == "init":
+        raise conflict("session must have validated IR before compile")
     if not session.latest_ir_json:
         raise conflict("session has no accepted IR")
+    _ensure_template_target_supported(request, session_id, actor.id, body.target)
     ir = IRDocument.model_validate_json(session.latest_ir_json)
-    artifact_bytes, artifact_name, artifact_kind = _compile_artifact(
+    artifact_bytes, artifact_name, artifact_kind, compile_warnings = _compile_artifact(
         ir,
         target=body.target,
         mode=body.mode,
@@ -294,6 +321,7 @@ def compile_session(
         target=body.target,
         mode=body.mode,
         binding_handle=body.binding,
+        compile_warnings=compile_warnings,
     )
     # Preserve the generated artifact UUID in the on-disk filename; update DB row path via direct rewrite.
     final_rel_path = Path("sessions") / str(session_id) / "artifacts" / f"{artifact.artifact_id}.{ext}"
@@ -332,6 +360,7 @@ def compile_session(
             "artifact_size": len(artifact_bytes),
             "compiler_version": "phase2-m1",
             "ir_version": ir.ir_version,
+            "compile_warnings": [asdict(w) for w in compile_warnings],
         },
     )
     return {
@@ -340,6 +369,7 @@ def compile_session(
         "artifact_name": artifact_name,
         "artifact_size": len(artifact_bytes),
         "sha256": digest,
+        "compile_warnings": [asdict(w) for w in compile_warnings],
     }
 
 
@@ -434,16 +464,82 @@ def _compile_artifact(
     mode: Literal["chat", "chatflow"] | None,
     binding_handle: str,
     binding_dir: Path,
-) -> tuple[bytes, str, Literal["zip", "yaml"]]:
+) -> tuple[bytes, str, Literal["zip", "yaml"], list[CompileWarning]]:
     if target == "dify":
-        text = compile_dify(ir)
-        return text.encode("utf-8"), f"{ir.metadata.name}.yaml", "yaml"
+        text, warnings = compile_dify(ir)
+        return text.encode("utf-8"), f"{ir.metadata.name}.yaml", "yaml", warnings
     binding_path = binding_dir / f"{binding_handle}.hiagent.yaml"
     if not binding_path.exists():
         raise bad_request(f"binding not found: {binding_handle}")
     binding = HiagentBinding.load(binding_path)
-    bundle = compile_ir_chatflow(ir, binding) if mode == "chatflow" else compile_ir(ir, binding)
-    return bundle.to_zip_bytes(), f"{ir.metadata.name}.zip", "zip"
+    bundle, warnings = compile_ir_chatflow(ir, binding) if mode == "chatflow" else compile_ir(ir, binding)
+    return bundle.to_zip_bytes(), f"{ir.metadata.name}.zip", "zip", warnings
+
+
+def _seed_session_from_template(
+    request: Request,
+    session_id: UUID,
+    *,
+    actor_id: str,
+    template_id: str,
+    scope: str | None,
+):
+    catalog = request.app.state.template_catalog
+    record = catalog.get(template_id)
+    if record is None:
+        raise bad_request(f"template not found: {template_id}")
+    selected_scope = scope or record.entry.scopes[0]
+    if selected_scope not in record.entry.scopes:
+        raise bad_request(f"template {template_id} is not available for scope {selected_scope}")
+    failures = validate(
+        record.ir,
+        scope=selected_scope,
+        audit_max_retention_days=request.app.state.settings.audit_max_retention_days,
+    )
+    if failures:
+        details = "; ".join(f.detail for f in failures)
+        raise bad_request(f"template {template_id} failed validation: {details}")
+    ir_json = json.dumps(record.ir, ensure_ascii=False, sort_keys=True)
+    turn = request.app.state.session_store.create_turn(
+        session_id,
+        actor_id=actor_id,
+        user_message=f"template:{template_id}",
+        ir_before=None,
+    )
+    row = request.app.state.session_store.finish_turn_succeeded(
+        turn.turn_id,
+        actor_id=actor_id,
+        planner_reply=(
+            f"已从模板「{record.entry.name.zh}」初始化 / "
+            f"Seeded from template '{record.entry.name.en}'"
+        ),
+        ir_after=ir_json,
+    )
+    request.app.state.archive_writer.append(
+        session_id,
+        actor_id=actor_id,
+        event_type="template_seeded",
+        payload={"template_id": template_id, "ir_sha": _sha256_text(ir_json), "turn_id": str(row.turn_id)},
+    )
+    seeded = request.app.state.session_store.get_session(session_id, actor_id=actor_id)
+    assert seeded is not None
+    return seeded
+
+
+def _ensure_template_target_supported(
+    request: Request,
+    session_id: UUID,
+    actor_id: str,
+    target: Literal["hiagent", "dify"],
+) -> None:
+    for turn in request.app.state.session_store.list_turns(session_id, actor_id=actor_id):
+        if not turn.user_message.startswith("template:"):
+            continue
+        template_id = turn.user_message.removeprefix("template:")
+        record = request.app.state.template_catalog.get(template_id)
+        if record is not None and target not in record.entry.compile_targets:
+            raise bad_request(f"template {template_id} does not support compile target {target}")
+        return
 
 
 def _turn_response(row: Any) -> dict[str, object]:

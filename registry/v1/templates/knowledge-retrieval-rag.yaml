@@ -1,0 +1,61 @@
+ir_version: "0.4"
+metadata:
+  name: Knowledge Retrieval RAG
+  description: Retrieve relevant knowledge and answer with citations.
+  owner: template-gallery
+  rationale: User-facing RAG template for source-grounded answers.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: [product_kb, policy_kb]
+  credentials: []
+policy:
+  default_timeout_s: 60
+  default_retry: {max_attempts: 3, backoff: exponential, retry_on: [5xx, timeout, rate_limit]}
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+inputs:
+  - {name: query, type: string, required: true, description: User question}
+outputs:
+  - {name: answer, type: string}
+  - {name: sources, type: "string[]"}
+  - {name: confidence, type: number}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept a user question on demand.}
+  - id: retrieve
+    type: retrieval
+    dataset: product_kb
+    query: ${input.query}
+    top_k: 12
+    rerank: true
+    rationale: Gather candidate passages before generation.
+  - id: rerank
+    type: llm
+    model: configured-small-model
+    prompt: "Question: ${input.query}\nPassages: ${retrieve.chunks}\nReturn top passages and confidence."
+    temperature: 0
+    output_schema:
+      type: object
+      properties:
+        selected_sources: {type: array, items: {type: string}}
+        confidence: {type: number}
+    rationale: Select strongest evidence and score answerability.
+  - id: answer
+    type: llm
+    model: configured-planner-model
+    prompt: "Question: ${input.query}\nEvidence: ${retrieve.chunks}\nSelected: ${rerank.selected_sources}\nAnswer with citations."
+    temperature: 0.2
+    output_schema:
+      type: object
+      properties:
+        answer: {type: string}
+        sources: {type: array, items: {type: string}}
+    rationale: Generate the final grounded response.
+  - id: out
+    type: output
+    bindings: {answer: "${answer.answer}", sources: "${answer.sources}", confidence: "${rerank.confidence}"}
+    rationale: Bind answer, sources, and confidence for review.
+edges:
+  - {from: start, to: retrieve}
+  - {from: retrieve, to: rerank}
+  - {from: rerank, to: answer}
+  - {from: answer, to: out}

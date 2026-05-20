@@ -11,6 +11,14 @@ def _ecommerce_faq():
     return IRDocument.model_validate(json.loads((ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json").read_text()))
 
 
+def _v04_faq(**policy_updates):
+    from loom.ir.models import Policy
+
+    base = _ecommerce_faq()
+    policy = Policy(**policy_updates)
+    return base.model_copy(update={"ir_version": "0.4", "policy": policy})
+
+
 def test_clean_archetype_has_no_policy_failures():
     failures = check_policy(_ecommerce_faq())
     assert failures == []
@@ -63,3 +71,60 @@ def test_agent_fallback_requires_existing_node():
     )
     failures = check_policy(ir)
     assert any("fallback_edge" in f.detail for f in failures)
+
+
+def test_v04_guardrails_custom_patterns_must_compile():
+    from loom.ir.models import PolicyGuardrails
+
+    ir = _v04_faq(guardrails=PolicyGuardrails(custom_patterns=["["]))
+    failures = check_policy(ir)
+    assert any("valid regex" in f.detail for f in failures)
+
+
+def test_v04_escalation_handoff_node_must_be_output():
+    from loom.ir.models import PolicyEscalation
+
+    ir = _v04_faq(
+        escalation=PolicyEscalation(
+            confidence_min=0.7,
+            confidence_from="${rerank.confidence}",
+            handoff_node="answer",
+        )
+    )
+    failures = check_policy(ir)
+    assert any("handoff_node" in f.detail and "output node" in f.detail for f in failures)
+
+
+def test_v04_escalation_confidence_from_must_reference_numeric_llm_schema_field():
+    from loom.ir.models import PolicyEscalation
+
+    ir = _v04_faq(
+        escalation=PolicyEscalation(
+            confidence_min=0.7,
+            confidence_from="${answer.answer}",
+            handoff_node="out",
+        )
+    )
+    failures = check_policy(ir)
+    assert any("must be numeric" in f.detail for f in failures)
+
+
+def test_v04_escalation_valid_confidence_ref_passes():
+    from loom.ir.models import PolicyEscalation
+
+    ir = _v04_faq(
+        escalation=PolicyEscalation(
+            confidence_min=0.7,
+            confidence_from="${rerank.confidence}",
+            handoff_node="out",
+        )
+    )
+    assert check_policy(ir) == []
+
+
+def test_v04_audit_retention_cannot_exceed_org_cap():
+    from loom.ir.models import PolicyAudit
+
+    ir = _v04_faq(audit=PolicyAudit(log_decisions=True, retention_days=366))
+    failures = check_policy(ir, audit_max_retention_days=365)
+    assert any("retention_days" in f.detail and "org cap" in f.detail for f in failures)

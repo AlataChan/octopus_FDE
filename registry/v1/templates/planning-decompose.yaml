@@ -1,0 +1,55 @@
+ir_version: "0.4"
+metadata:
+  name: Planning Decompose
+  description: Decompose a complex task into steps and execute each step.
+  owner: template-gallery
+  rationale: User-facing planning template for multi-step work.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: []
+  credentials: []
+policy:
+  default_timeout_s: 120
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+inputs:
+  - {name: objective, type: string, required: true}
+outputs:
+  - {name: plan, type: json}
+  - {name: result, type: json}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept a complex objective.}
+  - id: decompose
+    type: llm
+    model: configured-planner-model
+    prompt: "Objective: ${input.objective}\nReturn a short ordered list of executable steps."
+    temperature: 0.1
+    output_schema:
+      type: object
+      properties:
+        steps: {type: array, items: {type: string}}
+    rationale: Break the objective into bounded steps.
+  - id: execute
+    type: loop
+    over: ${decompose.steps}
+    as: step
+    max_iterations: 8
+    body:
+      - id: execute_step
+        type: llm
+        model: configured-small-model
+        prompt: "Objective: ${input.objective}\nCurrent step: ${execute.step}\nReturn step result."
+        output_schema:
+          type: object
+          properties:
+            result: {type: string}
+        rationale: Execute one planned step.
+    rationale: Execute each planned step with an iteration cap.
+  - id: out
+    type: output
+    bindings: {plan: "${decompose.steps}", result: "${execute.results}"}
+    rationale: Return the plan and collected step results.
+edges:
+  - {from: start, to: decompose}
+  - {from: decompose, to: execute}
+  - {from: execute, to: out}

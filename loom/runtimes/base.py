@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from loom.ir.models import IRDocument
+    from loom.runtimes.warnings import CompileWarning
 
 
 @dataclass(frozen=True)
@@ -44,7 +45,7 @@ class RuntimeAdapter(Protocol):
     target: str
     version: str
     # IR ↔ DSL
-    def compile(self, ir: IRDocument) -> Any: ...
+    def compile(self, ir: IRDocument) -> tuple[Any, list[CompileWarning]]: ...
     def reverse(self, dsl: Any) -> tuple[IRDocument, list[UnrecognizedConstruct]]: ...
     def canonical_ast_hash(self, dsl: Any) -> str: ...
     # DSL serialization (str for text formats like YAML / JSON; bytes for

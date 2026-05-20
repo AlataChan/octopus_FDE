@@ -14,6 +14,7 @@ from loom.runtimes.hiagent.v2_6.bundle import HiagentBundle
 from loom.runtimes.hiagent.v2_6.compiler_nodes import emit_workflow_nodes
 from loom.runtimes.hiagent.v2_6.ids import gen_id
 from loom.runtimes.hiagent.v2_6.layout import topological_layout
+from loom.runtimes.warnings import CompileWarning
 
 if TYPE_CHECKING:
     from loom.ir.models import IRDocument
@@ -51,7 +52,7 @@ _APP_CONFIG_REQUEST_KEYS = _APP_CONFIG_DRAFT_KEYS | {
 }
 
 
-def compile_ir(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
+def compile_ir(ir: IRDocument, binding: HiagentBinding) -> tuple[HiagentBundle, list[CompileWarning]]:
     """Compile IR to a Hiagent v2.6 chat-mode Agent bundle.
 
     The ZIP import shape is documented in
@@ -62,6 +63,7 @@ def compile_ir(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
     agent_filename = f"{ir.metadata.name}.yaml"
 
     agent_yaml = _build_agent_yaml(ir=ir, binding=binding, agent_id=agent_id)
+    warnings = _policy_warnings(ir)
 
     index_yaml = _build_index_yaml(ir=ir, binding=binding, agent_id=agent_id)
     files: dict[str, Any] = {
@@ -70,10 +72,10 @@ def compile_ir(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
     }
     files.update(_build_sidecar_files(agent_yaml["AppDepends"], binding))
 
-    return HiagentBundle(bundle_name=bundle_name, files=files)
+    return HiagentBundle(bundle_name=bundle_name, files=files), warnings
 
 
-def compile_ir_chatflow(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
+def compile_ir_chatflow(ir: IRDocument, binding: HiagentBinding) -> tuple[HiagentBundle, list[CompileWarning]]:
     """Compile IR to a Hiagent v2.6 ChatFlow Agent bundle.
 
     The ZIP import shape is documented in
@@ -83,6 +85,7 @@ def compile_ir_chatflow(ir: IRDocument, binding: HiagentBinding) -> HiagentBundl
     bundle_name = _bundle_dirname(ir)
     agent_filename = f"{ir.metadata.name}.yaml"
     agent_yaml = _build_agent_yaml(ir=ir, binding=binding, agent_id=agent_id)
+    warnings = _policy_warnings(ir)
     chatflow_detail = build_chatflow_config_draft(ir, binding)
     single = agent_yaml["AppConfig"]["SingleAgentConfig"]
     single["ModelID"] = ""
@@ -108,7 +111,7 @@ def compile_ir_chatflow(ir: IRDocument, binding: HiagentBinding) -> HiagentBundl
         f"agent/{agent_filename}": agent_yaml,
     }
     files.update(_build_sidecar_files(agent_yaml["AppDepends"], binding))
-    return HiagentBundle(bundle_name=bundle_name, files=files)
+    return HiagentBundle(bundle_name=bundle_name, files=files), warnings
 
 
 def build_agent_config_draft(ir: IRDocument, binding: HiagentBinding) -> dict[str, Any]:
@@ -184,6 +187,9 @@ def build_chatflow_config_draft(
         "VersionName": version_code,
         "WorkspaceID": binding.workspace_id,
     }
+    if ir.policy.audit is not None:
+        detail["AuditEnabled"] = ir.policy.audit.log_inputs or ir.policy.audit.log_decisions
+        detail["AuditRetentionDays"] = ir.policy.audit.retention_days
     check_generated_chatflow_config(detail)
     return detail
 
@@ -238,7 +244,7 @@ def _build_agent_yaml(
     update_time = time.strftime("%Y-%m-%d %H:%M:%S")
     version_name = "v1.0.0"
 
-    return {
+    agent_yaml = {
         "AppConfig": {
             "AgentMode": "Single",
             "AppID": agent_id,
@@ -333,6 +339,41 @@ def _build_agent_yaml(
         "VersionCode": gen_id(),
         "VersionName": version_name,
     }
+    if ir.policy.audit is not None:
+        single = agent_yaml["AppConfig"]["SingleAgentConfig"]
+        audit_enabled = ir.policy.audit.log_inputs or ir.policy.audit.log_decisions
+        single["AuditEnabled"] = audit_enabled
+        single["AuditRetentionDays"] = ir.policy.audit.retention_days
+        agent_yaml["AppConfig"]["AuditEnabled"] = audit_enabled
+        agent_yaml["AppConfig"]["AuditRetentionDays"] = ir.policy.audit.retention_days
+    return agent_yaml
+
+
+def _policy_warnings(ir: IRDocument) -> list[CompileWarning]:
+    warnings: list[CompileWarning] = []
+    if ir.policy.guardrails is not None:
+        warnings.append(CompileWarning(
+            target="hiagent",
+            node_id=None,
+            field="policy.guardrails",
+            message=(
+                "Hiagent v2.6 guardrail lowering requires a pre-compile graph "
+                "transformation layer; no safety-guard nodes were inserted."
+            ),
+            code="policy.guardrails.unsupported",
+        ))
+    if ir.policy.escalation is not None:
+        warnings.append(CompileWarning(
+            target="hiagent",
+            node_id=None,
+            field="policy.escalation",
+            message=(
+                "Hiagent v2.6 escalation lowering requires a pre-compile graph "
+                "transformation layer; no conditional branch was inserted."
+            ),
+            code="policy.escalation.unsupported",
+        ))
+    return warnings
 
 
 def _chat_advanced_config() -> dict[str, Any]:

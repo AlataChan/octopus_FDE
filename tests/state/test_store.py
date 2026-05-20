@@ -2,6 +2,7 @@ from uuid import uuid4
 
 from cryptography.fernet import Fernet
 
+from loom.runtimes.warnings import CompileWarning
 from loom.state.store import SessionStore
 
 
@@ -94,7 +95,18 @@ def test_artifact_lookup_requires_session_and_artifact_ids(tmp_path):
         target="hiagent",
         mode="chat",
         binding_handle="test",
+        compile_warnings=[
+            CompileWarning(
+                target="hiagent",
+                node_id=None,
+                field="policy.audit",
+                message="audit metadata is informational",
+                code="policy.audit.noop",
+            )
+        ],
     )
 
-    assert store.get_artifact(session.session_id, artifact.artifact_id, actor_id="fde") is not None
+    stored = store.get_artifact(session.session_id, artifact.artifact_id, actor_id="fde")
+    assert stored is not None
+    assert stored.compile_warnings[0].code == "policy.audit.noop"
     assert store.get_artifact(uuid4(), artifact.artifact_id, actor_id="fde") is None

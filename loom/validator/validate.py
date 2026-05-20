@@ -18,7 +18,7 @@ from loom.ir.models import (
     ParallelNode,
     RetrievalNode,
 )
-from loom.ir.schema import load_schema
+from loom.ir.schema import load_schema_for_doc
 from loom.validator.errors import ValidationFailure
 from loom.validator.policy import check_policy
 from loom.validator.refs import RefParseError, parse_refs
@@ -28,11 +28,16 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
 
-def validate(doc: dict[str, Any], *, scope: str) -> list[ValidationFailure]:
+def validate(
+    doc: dict[str, Any],
+    *,
+    scope: str,
+    audit_max_retention_days: int = 365,
+) -> list[ValidationFailure]:
     failures: list[ValidationFailure] = []
 
     # 1. JSON Schema (returns all errors at once)
-    schema = load_schema()
+    schema = load_schema_for_doc(doc)
     for err in Draft202012Validator(schema).iter_errors(doc):
         failures.append(ValidationFailure(
             "schema", err.message, location=_loc(err.absolute_path),
@@ -92,7 +97,7 @@ def validate(doc: dict[str, Any], *, scope: str) -> list[ValidationFailure]:
                     ))
 
     # 5. Per-node policy invariants
-    failures.extend(check_policy(ir))
+    failures.extend(check_policy(ir, audit_max_retention_days=audit_max_retention_days))
 
     # 6. Type-flow check (deferred to Task 8 wiring; placeholder here so the entry
     # point is the single seam the Planner calls. Phase 1 test_validate covers

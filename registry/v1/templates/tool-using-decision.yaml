@@ -1,0 +1,54 @@
+ir_version: "0.4"
+metadata:
+  name: Tool-Using Decision
+  description: Plan and execute tool use before returning a decision.
+  owner: template-gallery
+  rationale: User-facing agent template for controlled tool-assisted decisions.
+registry_ref:
+  registry_version: sha:0000000
+  tools: [web_search, fetch_url]
+  datasets: []
+  credentials: []
+policy:
+  default_timeout_s: 120
+  agent_budget: {max_iterations: 6, max_tokens: 20000, max_wall_clock_s: 180}
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+inputs:
+  - {name: task, type: string, required: true}
+outputs:
+  - {name: decision, type: string}
+  - {name: evidence, type: json}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept an operator decision task.}
+  - id: plan
+    type: llm
+    model: configured-small-model
+    prompt: "Task: ${input.task}\nPlan the minimum tool calls needed and success criteria."
+    temperature: 0
+    output_schema:
+      type: object
+      properties:
+        plan: {type: string}
+    rationale: Make tool use explicit before execution.
+  - id: agent
+    type: agent
+    model: configured-planner-model
+    tools: [web_search, fetch_url]
+    input_schema: {type: object}
+    output_schema:
+      type: object
+      properties:
+        decision: {type: string}
+        evidence: {type: object}
+    inputs: {task: "${input.task}", plan: "${plan.plan}"}
+    budget: {max_iterations: 4, max_tokens: 12000, max_wall_clock_s: 120}
+    on_budget_exhausted: return_partial
+    rationale: Execute the approved tool plan with bounded iterations.
+  - id: out
+    type: output
+    bindings: {decision: "${agent.decision}", evidence: "${agent.evidence}"}
+    rationale: Return the decision and supporting evidence.
+edges:
+  - {from: start, to: plan}
+  - {from: plan, to: agent}
+  - {from: agent, to: out}

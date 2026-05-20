@@ -32,6 +32,10 @@ export default function SessionDetailPage() {
   const markImported = useMarkImported();
   const needsConfig = Boolean(session.data && !session.data.llm_model);
   const errors = ir.data?.validation_errors || [];
+  const compileWarningCount = (session.data?.artifacts || []).reduce(
+    (count, artifact) => count + artifact.compile_warnings.length,
+    0
+  );
   const successfulTurns = (turns.data || []).filter((turn) => turn.status === "succeeded");
   const fromTurn =
     successfulTurns.length >= 2 ? successfulTurns[successfulTurns.length - 2].turn_id : null;
@@ -79,6 +83,7 @@ export default function SessionDetailPage() {
   );
   const irCol = (
     <IRColumn
+      compileWarningCount={compileWarningCount}
       diff={diff.data || null}
       errors={errors}
       highlightedPath={highlightedPath}

@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003
 from typing import Literal
@@ -13,6 +14,7 @@ from cryptography.fernet import Fernet  # noqa: TC002
 
 from loom.state.models import ArtifactRow, SessionRow, TurnRow
 from loom.state.sm import SessionState, transition
+from loom.runtimes.warnings import CompileWarning
 
 
 class SessionStore:
@@ -205,6 +207,7 @@ class SessionStore:
         target: Literal["hiagent", "dify"],
         mode: str | None,
         binding_handle: str,
+        compile_warnings: list[CompileWarning] | None = None,
     ) -> ArtifactRow:
         artifact_id = uuid4()
         now = _now()
@@ -214,9 +217,9 @@ class SessionStore:
                 INSERT INTO artifacts (
                     artifact_id, session_id, workflow_id, actor_id, artifact_name,
                     artifact_kind, artifact_path, artifact_size, sha256, target,
-                    mode, binding_handle, created_at
+                    mode, binding_handle, compile_warnings_json, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(artifact_id),
@@ -231,6 +234,7 @@ class SessionStore:
                     target,
                     mode,
                     binding_handle,
+                    json.dumps([asdict(w) for w in compile_warnings or []], ensure_ascii=False),
                     now,
                 ),
             )
@@ -335,10 +339,14 @@ class SessionStore:
                     target TEXT NOT NULL,
                     mode TEXT,
                     binding_handle TEXT NOT NULL,
+                    compile_warnings_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL
                 );
                 """
             )
+            columns = {row["name"] for row in con.execute("PRAGMA table_info(artifacts)").fetchall()}
+            if "compile_warnings_json" not in columns:
+                con.execute("ALTER TABLE artifacts ADD COLUMN compile_warnings_json TEXT NOT NULL DEFAULT '[]'")
 
 
 def _now() -> str:
@@ -377,6 +385,7 @@ def _turn_row(row: sqlite3.Row) -> TurnRow:
 
 
 def _artifact_row(row: sqlite3.Row) -> ArtifactRow:
+    warnings_raw = row["compile_warnings_json"] if "compile_warnings_json" in row.keys() else "[]"
     return ArtifactRow(
         artifact_id=UUID(row["artifact_id"]),
         session_id=UUID(row["session_id"]),
@@ -390,5 +399,9 @@ def _artifact_row(row: sqlite3.Row) -> ArtifactRow:
         target=row["target"],
         mode=row["mode"],
         binding_handle=row["binding_handle"],
+        compile_warnings=[
+            CompileWarning(**item)
+            for item in json.loads(warnings_raw or "[]")
+        ],
         created_at=datetime.fromisoformat(row["created_at"]),
     )

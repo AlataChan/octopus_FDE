@@ -36,6 +36,7 @@ describe("CompileBar", () => {
             artifact_path: "/tmp/workflow.zip",
             artifact_size: 123,
             binding_handle: "test",
+            compile_warnings: [],
             created_at: "2026-05-11T00:00:00Z",
             mode: "chatflow",
             sha256: "abc1234567890def",

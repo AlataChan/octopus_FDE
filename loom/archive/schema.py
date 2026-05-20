@@ -15,6 +15,7 @@ ArchiveEventType = Literal[
     "turn.started",
     "turn.succeeded",
     "turn.failed",
+    "template_seeded",
     "compile.produced",
     "artifact.downloaded",
     "registry.deployed",

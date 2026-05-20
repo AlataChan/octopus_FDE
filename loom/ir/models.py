@@ -1,13 +1,13 @@
-"""Pydantic v2 models for FDE IR v0.3.
+"""Pydantic v2 models for FDE IR v0.3/v0.4.
 
-These mirror schemas/ir-v0.3.schema.json. Any divergence is a bug; the
+These mirror schemas/ir-v0.3.schema.json and schemas/ir-v0.4.schema.json. Any divergence is a bug; the
 test_archetype_validates suite + test_models suite catch most cases.
 """
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 # ---- Primitives ----------------------------------------------------------
 
@@ -58,10 +58,31 @@ class AgentBudget(_Strict):
     max_wall_clock_s: Annotated[int, Field(ge=1, le=3600)]
 
 
+class PolicyGuardrails(_Strict):
+    input_filters: list[str] = Field(default_factory=list)
+    output_filters: list[str] = Field(default_factory=list)
+    custom_patterns: list[str] = Field(default_factory=list)
+
+
+class PolicyEscalation(_Strict):
+    confidence_min: Annotated[float, Field(ge=0, le=1)]
+    confidence_from: VarRef
+    handoff_node: NodeId
+
+
+class PolicyAudit(_Strict):
+    log_inputs: bool = False
+    log_decisions: bool = True
+    retention_days: Annotated[int, Field(ge=1)] = 90
+
+
 class Policy(_Strict):
     default_timeout_s: Annotated[float, Field(gt=0)] | None = None
     default_retry: Retry | None = None
     agent_budget: AgentBudget | None = None
+    guardrails: PolicyGuardrails | None = None
+    escalation: PolicyEscalation | None = None
+    audit: PolicyAudit | None = None
 
 
 class PortDecl(_Strict):
@@ -206,7 +227,7 @@ class Edge(_Strict):
 
 
 class IRDocument(_Strict):
-    ir_version: Literal["0.3"]
+    ir_version: Literal["0.3", "0.4"]
     metadata: Metadata
     registry_ref: RegistryRef
     policy: Policy
@@ -214,3 +235,13 @@ class IRDocument(_Strict):
     outputs: list[PortDecl]
     nodes: Annotated[list[AnyNode], Field(min_length=1)]
     edges: list[Edge]
+
+    @model_validator(mode="after")
+    def _gate_v04_policy_fields(self) -> IRDocument:
+        if self.ir_version == "0.3" and (
+            self.policy.guardrails is not None
+            or self.policy.escalation is not None
+            or self.policy.audit is not None
+        ):
+            raise ValueError("policy.guardrails, policy.escalation, and policy.audit require ir_version 0.4")
+        return self

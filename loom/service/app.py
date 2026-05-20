@@ -14,10 +14,12 @@ from loom.planner.client import PlannerClient
 from loom.planner.retry import plan as plan_intent
 from loom.planner.types import IntentRequest
 from loom.registry.store import WorkflowRegistryStore
+from loom.registry.templates import TemplateCatalog
 from loom.service.deps import Settings
 from loom.service.routes.health import router as health_router
 from loom.service.routes.registry import router as registry_router
 from loom.service.routes.sessions import router as sessions_router
+from loom.service.routes.templates import router as templates_router
 from loom.state.store import SessionStore
 
 PlannerCallable = Callable[..., Any]
@@ -69,10 +71,12 @@ def create_app(
     app.state.session_store = SessionStore(settings.data_dir / "sessions.db")
     app.state.registry_store = WorkflowRegistryStore(settings.data_dir / "workflow_registry.db")
     app.state.archive_writer = ArchiveWriter(settings.data_dir)
+    app.state.template_catalog = TemplateCatalog.load()
     app.state.planner = planner or _default_planner
     app.include_router(health_router)
     app.include_router(sessions_router)
     app.include_router(registry_router)
+    app.include_router(templates_router)
     web_dist = Path(__file__).resolve().parents[2] / "web" / "dist"
     if web_dist.exists():
         app.mount("/", StaticFiles(directory=web_dist, html=True), name="web")

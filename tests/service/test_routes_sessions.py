@@ -59,6 +59,9 @@ def test_session_turn_compile_download_archive_and_registry_round_trip(tmp_path)
     artifact_id = compiled["artifact_id"]
     assert compiled["sha256"]
     assert compiled["workflow_id"]
+    assert compiled["compile_warnings"] == []
+    artifacts = client.get(f"/v1/sessions/{sid}/artifacts").json()
+    assert artifacts[0]["compile_warnings"] == []
 
     downloaded = client.get(f"/v1/sessions/{sid}/artifacts/{artifact_id}")
     assert downloaded.status_code == 200
@@ -118,6 +121,16 @@ def test_artifact_path_traversal_is_not_part_of_api(tmp_path):
     assert resp.status_code in {404, 422}
 
 
+def test_compile_rejects_init_session(tmp_path):
+    client = _client(tmp_path)
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+    resp = client.post(
+        f"/v1/sessions/{sid}/compile",
+        json={"target": "dify", "binding": "demo"},
+    )
+    assert resp.status_code == 409
+
+
 def test_bindings_route_returns_handles_not_raw_yaml(tmp_path):
     client = _client(tmp_path)
     rows = client.get("/v1/bindings").json()
@@ -163,3 +176,35 @@ def test_download_artifact_with_non_ascii_filename(tmp_path):
     fallback_end = disposition.index('"', fallback_start)
     fallback = disposition[fallback_start:fallback_end]
     fallback.encode("ascii")  # 不抛即通过
+
+
+def test_create_session_from_template_seeds_validated_ir_and_sentinel_turn(tmp_path):
+    client = _client(tmp_path)
+    created = client.post(
+        "/v1/sessions",
+        json={"template_id": "knowledge-retrieval-rag", "scope": "ecommerce/kb"},
+    ).json()
+    sid = created["session_id"]
+
+    assert created["state"] == "validated"
+    ir = client.get(f"/v1/sessions/{sid}/ir").json()
+    assert ir["ir"]["ir_version"] == "0.4"
+    turns = client.app.state.session_store.list_turns(sid, actor_id="single-user")
+    assert turns[0].user_message == "template:knowledge-retrieval-rag"
+    assert "Seeded from template" in (turns[0].planner_reply or "")
+    archive = client.get(f"/v1/archive/sessions/{sid}").text
+    assert "template_seeded" in archive
+
+
+def test_hiagent_only_template_rejects_dify_compile(tmp_path):
+    client = _client(tmp_path)
+    created = client.post(
+        "/v1/sessions",
+        json={"template_id": "tool-using-decision", "scope": "ecommerce/kb"},
+    ).json()
+    resp = client.post(
+        f"/v1/sessions/{created['session_id']}/compile",
+        json={"target": "dify", "binding": "demo"},
+    )
+    assert resp.status_code == 400
+    assert "does not support compile target dify" in resp.text
