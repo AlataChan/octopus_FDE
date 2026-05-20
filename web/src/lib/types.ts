@@ -12,6 +12,14 @@ export type ArtifactKind = "zip" | "yaml";
 export type CompileTarget = "hiagent" | "dify";
 export type CompileMode = "chat" | "chatflow";
 
+export type CompileWarning = {
+  target: CompileTarget;
+  node_id: string | null;
+  field: string;
+  message: string;
+  code: string;
+};
+
 export type Artifact = {
   artifact_id: string;
   session_id: string;
@@ -25,6 +33,7 @@ export type Artifact = {
   target: CompileTarget;
   mode: CompileMode | string | null;
   binding_handle: string;
+  compile_warnings: CompileWarning[];
   created_at: string;
 };
 
@@ -69,6 +78,7 @@ export type CompileResponse = {
   artifact_name: string;
   artifact_size: number;
   sha256: string;
+  compile_warnings: CompileWarning[];
 };
 
 export type ValidationFailure = {
@@ -146,4 +156,22 @@ export type WorkflowRecord = {
 export type MarkImportedInput = {
   platform_app_id: string;
   deployment_note?: string | null;
+};
+
+export type LocalizedText = {
+  zh: string;
+  en: string;
+};
+
+export type TemplateSummary = {
+  id: string;
+  name: LocalizedText;
+  description: LocalizedText;
+  tags: string[];
+  scopes: string[];
+  compile_targets: CompileTarget[];
+};
+
+export type TemplateDetail = TemplateSummary & {
+  ir: unknown;
 };

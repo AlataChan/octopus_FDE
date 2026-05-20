@@ -9,6 +9,8 @@ import type {
   MarkImportedInput,
   SessionDetail,
   SessionSummary,
+  TemplateDetail,
+  TemplateSummary,
   Turn,
   WorkflowRecord
 } from "./types";
@@ -62,6 +64,31 @@ export function createSession(): Promise<{ session_id: string; state: string }> 
     body: JSON.stringify({}),
     method: "POST"
   });
+}
+
+export function createSessionFromTemplate(
+  templateId: string,
+  scope = "ecommerce/kb"
+): Promise<{ session_id: string; state: string }> {
+  return apiFetch<{ session_id: string; state: string }>("/v1/sessions", {
+    body: JSON.stringify({ scope, template_id: templateId }),
+    method: "POST"
+  });
+}
+
+export function listTemplates(params: {
+  scope?: string;
+  target?: "hiagent" | "dify";
+} = {}): Promise<TemplateSummary[]> {
+  const query = new URLSearchParams();
+  if (params.scope) query.set("scope", params.scope);
+  if (params.target) query.set("target", params.target);
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return apiFetch<TemplateSummary[]>(`/v1/templates${suffix}`);
+}
+
+export function getTemplate(templateId: string): Promise<TemplateDetail> {
+  return apiFetch<TemplateDetail>(`/v1/templates/${templateId}`);
 }
 
 export function getSession(sessionId: string): Promise<SessionDetail> {

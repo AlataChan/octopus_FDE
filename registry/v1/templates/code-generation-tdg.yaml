@@ -1,0 +1,66 @@
+ir_version: "0.4"
+metadata:
+  name: Test-Driven Code Generation
+  description: Generate tests, generate code, then run a test endpoint.
+  owner: template-gallery
+  rationale: User-facing code generation template using a test-first sequence.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: []
+  credentials: []
+policy:
+  default_timeout_s: 120
+  default_retry: {max_attempts: 2, backoff: exponential, retry_on: [5xx, timeout, network]}
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+inputs:
+  - {name: request, type: string, required: true}
+outputs:
+  - {name: code, type: string}
+  - {name: tests, type: string}
+  - {name: status, type: string}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept a code generation request.}
+  - id: tests
+    type: llm
+    model: configured-small-model
+    prompt: "Request: ${input.request}\nWrite concise executable tests first."
+    temperature: 0
+    output_schema:
+      type: object
+      properties:
+        tests: {type: string}
+    rationale: Define expected behavior before generating code.
+  - id: code
+    type: llm
+    model: configured-planner-model
+    prompt: "Request: ${input.request}\nTests: ${tests.tests}\nWrite code that satisfies the tests."
+    temperature: 0.1
+    output_schema:
+      type: object
+      properties:
+        code: {type: string}
+    rationale: Generate implementation against the test contract.
+  - id: run_tests
+    type: http
+    method: POST
+    url: https://example.invalid/fde/test-runner
+    body: {tests: "${tests.tests}", code: "${code.code}"}
+    idempotency_key: ${input.request}
+    rationale: Submit code and tests to a sandbox test runner.
+  - id: route
+    type: condition
+    branches:
+      - {when: "${run_tests.status} == 200", next: out}
+    default: out
+    rationale: Route successful and failed test runs to the same output for review.
+  - id: out
+    type: output
+    bindings: {code: "${code.code}", tests: "${tests.tests}", status: "${run_tests.status}"}
+    rationale: Return generated code, tests, and runner status.
+edges:
+  - {from: start, to: tests}
+  - {from: tests, to: code}
+  - {from: code, to: run_tests}
+  - {from: run_tests, to: route}
+  - {from: route, to: out}

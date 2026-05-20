@@ -1,0 +1,49 @@
+ir_version: "0.4"
+metadata:
+  name: Verification Factcheck
+  description: Check a claim against retrieved evidence and return a verdict.
+  owner: template-gallery
+  rationale: User-facing verification template for claims that need evidence.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: [policy_kb]
+  credentials: []
+policy:
+  default_timeout_s: 60
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+inputs:
+  - {name: claim, type: string, required: true}
+outputs:
+  - {name: verdict, type: string}
+  - {name: evidence, type: "string[]"}
+  - {name: confidence, type: number}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept a claim to verify.}
+  - id: retrieve
+    type: retrieval
+    dataset: policy_kb
+    query: ${input.claim}
+    top_k: 20
+    rerank: true
+    rationale: Collect multiple candidate evidence passages.
+  - id: validate
+    type: llm
+    model: configured-planner-model
+    prompt: "Claim: ${input.claim}\nEvidence candidates: ${retrieve.chunks}\nReturn supported/refuted/unclear, evidence ids, and confidence."
+    temperature: 0
+    output_schema:
+      type: object
+      properties:
+        verdict: {type: string}
+        evidence: {type: array, items: {type: string}}
+        confidence: {type: number}
+    rationale: Judge the claim against evidence without adding unsupported facts.
+  - id: out
+    type: output
+    bindings: {verdict: "${validate.verdict}", evidence: "${validate.evidence}", confidence: "${validate.confidence}"}
+    rationale: Expose factcheck decision and confidence.
+edges:
+  - {from: start, to: retrieve}
+  - {from: retrieve, to: validate}
+  - {from: validate, to: out}

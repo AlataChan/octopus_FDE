@@ -30,6 +30,8 @@ ActorDep = Annotated[Actor, Depends(get_actor)]
 
 class CreateSessionRequest(BaseModel):
     actor: str | None = None
+    template_id: str | None = None
+    scope: str | None = None
 
 
 class LLMConfigRequest(BaseModel):
@@ -76,6 +78,14 @@ def create_session(
         event_type="session.created",
         payload={"actor_id": actor_id},
     )
+    if body.template_id:
+        session = _seed_session_from_template(
+            request,
+            session.session_id,
+            actor_id=actor_id,
+            template_id=body.template_id,
+            scope=body.scope,
+        )
     return {"session_id": str(session.session_id), "state": session.state}
 
 
@@ -278,8 +288,11 @@ def compile_session(
     session = request.app.state.session_store.get_session(session_id, actor_id=actor.id)
     if session is None:
         raise not_found("session not found")
+    if session.state == "init":
+        raise conflict("session must have validated IR before compile")
     if not session.latest_ir_json:
         raise conflict("session has no accepted IR")
+    _ensure_template_target_supported(request, session_id, actor.id, body.target)
     ir = IRDocument.model_validate_json(session.latest_ir_json)
     artifact_bytes, artifact_name, artifact_kind, compile_warnings = _compile_artifact(
         ir,
@@ -461,6 +474,72 @@ def _compile_artifact(
     binding = HiagentBinding.load(binding_path)
     bundle, warnings = compile_ir_chatflow(ir, binding) if mode == "chatflow" else compile_ir(ir, binding)
     return bundle.to_zip_bytes(), f"{ir.metadata.name}.zip", "zip", warnings
+
+
+def _seed_session_from_template(
+    request: Request,
+    session_id: UUID,
+    *,
+    actor_id: str,
+    template_id: str,
+    scope: str | None,
+):
+    catalog = request.app.state.template_catalog
+    record = catalog.get(template_id)
+    if record is None:
+        raise bad_request(f"template not found: {template_id}")
+    selected_scope = scope or record.entry.scopes[0]
+    if selected_scope not in record.entry.scopes:
+        raise bad_request(f"template {template_id} is not available for scope {selected_scope}")
+    failures = validate(
+        record.ir,
+        scope=selected_scope,
+        audit_max_retention_days=request.app.state.settings.audit_max_retention_days,
+    )
+    if failures:
+        details = "; ".join(f.detail for f in failures)
+        raise bad_request(f"template {template_id} failed validation: {details}")
+    ir_json = json.dumps(record.ir, ensure_ascii=False, sort_keys=True)
+    turn = request.app.state.session_store.create_turn(
+        session_id,
+        actor_id=actor_id,
+        user_message=f"template:{template_id}",
+        ir_before=None,
+    )
+    row = request.app.state.session_store.finish_turn_succeeded(
+        turn.turn_id,
+        actor_id=actor_id,
+        planner_reply=(
+            f"已从模板「{record.entry.name.zh}」初始化 / "
+            f"Seeded from template '{record.entry.name.en}'"
+        ),
+        ir_after=ir_json,
+    )
+    request.app.state.archive_writer.append(
+        session_id,
+        actor_id=actor_id,
+        event_type="template_seeded",
+        payload={"template_id": template_id, "ir_sha": _sha256_text(ir_json), "turn_id": str(row.turn_id)},
+    )
+    seeded = request.app.state.session_store.get_session(session_id, actor_id=actor_id)
+    assert seeded is not None
+    return seeded
+
+
+def _ensure_template_target_supported(
+    request: Request,
+    session_id: UUID,
+    actor_id: str,
+    target: Literal["hiagent", "dify"],
+) -> None:
+    for turn in request.app.state.session_store.list_turns(session_id, actor_id=actor_id):
+        if not turn.user_message.startswith("template:"):
+            continue
+        template_id = turn.user_message.removeprefix("template:")
+        record = request.app.state.template_catalog.get(template_id)
+        if record is not None and target not in record.entry.compile_targets:
+            raise bad_request(f"template {template_id} does not support compile target {target}")
+        return
 
 
 def _turn_response(row: Any) -> dict[str, object]:

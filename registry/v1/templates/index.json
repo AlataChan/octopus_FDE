@@ -1,0 +1,60 @@
+{
+  "version": "sha:0000000",
+  "templates": [
+    {
+      "id": "knowledge-retrieval-rag",
+      "name": {"zh": "知识检索（RAG）", "en": "Knowledge Retrieval (RAG)"},
+      "description": {"zh": "从知识库检索并生成带来源的回答。", "en": "Retrieve from a knowledge base and generate a sourced answer."},
+      "tags": ["rag", "qa", "kb"],
+      "ir_file": "knowledge-retrieval-rag.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.6",
+      "_internal_pattern": "trigger -> retrieval -> llm -> llm -> output"
+    },
+    {
+      "id": "verification-factcheck",
+      "name": {"zh": "事实核验", "en": "Verification Factcheck"},
+      "description": {"zh": "检索多条依据并输出结论、证据与置信度。", "en": "Retrieve evidence and return verdict, support, and confidence."},
+      "tags": ["verification", "factcheck", "confidence"],
+      "ir_file": "verification-factcheck.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.9",
+      "_internal_pattern": "trigger -> retrieval -> llm -> output"
+    },
+    {
+      "id": "tool-using-decision",
+      "name": {"zh": "工具辅助决策", "en": "Tool-Using Decision"},
+      "description": {"zh": "先规划工具调用，再由 Agent 执行并汇总。", "en": "Plan tool use, execute through an agent, then summarize."},
+      "tags": ["agent", "tools", "decision"],
+      "ir_file": "tool-using-decision.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent"],
+      "_internal_source": "Ahmad (2026) Ch.12",
+      "_internal_pattern": "trigger -> llm -> agent -> output"
+    },
+    {
+      "id": "planning-decompose",
+      "name": {"zh": "规划分解", "en": "Planning Decompose"},
+      "description": {"zh": "把复杂任务分解为步骤并循环执行。", "en": "Decompose a complex task into steps and execute them in a loop."},
+      "tags": ["planning", "decompose", "loop"],
+      "ir_file": "planning-decompose.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent"],
+      "_internal_source": "Ahmad (2026) Ch.15",
+      "_internal_pattern": "trigger -> llm -> loop -> output"
+    },
+    {
+      "id": "code-generation-tdg",
+      "name": {"zh": "测试驱动代码生成", "en": "Test-Driven Code Generation"},
+      "description": {"zh": "先生成测试，再生成代码并调用测试运行器。", "en": "Generate tests first, then code, and call a test runner."},
+      "tags": ["code", "tdg", "testing"],
+      "ir_file": "code-generation-tdg.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.18",
+      "_internal_pattern": "trigger -> llm -> llm -> http -> condition -> output"
+    }
+  ]
+}

@@ -64,3 +64,38 @@ def test_audit_retention_cap_loaded_from_env(tmp_path, monkeypatch):
     monkeypatch.setenv("LOOM_AUDIT_MAX_RETENTION_DAYS", "180")
     settings = Settings.from_env()
     assert settings.audit_max_retention_days == 180
+
+
+def test_app_startup_fails_on_invalid_template_catalog(tmp_path, monkeypatch):
+    from loom.registry.templates import TemplateCatalog, TemplateLoadError
+
+    catalog_root = tmp_path / "templates"
+    catalog_root.mkdir()
+    (catalog_root / "index.json").write_text(
+        """
+        {
+          "version": "sha:0000000",
+          "templates": [{
+            "id": "bad",
+            "name": {"zh": "坏模板", "en": "Bad"},
+            "description": {"zh": "坏", "en": "Bad"},
+            "tags": [],
+            "ir_file": "bad.yaml",
+            "scopes": ["ecommerce/kb"],
+            "compile_targets": ["hiagent"],
+            "_internal_source": "test",
+            "_internal_pattern": "bad"
+          }]
+        }
+        """
+    )
+    (catalog_root / "bad.yaml").write_text("ir_version: [")
+    original_load = TemplateCatalog.load
+    monkeypatch.setattr(
+        "loom.service.app.TemplateCatalog.load",
+        lambda *_args, **_kwargs: original_load(catalog_root),
+    )
+    settings = Settings(data_dir=tmp_path / "data", app_env="dev", fernet_key=Fernet.generate_key().decode())
+
+    with pytest.raises(TemplateLoadError, match="failed to load template bad"):
+        create_app(settings=settings)
