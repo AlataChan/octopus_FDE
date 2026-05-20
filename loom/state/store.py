@@ -73,7 +73,14 @@ class SessionStore:
     ) -> None:
         session = self.require_session(session_id, actor_id=actor_id)
         encrypted = fernet.encrypt(api_key.encode("utf-8"))
-        state = transition(session.state, "llm_config_set").value
+        # 模板初始化的 session 直接落到 validated（无 LLM key），此时配置/更新
+        # LLM key 不应再触发 INIT → LLM_CONFIG_SET 跃迁。其他非 INIT 状态（已生成
+        # IR 后回头换 key）同理保持 state 不变。
+        state = (
+            transition(session.state, "llm_config_set").value
+            if session.state == "init"
+            else session.state
+        )
         with self._connect() as con:
             con.execute(
                 """

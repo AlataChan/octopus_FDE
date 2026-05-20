@@ -33,6 +33,29 @@ def test_session_llm_key_is_encrypted(tmp_path):
     assert row.llm_key_version == 1
 
 
+def test_set_llm_config_on_template_seeded_session_preserves_state(tmp_path):
+    """模板初始化的 session（state=validated）必须允许再次设置 LLM key。"""
+    store = SessionStore(tmp_path / "sessions.db")
+    fernet = Fernet(Fernet.generate_key())
+    session = store.create_session(actor_id="fde")
+    turn = store.create_turn(session.session_id, actor_id="fde", user_message="template:rag", ir_before=None)
+    store.finish_turn_succeeded(turn.turn_id, actor_id="fde", planner_reply="seeded", ir_after='{"ir_version":"0.4"}')
+    assert store.get_session(session.session_id, actor_id="fde").state == "validated"
+
+    store.set_llm_config(
+        session.session_id,
+        actor_id="fde",
+        api_key="sk-deepseek",
+        base_url="https://api.deepseek.com/v1",
+        model="deepseek-chat",
+        fernet=fernet,
+    )
+
+    row = store.get_session(session.session_id, actor_id="fde")
+    assert row.state == "validated"
+    assert fernet.decrypt(row.llm_api_key_encrypted).decode() == "sk-deepseek"
+
+
 def test_failed_turn_does_not_advance_latest_ir(tmp_path):
     store = SessionStore(tmp_path / "sessions.db")
     session = store.create_session(actor_id="fde")
