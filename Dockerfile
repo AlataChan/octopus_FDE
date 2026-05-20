@@ -22,7 +22,11 @@ COPY registry/ ./registry/
 COPY config/customers/example.hiagent.yaml ./config/customers/example.hiagent.yaml
 COPY --from=web-build /app/web/dist ./web/dist
 
-RUN pip install --no-cache-dir .
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip install --no-cache-dir \
+    -i "$PIP_INDEX_URL" \
+    --timeout 120 --retries 5 \
+    .
 
 EXPOSE 8000
 CMD ["uvicorn", "loom.service.app:app", "--host", "0.0.0.0", "--port", "8000"]
