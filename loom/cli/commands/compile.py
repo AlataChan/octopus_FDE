@@ -75,9 +75,9 @@ def compile_cmd(
             sys.exit(2)
 
         if mode == "chatflow":
-            dsl = compile_ir_chatflow(ir, binding)
+            dsl, compile_warnings = compile_ir_chatflow(ir, binding)
         else:
-            dsl = cast("Any", adapter).compile(ir, binding=binding)
+            dsl, compile_warnings = cast("Any", adapter).compile(ir, binding=binding)
 
         if inspect:
             agent_files = dsl.agent_files()
@@ -99,6 +99,8 @@ def compile_cmd(
         zip_path.write_bytes(dsl.to_zip_bytes())
         for warning in _hiagent_binding_warnings(ir, dsl):
             click.echo(f"warning: {warning}", err=True)
+        for warning in compile_warnings:
+            click.echo(f"warning[{warning.code}]: {warning.message}", err=True)
         click.echo(f"wrote {zip_path} (hiagent {mode} zip)")
         click.echo("Next: drag this zip into Hiagent's 导入智能体 wizard.")
         return
@@ -106,13 +108,15 @@ def compile_cmd(
         click.echo("--inspect is only supported for hiagent target.", err=True)
         sys.exit(2)
     else:
-        dsl = adapter.compile(ir)
+        dsl, compile_warnings = adapter.compile(ir)
 
     serialized = adapter.serialize_dsl(dsl)
     if isinstance(serialized, bytes):
         out_path.write_bytes(serialized)
     else:
         out_path.write_text(serialized)
+    for warning in compile_warnings:
+        click.echo(f"warning[{warning.code}]: {warning.message}", err=True)
     click.echo(f"wrote {out_path} ({target})")
 
 

@@ -58,13 +58,18 @@ def test_all_archetypes_compile_for_phase_1_5_targets(ir_path: Path, target: str
     assert len(IR_FILES) == 5
     ir = _load_ir(ir_path)
     if target == "hiagent-chat":
-        _assert_hiagent_zip(compile_ir(ir, BINDING).to_zip_bytes())
+        bundle, warnings = compile_ir(ir, BINDING)
+        assert warnings == []
+        _assert_hiagent_zip(bundle.to_zip_bytes())
     elif target == "hiagent-chatflow":
         if ir_path.name == "05-ecommerce-order-exception.json":
             pytest.xfail("known Hiagent ChatFlow spec_check rejection for legacy output template")
-        _assert_hiagent_zip(compile_ir_chatflow(ir, BINDING).to_zip_bytes())
+        bundle, warnings = compile_ir_chatflow(ir, BINDING)
+        assert warnings == []
+        _assert_hiagent_zip(bundle.to_zip_bytes())
     else:
-        text = compile_dify(ir)
+        text, warnings = compile_dify(ir)
+        assert warnings == []
         if ir_path.name in {"02-tcm-intake-triage.json", "03-clinic-ops-summary.json"} and "${" in text:
             pytest.xfail("known Dify compiler placeholder leakage for this legacy archetype")
         _assert_dify_yaml(text)

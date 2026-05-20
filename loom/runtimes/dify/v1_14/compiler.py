@@ -18,9 +18,10 @@ from loom.runtimes.dify.v1_14.compiler_nodes import (
     source_handle_for_edge,
 )
 from loom.runtimes.dify.v1_14.layout import topological_layout
+from loom.runtimes.warnings import CompileWarning
 
 
-def compile_ir(ir: IRDocument) -> str:
+def compile_ir(ir: IRDocument) -> tuple[str, list[CompileWarning]]:
     """Return Dify DSL YAML suitable for UI import."""
     node_id_map = {node.id: node.id for node in ir.nodes}
     start_node_id = _start_node_id(ir)
@@ -74,7 +75,7 @@ def compile_ir(ir: IRDocument) -> str:
             "rag_pipeline_variables": [],
         },
     }
-    return cast("str", yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+    return cast("str", yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)), []
 
 
 def _start_node_id(ir: IRDocument) -> str:

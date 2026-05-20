@@ -14,6 +14,7 @@ from loom.runtimes.hiagent.v2_6.bundle import HiagentBundle
 from loom.runtimes.hiagent.v2_6.compiler_nodes import emit_workflow_nodes
 from loom.runtimes.hiagent.v2_6.ids import gen_id
 from loom.runtimes.hiagent.v2_6.layout import topological_layout
+from loom.runtimes.warnings import CompileWarning
 
 if TYPE_CHECKING:
     from loom.ir.models import IRDocument
@@ -51,7 +52,7 @@ _APP_CONFIG_REQUEST_KEYS = _APP_CONFIG_DRAFT_KEYS | {
 }
 
 
-def compile_ir(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
+def compile_ir(ir: IRDocument, binding: HiagentBinding) -> tuple[HiagentBundle, list[CompileWarning]]:
     """Compile IR to a Hiagent v2.6 chat-mode Agent bundle.
 
     The ZIP import shape is documented in
@@ -70,10 +71,10 @@ def compile_ir(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
     }
     files.update(_build_sidecar_files(agent_yaml["AppDepends"], binding))
 
-    return HiagentBundle(bundle_name=bundle_name, files=files)
+    return HiagentBundle(bundle_name=bundle_name, files=files), []
 
 
-def compile_ir_chatflow(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
+def compile_ir_chatflow(ir: IRDocument, binding: HiagentBinding) -> tuple[HiagentBundle, list[CompileWarning]]:
     """Compile IR to a Hiagent v2.6 ChatFlow Agent bundle.
 
     The ZIP import shape is documented in
@@ -108,7 +109,7 @@ def compile_ir_chatflow(ir: IRDocument, binding: HiagentBinding) -> HiagentBundl
         f"agent/{agent_filename}": agent_yaml,
     }
     files.update(_build_sidecar_files(agent_yaml["AppDepends"], binding))
-    return HiagentBundle(bundle_name=bundle_name, files=files)
+    return HiagentBundle(bundle_name=bundle_name, files=files), []
 
 
 def build_agent_config_draft(ir: IRDocument, binding: HiagentBinding) -> dict[str, Any]:

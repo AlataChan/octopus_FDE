@@ -44,13 +44,15 @@ def _zip_yaml(raw: bytes, path: str) -> dict[str, Any]:
 
 
 def test_zip_format_hard_rules():
-    bundle = compile_ir(_load_ir(), _test_binding())
+    bundle, warnings = compile_ir(_load_ir(), _test_binding())
+    assert warnings == []
     raw = bundle.to_zip_bytes()
     _assert_zip_hard_rules(bundle, raw)
 
 
 def test_chatflow_zip_format_hard_rules():
-    bundle = compile_ir_chatflow(_load_ir(), _test_binding())
+    bundle, warnings = compile_ir_chatflow(_load_ir(), _test_binding())
+    assert warnings == []
     raw = bundle.to_zip_bytes()
     _assert_zip_hard_rules(bundle, raw)
 
@@ -85,7 +87,9 @@ def test_zip_rejects_unsafe_entry_paths(path: str):
 
 
 def test_zip_contains_index_agent_model_and_knowledge_sidecars():
-    raw = compile_ir(_load_ir(), _test_binding()).to_zip_bytes()
+    bundle, warnings = compile_ir(_load_ir(), _test_binding())
+    assert warnings == []
+    raw = bundle.to_zip_bytes()
     names = _zip_names(raw)
 
     assert "index.yaml" in names
@@ -97,7 +101,9 @@ def test_zip_contains_index_agent_model_and_knowledge_sidecars():
 
 
 def test_zip_sidecar_yaml_matches_depends_names():
-    raw = compile_ir(_load_ir(), _test_binding()).to_zip_bytes()
+    bundle, warnings = compile_ir(_load_ir(), _test_binding())
+    assert warnings == []
+    raw = bundle.to_zip_bytes()
     agent = _zip_yaml(raw, "agent/Ecommerce Customer FAQ.yaml")
 
     for model_id, entry in agent["AppDepends"]["ModelMap"].items():

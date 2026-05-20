@@ -51,12 +51,24 @@ def _agent_path(bundle: HiagentBundle) -> str:
     return agent_files[0][0]
 
 
+def _compile_bundle(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
+    bundle, warnings = compile_ir(ir, binding)
+    assert warnings == []
+    return bundle
+
+
+def _compile_chatflow_bundle(ir: IRDocument, binding: HiagentBinding) -> HiagentBundle:
+    bundle, warnings = compile_ir_chatflow(ir, binding)
+    assert warnings == []
+    return bundle
+
+
 def test_compile_archetype_01_returns_bundle(faq_ir: IRDocument, minimal_binding: HiagentBinding):
-    assert isinstance(compile_ir(faq_ir, minimal_binding), HiagentBundle)
+    assert isinstance(_compile_bundle(faq_ir, minimal_binding), HiagentBundle)
 
 
 def test_bundle_has_index_and_single_agent_only(faq_ir: IRDocument, minimal_binding: HiagentBinding):
-    bundle = compile_ir(faq_ir, minimal_binding)
+    bundle = _compile_bundle(faq_ir, minimal_binding)
     assert "index.yaml" in bundle.files
     assert any(p.startswith("agent/") and p.endswith(".yaml") for p in bundle.files)
     assert not any(p.startswith("workflow/") for p in bundle.files)
@@ -66,7 +78,7 @@ def test_bundle_has_index_and_single_agent_only(faq_ir: IRDocument, minimal_bind
 
 
 def test_bundle_index_has_required_fields(faq_ir: IRDocument, minimal_binding: HiagentBinding):
-    bundle = compile_ir(faq_ir, minimal_binding)
+    bundle = _compile_bundle(faq_ir, minimal_binding)
     index = bundle.index
     agent = _agent(bundle)
     assert index["DLVersion"] == "0.0.1"
@@ -90,7 +102,7 @@ def test_agent_filename_preserves_metadata_name_verbatim(
     data["metadata"]["name"] = name
     renamed = IRDocument.model_validate(data)
 
-    bundle = compile_ir(renamed, minimal_binding)
+    bundle = _compile_bundle(renamed, minimal_binding)
 
     assert f"agent/{name}.yaml" in bundle.files
     assert bundle.index["MainMetaName"] == name
@@ -98,7 +110,7 @@ def test_agent_filename_preserves_metadata_name_verbatim(
 
 
 def test_agent_yaml_has_single_chat_mode(faq_ir: IRDocument, minimal_binding: HiagentBinding):
-    agent = _agent(compile_ir(faq_ir, minimal_binding))
+    agent = _agent(_compile_bundle(faq_ir, minimal_binding))
     assert agent["DLVersion"] == "0.0.1"
     assert agent["MetaType"] == "Agent"
     assert agent["AppInfo"]["AppType"] == "Chat"
@@ -109,7 +121,7 @@ def test_agent_yaml_has_single_chat_mode(faq_ir: IRDocument, minimal_binding: Hi
 
 
 def test_agent_unique_name_matches_index(faq_ir: IRDocument, minimal_binding: HiagentBinding):
-    bundle = compile_ir(faq_ir, minimal_binding)
+    bundle = _compile_bundle(faq_ir, minimal_binding)
     agent = _agent(bundle)
     assert agent["UniqueName"] == bundle.index["MainUniqueName"]
 
@@ -118,7 +130,7 @@ def test_single_agent_config_has_required_chat_defaults(
     faq_ir: IRDocument,
     minimal_binding: HiagentBinding,
 ):
-    single = _agent(compile_ir(faq_ir, minimal_binding))["AppConfig"]["SingleAgentConfig"]
+    single = _agent(_compile_bundle(faq_ir, minimal_binding))["AppConfig"]["SingleAgentConfig"]
     advanced = single["ChatAdvancedConfig"]
     assert advanced["AdvancedReviewType"] == "unused"
     assert advanced["FeedbackTagConfig"]["Enabled"] is True
@@ -141,7 +153,7 @@ def test_compile_with_unbound_kb_has_empty_knowledge_refs(
     faq_ir: IRDocument,
     minimal_binding: HiagentBinding,
 ):
-    agent = _agent(compile_ir(faq_ir, minimal_binding))
+    agent = _agent(_compile_bundle(faq_ir, minimal_binding))
     single = agent["AppConfig"]["SingleAgentConfig"]
     assert single["KnowledgeIDs"] == []
     assert agent["AppDepends"]["KnowledgeMap"] == {}
@@ -155,7 +167,7 @@ def test_compile_with_bound_kb_populates_agent_knowledge_refs(faq_ir: IRDocument
         workspace_id="d31pcnoboot936af1tsg",
         dataset_id_map={"product_kb": kb_id},
     )
-    agent = _agent(compile_ir(faq_ir, binding))
+    agent = _agent(_compile_bundle(faq_ir, binding))
     single = agent["AppConfig"]["SingleAgentConfig"]
     assert single["KnowledgeIDs"] == [kb_id]
     assert agent["AppDepends"]["KnowledgeMap"][kb_id]["ID"] == kb_id
@@ -169,7 +181,7 @@ def test_compile_with_bound_model_populates_agent_model_refs(faq_ir: IRDocument)
         workspace_id="d31pcnoboot936af1tsg",
         model_id_map={"configured-planner-model": model_id},
     )
-    agent = _agent(compile_ir(faq_ir, binding))
+    agent = _agent(_compile_bundle(faq_ir, binding))
     single = agent["AppConfig"]["SingleAgentConfig"]
     assert single["ModelID"] == model_id
     assert agent["AppDepends"]["ModelMap"][model_id]["ID"] == model_id
@@ -179,7 +191,7 @@ def test_model_sidecar_emitted_when_bound(
     faq_ir: IRDocument,
     bound_binding: HiagentBinding,
 ):
-    bundle = compile_ir(faq_ir, bound_binding)
+    bundle = _compile_bundle(faq_ir, bound_binding)
     agent = _agent(bundle)
 
     for model_id, entry in agent["AppDepends"]["ModelMap"].items():
@@ -192,7 +204,7 @@ def test_no_sidecar_emitted_when_unbound(
     faq_ir: IRDocument,
     minimal_binding: HiagentBinding,
 ):
-    bundle = compile_ir(faq_ir, minimal_binding)
+    bundle = _compile_bundle(faq_ir, minimal_binding)
     agent = _agent(bundle)
 
     assert agent["AppDepends"]["ModelMap"] == {}
@@ -241,7 +253,7 @@ def test_chatflow_workflow_snapshot_derives_links_from_depends(
 
 
 def test_chatflow_shape(faq_ir: IRDocument, bound_binding: HiagentBinding):
-    bundle = compile_ir_chatflow(faq_ir, bound_binding)
+    bundle = _compile_chatflow_bundle(faq_ir, bound_binding)
     agent = _agent(bundle)
 
     assert _agent_path(bundle) == f"agent/{faq_ir.metadata.name}.yaml"
@@ -262,7 +274,7 @@ def test_chatflow_start_canonical_schema(
     faq_ir: IRDocument,
     bound_binding: HiagentBinding,
 ):
-    detail = _agent(compile_ir_chatflow(faq_ir, bound_binding))["AppConfig"]["ChatFlowDetail"]
+    detail = _agent(_compile_chatflow_bundle(faq_ir, bound_binding))["AppConfig"]["ChatFlowDetail"]
     start = next(node for node in detail["Nodes"] if node["Type"] == "Start")
     config = start["Configs"]["Start"]
 
@@ -284,7 +296,7 @@ def test_chatflow_knowledge_field_types(
     faq_ir: IRDocument,
     bound_binding: HiagentBinding,
 ):
-    detail = _agent(compile_ir_chatflow(faq_ir, bound_binding))["AppConfig"]["ChatFlowDetail"]
+    detail = _agent(_compile_chatflow_bundle(faq_ir, bound_binding))["AppConfig"]["ChatFlowDetail"]
     knowledge_nodes = [node for node in detail["Nodes"] if node["Type"] == "Knowledge"]
     assert knowledge_nodes
 

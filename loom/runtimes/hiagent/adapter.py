@@ -23,7 +23,7 @@ class HiagentAdapter:
     target = "hiagent"
     version = HIAGENT_VERSION
 
-    def compile(self, ir: IRDocument, *, binding: HiagentBinding | None = None) -> HiagentBundle:
+    def compile(self, ir: IRDocument, *, binding: HiagentBinding | None = None):
         """Compile IR to a HiagentBundle.
 
         Per ADR 0024, a customer Binding [workspace_id required] is mandatory

@@ -5,7 +5,9 @@ from datetime import datetime  # noqa: TC003
 from typing import Literal
 from uuid import UUID  # noqa: TC003
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from loom.runtimes.warnings import CompileWarning
 
 
 class SessionRow(BaseModel):
@@ -54,4 +56,5 @@ class ArtifactRow(BaseModel):
     target: Literal["hiagent", "dify"]
     mode: str | None
     binding_handle: str
+    compile_warnings: list[CompileWarning] = Field(default_factory=list)
     created_at: datetime

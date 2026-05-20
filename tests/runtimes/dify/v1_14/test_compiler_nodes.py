@@ -13,7 +13,8 @@ def _load(name: str) -> IRDocument:
 
 def test_ecommerce_faq_emits_yaml():
     ir = _load("01-ecommerce-customer-faq.json")
-    yaml_text = compile_ir(ir)
+    yaml_text, warnings = compile_ir(ir)
+    assert warnings == []
     assert yaml_text.startswith("app:")
     assert "workflow:" in yaml_text
     assert "knowledge-retrieval" in yaml_text or "retrieval" in yaml_text
@@ -22,6 +23,7 @@ def test_ecommerce_faq_emits_yaml():
 
 def test_ecommerce_order_exception_emits_yaml():
     ir = _load("05-ecommerce-order-exception.json")
-    yaml_text = compile_ir(ir)
+    yaml_text, warnings = compile_ir(ir)
+    assert warnings == []
     assert "code" in yaml_text
     assert "if-else" in yaml_text

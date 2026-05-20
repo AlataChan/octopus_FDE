@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated, Any, Literal, cast
 from urllib.parse import quote
@@ -18,6 +19,7 @@ from loom.registry.models import WorkflowRecord
 from loom.runtimes.dify.v1_14.compiler import compile_ir as compile_dify
 from loom.runtimes.hiagent.binding import HiagentBinding
 from loom.runtimes.hiagent.v2_6.compiler import compile_ir, compile_ir_chatflow
+from loom.runtimes.warnings import CompileWarning
 from loom.service.deps import Actor, get_actor
 from loom.service.errors import bad_request, conflict, not_found
 from loom.validator.validate import validate
@@ -279,7 +281,7 @@ def compile_session(
     if not session.latest_ir_json:
         raise conflict("session has no accepted IR")
     ir = IRDocument.model_validate_json(session.latest_ir_json)
-    artifact_bytes, artifact_name, artifact_kind = _compile_artifact(
+    artifact_bytes, artifact_name, artifact_kind, compile_warnings = _compile_artifact(
         ir,
         target=body.target,
         mode=body.mode,
@@ -306,6 +308,7 @@ def compile_session(
         target=body.target,
         mode=body.mode,
         binding_handle=body.binding,
+        compile_warnings=compile_warnings,
     )
     # Preserve the generated artifact UUID in the on-disk filename; update DB row path via direct rewrite.
     final_rel_path = Path("sessions") / str(session_id) / "artifacts" / f"{artifact.artifact_id}.{ext}"
@@ -344,6 +347,7 @@ def compile_session(
             "artifact_size": len(artifact_bytes),
             "compiler_version": "phase2-m1",
             "ir_version": ir.ir_version,
+            "compile_warnings": [asdict(w) for w in compile_warnings],
         },
     )
     return {
@@ -352,6 +356,7 @@ def compile_session(
         "artifact_name": artifact_name,
         "artifact_size": len(artifact_bytes),
         "sha256": digest,
+        "compile_warnings": [asdict(w) for w in compile_warnings],
     }
 
 
@@ -446,16 +451,16 @@ def _compile_artifact(
     mode: Literal["chat", "chatflow"] | None,
     binding_handle: str,
     binding_dir: Path,
-) -> tuple[bytes, str, Literal["zip", "yaml"]]:
+) -> tuple[bytes, str, Literal["zip", "yaml"], list[CompileWarning]]:
     if target == "dify":
-        text = compile_dify(ir)
-        return text.encode("utf-8"), f"{ir.metadata.name}.yaml", "yaml"
+        text, warnings = compile_dify(ir)
+        return text.encode("utf-8"), f"{ir.metadata.name}.yaml", "yaml", warnings
     binding_path = binding_dir / f"{binding_handle}.hiagent.yaml"
     if not binding_path.exists():
         raise bad_request(f"binding not found: {binding_handle}")
     binding = HiagentBinding.load(binding_path)
-    bundle = compile_ir_chatflow(ir, binding) if mode == "chatflow" else compile_ir(ir, binding)
-    return bundle.to_zip_bytes(), f"{ir.metadata.name}.zip", "zip"
+    bundle, warnings = compile_ir_chatflow(ir, binding) if mode == "chatflow" else compile_ir(ir, binding)
+    return bundle.to_zip_bytes(), f"{ir.metadata.name}.zip", "zip", warnings
 
 
 def _turn_response(row: Any) -> dict[str, object]:

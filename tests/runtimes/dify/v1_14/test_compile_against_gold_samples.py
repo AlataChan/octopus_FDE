@@ -21,7 +21,9 @@ def _load_ir(name: str) -> IRDocument:
 
 
 def _compile_doc(ir: IRDocument) -> dict[str, Any]:
-    return yaml.safe_load(compile_ir(ir))
+    text, warnings = compile_ir(ir)
+    assert warnings == []
+    return yaml.safe_load(text)
 
 
 def _branch_ir() -> IRDocument:
@@ -146,7 +148,8 @@ def test_ecommerce_faq_compiles_to_importable_dify_shape():
 
 
 def test_compiled_yaml_has_no_raw_ir_template_refs():
-    text = compile_ir(_load_ir("01-ecommerce-customer-faq.json"))
+    text, warnings = compile_ir(_load_ir("01-ecommerce-customer-faq.json"))
+    assert warnings == []
     assert not re.search(r"\$\{[^}]+\}", text)
     assert "{{#" in text
 

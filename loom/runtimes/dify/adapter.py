@@ -24,7 +24,7 @@ class DifyAdapter:
     target = "dify"
     version = DIFY_VERSION
 
-    def compile(self, ir: IRDocument) -> str:
+    def compile(self, ir: IRDocument):
         # compile_to_yaml already returns YAML string; the adapter passes it through.
         return compile_to_yaml(ir)
 

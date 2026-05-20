@@ -59,6 +59,9 @@ def test_session_turn_compile_download_archive_and_registry_round_trip(tmp_path)
     artifact_id = compiled["artifact_id"]
     assert compiled["sha256"]
     assert compiled["workflow_id"]
+    assert compiled["compile_warnings"] == []
+    artifacts = client.get(f"/v1/sessions/{sid}/artifacts").json()
+    assert artifacts[0]["compile_warnings"] == []
 
     downloaded = client.get(f"/v1/sessions/{sid}/artifacts/{artifact_id}")
     assert downloaded.status_code == 200

@@ -27,7 +27,9 @@ def test_generated_hiagent_and_dify_artifacts_stay_pure():
     ir_node_ids = {node.id for node in ir.nodes}
     ir_rationales = {node.rationale for node in ir.nodes}
 
-    hiagent_raw = compile_ir_chatflow(ir, binding).to_zip_bytes()
+    hiagent_bundle, hiagent_warnings = compile_ir_chatflow(ir, binding)
+    assert hiagent_warnings == []
+    hiagent_raw = hiagent_bundle.to_zip_bytes()
     assert not FORBIDDEN_TERMS.search(hiagent_raw)
     hiagent_docs = _yaml_docs_from_hiagent_zip(hiagent_raw)
     for name, doc in hiagent_docs:
@@ -36,7 +38,9 @@ def test_generated_hiagent_and_dify_artifacts_stay_pure():
         if name.startswith("agent/"):
             _assert_hiagent_nodes_have_provenance(doc, ir_rationales)
 
-    dify_raw = compile_dify(ir).encode("utf-8")
+    dify_text, dify_warnings = compile_dify(ir)
+    assert dify_warnings == []
+    dify_raw = dify_text.encode("utf-8")
     assert not FORBIDDEN_TERMS.search(dify_raw)
     dify_doc = yaml.safe_load(dify_raw)
     _assert_no_new_urls("dify.yaml", dify_doc, source_urls)
