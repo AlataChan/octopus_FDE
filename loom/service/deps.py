@@ -24,6 +24,7 @@ class Settings:
     app_env: str = "dev"
     fernet_key: str | None = None
     binding_dir: Path = Path("config/customers")
+    audit_max_retention_days: int = 365
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -39,6 +40,7 @@ class Settings:
             app_env=app_env,
             fernet_key=key,
             binding_dir=Path(os.environ.get("LOOM_BINDING_DIR", "config/customers")),
+            audit_max_retention_days=int(os.environ.get("LOOM_AUDIT_MAX_RETENTION_DAYS", "365")),
         )
 
     def ensure_data_dir(self) -> None:

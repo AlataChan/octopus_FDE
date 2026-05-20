@@ -56,3 +56,11 @@ def test_data_dir_created_private(tmp_path):
     settings.ensure_data_dir()
     mode = os.stat(settings.data_dir).st_mode & 0o777
     assert mode == 0o700
+
+
+def test_audit_retention_cap_loaded_from_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("LOOM_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LOOM_AUDIT_MAX_RETENTION_DAYS", "180")
+    settings = Settings.from_env()
+    assert settings.audit_max_retention_days == 180

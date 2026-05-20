@@ -28,7 +28,12 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
 
-def validate(doc: dict[str, Any], *, scope: str) -> list[ValidationFailure]:
+def validate(
+    doc: dict[str, Any],
+    *,
+    scope: str,
+    audit_max_retention_days: int = 365,
+) -> list[ValidationFailure]:
     failures: list[ValidationFailure] = []
 
     # 1. JSON Schema (returns all errors at once)
@@ -92,7 +97,7 @@ def validate(doc: dict[str, Any], *, scope: str) -> list[ValidationFailure]:
                     ))
 
     # 5. Per-node policy invariants
-    failures.extend(check_policy(ir))
+    failures.extend(check_policy(ir, audit_max_retention_days=audit_max_retention_days))
 
     # 6. Type-flow check (deferred to Task 8 wiring; placeholder here so the entry
     # point is the single seam the Planner calls. Phase 1 test_validate covers

@@ -163,7 +163,11 @@ def create_turn(
             ensure_ascii=False,
             sort_keys=True,
         )
-        failures = validate(json.loads(ir_json), scope="ecommerce/kb")
+        failures = validate(
+            json.loads(ir_json),
+            scope="ecommerce/kb",
+            audit_max_retention_days=request.app.state.settings.audit_max_retention_days,
+        )
         if failures:
             raise ValueError("; ".join(f.detail for f in failures))
         row = store.finish_turn_succeeded(
@@ -221,7 +225,15 @@ def get_ir(
     if session is None:
         raise not_found("session not found")
     doc = json.loads(session.latest_ir_json) if session.latest_ir_json else None
-    failures = validate(doc, scope="ecommerce/kb") if doc else []
+    failures = (
+        validate(
+            doc,
+            scope="ecommerce/kb",
+            audit_max_retention_days=request.app.state.settings.audit_max_retention_days,
+        )
+        if doc
+        else []
+    )
     return {
         "ir": doc,
         "latest_ir_sha256": session.latest_ir_sha256,
