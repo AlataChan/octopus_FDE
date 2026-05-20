@@ -66,9 +66,11 @@ class PlannerClient:
         max_tokens: int = 16000,
         api_key: str | None = None,
         base_url: str | None = None,
+        ir_version: Literal["0.3", "0.4"] | None = None,
     ):
         self._model = model or os.environ.get("OPENAI_MODEL", _DEFAULT_MODEL)
         self._max_tokens = max_tokens
+        self._ir_version = ir_version or os.environ.get("LOOM_IR_VERSION", "0.4")
         self._client = OpenAI(
             api_key=api_key or os.environ.get("OPENAI_API_KEY", ""),
             base_url=base_url or os.environ.get("OPENAI_BASE_URL"),
@@ -77,12 +79,12 @@ class PlannerClient:
 
     def _build_static_system(self) -> str:
         prompt_md = (_PROMPT_DIR / "system.md").read_text()
-        schema = json.dumps(load_schema(), indent=2)
+        schema = json.dumps(load_schema(self._ir_version), indent=2)
         few_shot_files = sorted((_PROMPT_DIR / "few_shot").glob("*.json"))
         few_shot = "\n\n".join(p.read_text() for p in few_shot_files)
         return (
             prompt_md
-            + "\n\n# IR v0.3 JSON Schema [verbatim]\n```json\n" + schema + "\n```\n\n"
+            + f"\n\n# IR v{self._ir_version} JSON Schema [verbatim]\n```json\n" + schema + "\n```\n\n"
             + "# Few-shot library\n\n" + few_shot
         )
 
@@ -107,7 +109,7 @@ class PlannerClient:
         user_parts = [f"# Intent\n{intent}\n\n# Scope\n{scope}\n\n# Target runtime\n{target}"]
         if prior_failures_md:
             user_parts.append("# Validator failures from previous attempt\n" + prior_failures_md)
-        user_parts.append("Emit IR v0.3 JSON only.")
+        user_parts.append(f"Emit IR v{self._ir_version} JSON only.")
         user_text = "\n\n".join(user_parts)
 
         t0 = time.monotonic()

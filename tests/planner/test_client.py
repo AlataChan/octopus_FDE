@@ -9,7 +9,7 @@ def test_static_system_built_as_single_string():
         c = PlannerClient(api_key="x")
     assert isinstance(c._system_static, str)
     assert "FDE Planner" in c._system_static
-    assert "IR v0.3 JSON Schema" in c._system_static
+    assert "IR v0.4 JSON Schema" in c._system_static
     assert "Few-shot library" in c._system_static
 
 
@@ -17,7 +17,7 @@ def test_call_appends_persona_target_registry_blocks_and_user_msg():
     with patch("loom.planner.client.OpenAI") as MockClient:
         instance = MockClient.return_value
         instance.chat.completions.create.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(content='{"ir_version": "0.3"}'))],
+            choices=[MagicMock(message=MagicMock(content='{"ir_version": "0.4"}'))],
             usage=MagicMock(prompt_tokens=100, completion_tokens=50),
         )
         from loom.fde_session.persona_brief import ComplianceBoundary, PersonaBrief, ReviewerSpec
@@ -44,6 +44,7 @@ def test_call_appends_persona_target_registry_blocks_and_user_msg():
         assert "hiagent" in sys_msg["content"]
         # User contains intent
         assert "do X" in user_msg["content"]
+        assert "Emit IR v0.4 JSON only." in user_msg["content"]
         # response parsed
         assert result.ir_text.startswith('{"ir_version"')
 
@@ -53,7 +54,7 @@ def test_call_default_persona_when_none():
     with patch("loom.planner.client.OpenAI") as MockClient:
         instance = MockClient.return_value
         instance.chat.completions.create.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(content='{"ir_version": "0.3"}'))],
+            choices=[MagicMock(message=MagicMock(content='{"ir_version": "0.4"}'))],
             usage=MagicMock(prompt_tokens=100, completion_tokens=50),
         )
         c = PlannerClient(api_key="x")

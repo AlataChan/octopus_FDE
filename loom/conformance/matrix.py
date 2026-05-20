@@ -27,6 +27,7 @@ from loom.ir.models import (
     OutputNode,
     ParallelNode,
     Policy,
+    PolicyAudit,
     PortDecl,
     RegistryRef,
     Retry,
@@ -45,9 +46,9 @@ def _output(bindings: dict[str, str]) -> OutputNode:
 
 
 def _ir(name: str, nodes: list[Any], edges: list[Edge], inputs: list[PortDecl] | None = None,
-        outputs: list[PortDecl] | None = None) -> IRDocument:
+        outputs: list[PortDecl] | None = None, ir_version: str = "0.3") -> IRDocument:
     return IRDocument(
-        ir_version="0.3",
+        ir_version=ir_version,
         metadata=Metadata(name=name, owner="loom-conformance",
                           rationale=f"Conformance row {name}"),
         registry_ref=_REG,
@@ -277,6 +278,23 @@ def case_condition_truthiness() -> ConformanceCase:
     return ConformanceCase(ir=ir, inputs={"x": 0, "expected": "falsy"}, expect=expect)
 
 
+def case_v04_policy_audit_smoke() -> ConformanceCase:
+    out = _output({"ok": "${start.ok}"})
+    ir = _ir(
+        "v04_policy_audit_smoke",
+        [_trigger(), out],
+        [Edge(**{"from": "start"}, to="out")],
+        outputs=[PortDecl(name="ok", type="boolean")],
+        ir_version="0.4",
+    )
+    ir = ir.model_copy(update={"policy": Policy(audit=PolicyAudit(log_decisions=True, retention_days=90))})
+
+    def expect(result: dict[str, Any]) -> None:
+        assert result["ok"] is True
+
+    return ConformanceCase(ir=ir, inputs={}, expect=expect)
+
+
 # ---- Matrix -------------------------------------------------------------
 
 MATRIX: list[MatrixRow] = [
@@ -290,4 +308,5 @@ MATRIX: list[MatrixRow] = [
     MatrixRow("node_timeout",           "node timeout_s hard-cuts",                        case_node_timeout),
     MatrixRow("http_idempotency",       "idempotency_key dedupes side-effect",             case_http_idempotency),
     MatrixRow("condition_truthiness",   "condition truthiness parity with Dify",           case_condition_truthiness),
+    MatrixRow("v04_policy_audit_smoke", "IR v0.4 policy audit remains additive",           case_v04_policy_audit_smoke),
 ]

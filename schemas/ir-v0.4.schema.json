@@ -1,0 +1,366 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loom.example/schemas/ir-v0.4.schema.json",
+  "title": "FDE IR v0.4",
+  "description": "v0.4 — additive over v0.3 with workflow policy guardrails, escalation, and audit controls.",
+  "type": "object",
+  "required": ["ir_version", "metadata", "registry_ref", "policy", "inputs", "outputs", "nodes", "edges"],
+  "additionalProperties": false,
+  "properties": {
+    "ir_version": { "const": "0.4" },
+    "metadata":     { "$ref": "#/$defs/Metadata" },
+    "registry_ref": { "$ref": "#/$defs/RegistryRef" },
+    "policy":       { "$ref": "#/$defs/Policy" },
+    "inputs":  { "type": "array", "items": { "$ref": "#/$defs/PortDecl" } },
+    "outputs": { "type": "array", "items": { "$ref": "#/$defs/PortDecl" } },
+    "nodes":   { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Node" } },
+    "edges":   { "type": "array", "items": { "$ref": "#/$defs/Edge" } }
+  },
+  "$defs": {
+    "Metadata": {
+      "type": "object",
+      "required": ["name", "owner", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "name":        { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "owner":       { "type": "string", "minLength": 1 },
+        "rationale":   { "type": "string", "minLength": 1, "maxLength": 1000 }
+      }
+    },
+    "RegistryRef": {
+      "type": "object",
+      "required": ["registry_version"],
+      "additionalProperties": false,
+      "properties": {
+        "registry_version": {
+          "type": "string",
+          "pattern": "^sha:[0-9a-f]{7,40}$",
+          "description": "Immutable git SHA of the registry repo. Calendar tags forbidden in v0.3."
+        },
+        "tools":       { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "default": [] },
+        "datasets":    { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "default": [] },
+        "credentials": { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "default": [] }
+      }
+    },
+    "Policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default_timeout_s": { "type": "number", "exclusiveMinimum": 0 },
+        "default_retry":     { "$ref": "#/$defs/Retry" },
+        "agent_budget":      { "$ref": "#/$defs/AgentBudget" },
+        "guardrails":        { "$ref": "#/$defs/PolicyGuardrails" },
+        "escalation":        { "$ref": "#/$defs/PolicyEscalation" },
+        "audit":             { "$ref": "#/$defs/PolicyAudit" }
+      }
+    },
+    "PolicyGuardrails": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input_filters":    { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "default": [] },
+        "output_filters":   { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "default": [] },
+        "custom_patterns":  { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "default": [] }
+      }
+    },
+    "PolicyEscalation": {
+      "type": "object",
+      "required": ["confidence_min", "confidence_from", "handoff_node"],
+      "additionalProperties": false,
+      "properties": {
+        "confidence_min":  { "type": "number", "minimum": 0, "maximum": 1 },
+        "confidence_from": { "$ref": "#/$defs/VarRef" },
+        "handoff_node":    { "$ref": "#/$defs/NodeIdentifier" }
+      }
+    },
+    "PolicyAudit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "log_inputs":     { "type": "boolean", "default": false },
+        "log_decisions":  { "type": "boolean", "default": true },
+        "retention_days": { "type": "integer", "minimum": 1, "default": 90 }
+      }
+    },
+    "Retry": {
+      "type": "object",
+      "required": ["max_attempts"],
+      "additionalProperties": false,
+      "properties": {
+        "max_attempts": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "backoff":      { "enum": ["none", "linear", "exponential"], "default": "exponential" },
+        "retry_on":     { "type": "array", "items": { "enum": ["5xx", "4xx", "timeout", "network", "rate_limit"] }, "uniqueItems": true }
+      }
+    },
+    "AgentBudget": {
+      "type": "object",
+      "required": ["max_iterations", "max_tokens", "max_wall_clock_s"],
+      "additionalProperties": false,
+      "properties": {
+        "max_iterations":   { "type": "integer", "minimum": 1, "maximum": 50 },
+        "max_tokens":       { "type": "integer", "minimum": 1000, "maximum": 200000 },
+        "max_wall_clock_s": { "type": "integer", "minimum": 1, "maximum": 3600 }
+      }
+    },
+    "PortDecl": {
+      "type": "object",
+      "required": ["name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "name":        { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$" },
+        "type":        { "$ref": "#/$defs/TypeName" },
+        "required":    { "type": "boolean", "default": false },
+        "description": { "type": "string" }
+      }
+    },
+    "TypeName": {
+      "description": "v0.3 primitives + compounds. Compound types (array<T>, object<{...}>, union<T1|T2>) are expressed as strings; the Validator parses the grammar.",
+      "enum": [
+        "string", "number", "boolean", "null", "json",
+        "string[]", "number[]", "json[]",
+        "chunks", "file", "any"
+      ]
+    },
+    "VarRef": { "type": "string" },
+    "JSONSchemaLite": { "type": "object" },
+    "NodeIdentifier": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$" },
+    "Node": {
+      "oneOf": [
+        { "$ref": "#/$defs/TriggerNode" },
+        { "$ref": "#/$defs/LLMNode" },
+        { "$ref": "#/$defs/RetrievalNode" },
+        { "$ref": "#/$defs/HTTPNode" },
+        { "$ref": "#/$defs/CodeNode" },
+        { "$ref": "#/$defs/ConditionNode" },
+        { "$ref": "#/$defs/LoopNode" },
+        { "$ref": "#/$defs/ParallelNode" },
+        { "$ref": "#/$defs/AgentNode" },
+        { "$ref": "#/$defs/OutputNode" }
+      ]
+    },
+    "TriggerNode": {
+      "type": "object",
+      "required": ["id", "type", "mode", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "id":          { "$ref": "#/$defs/NodeIdentifier" },
+        "type":        { "const": "trigger" },
+        "rationale":   { "type": "string", "minLength": 1, "maxLength": 500 },
+        "description": { "type": "string" },
+        "mode":        { "enum": ["manual", "schedule", "webhook"] },
+        "schedule":    { "type": "string" },
+        "webhook":     {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path":   { "type": "string" },
+            "method": { "enum": ["POST", "GET", "PUT", "PATCH", "DELETE"] }
+          }
+        }
+      },
+      "allOf": [
+        { "if": { "properties": { "mode": { "const": "schedule" } } }, "then": { "required": ["schedule"] } },
+        { "if": { "properties": { "mode": { "const": "webhook"  } } }, "then": { "required": ["webhook"] } }
+      ]
+    },
+    "LLMNode": {
+      "type": "object",
+      "required": ["id", "type", "model", "prompt", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "id":            { "$ref": "#/$defs/NodeIdentifier" },
+        "type":          { "const": "llm" },
+        "rationale":     { "type": "string", "minLength": 1, "maxLength": 500 },
+        "description":   { "type": "string" },
+        "model":         { "type": "string" },
+        "prompt":        { "$ref": "#/$defs/VarRef" },
+        "system_prompt": { "$ref": "#/$defs/VarRef" },
+        "temperature":   { "type": "number", "minimum": 0, "maximum": 2 },
+        "max_tokens":    { "type": "integer", "minimum": 1 },
+        "output_schema": { "$ref": "#/$defs/JSONSchemaLite" },
+        "timeout_s":     { "type": "number", "exclusiveMinimum": 0 },
+        "retry":         { "$ref": "#/$defs/Retry" }
+      }
+    },
+    "RetrievalNode": {
+      "type": "object",
+      "required": ["id", "type", "dataset", "query", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "id":          { "$ref": "#/$defs/NodeIdentifier" },
+        "type":        { "const": "retrieval" },
+        "rationale":   { "type": "string", "minLength": 1, "maxLength": 500 },
+        "description": { "type": "string" },
+        "dataset":     { "type": "string" },
+        "query":       { "$ref": "#/$defs/VarRef" },
+        "top_k":       { "type": "integer", "minimum": 1, "maximum": 100, "default": 5 },
+        "rerank":      { "type": "boolean", "default": false },
+        "timeout_s":   { "type": "number", "exclusiveMinimum": 0 },
+        "retry":       { "$ref": "#/$defs/Retry" }
+      }
+    },
+    "HTTPNode": {
+      "type": "object",
+      "required": ["id", "type", "method", "url", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "id":              { "$ref": "#/$defs/NodeIdentifier" },
+        "type":            { "const": "http" },
+        "rationale":       { "type": "string", "minLength": 1, "maxLength": 500 },
+        "description":     { "type": "string" },
+        "method":          { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+        "url":             { "$ref": "#/$defs/VarRef" },
+        "headers":         { "type": "object", "additionalProperties": { "$ref": "#/$defs/VarRef" } },
+        "body":            {},
+        "credential":      { "type": "string" },
+        "timeout_s":       { "type": "number", "exclusiveMinimum": 0 },
+        "retry":           { "$ref": "#/$defs/Retry" },
+        "idempotency_key": { "$ref": "#/$defs/VarRef" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "method": { "enum": ["POST", "PUT", "PATCH", "DELETE"] } } },
+          "then": { "required": ["idempotency_key"] }
+        }
+      ]
+    },
+    "CodeNode": {
+      "type": "object",
+      "required": ["id", "type", "language", "source", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "id":              { "$ref": "#/$defs/NodeIdentifier" },
+        "type":            { "const": "code" },
+        "rationale":       { "type": "string", "minLength": 1, "maxLength": 500 },
+        "description":     { "type": "string" },
+        "language":        { "enum": ["python", "javascript"] },
+        "source":          { "type": "string" },
+        "inputs":          { "type": "object", "additionalProperties": { "$ref": "#/$defs/VarRef" } },
+        "output_schema":   { "$ref": "#/$defs/JSONSchemaLite" },
+        "timeout_s":       { "type": "number", "exclusiveMinimum": 0 },
+        "retry":           { "$ref": "#/$defs/Retry" },
+        "idempotency_key": { "$ref": "#/$defs/VarRef" }
+      }
+    },
+    "ConditionNode": {
+      "type": "object",
+      "required": ["id", "type", "branches", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "id":          { "$ref": "#/$defs/NodeIdentifier" },
+        "type":        { "const": "condition" },
+        "rationale":   { "type": "string", "minLength": 1, "maxLength": 500 },
+        "description": { "type": "string" },
+        "branches": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["when", "next"],
+            "additionalProperties": false,
+            "properties": {
+              "when":    { "type": "string" },
+              "next":    { "$ref": "#/$defs/NodeIdentifier" },
+              "narrows": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "var":    { "type": "string" },
+                  "to_type": { "$ref": "#/$defs/TypeName" }
+                }
+              }
+            }
+          }
+        },
+        "default": { "$ref": "#/$defs/NodeIdentifier" }
+      }
+    },
+    "LoopNode": {
+      "type": "object",
+      "required": ["id", "type", "over", "as", "body", "max_iterations", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "id":             { "$ref": "#/$defs/NodeIdentifier" },
+        "type":           { "const": "loop" },
+        "rationale":      { "type": "string", "minLength": 1, "maxLength": 500 },
+        "description":    { "type": "string" },
+        "over":           { "$ref": "#/$defs/VarRef" },
+        "as":             { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$" },
+        "body":           { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Node" } },
+        "max_iterations": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "collect":        { "$ref": "#/$defs/VarRef" },
+        "timeout_s":      { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "ParallelNode": {
+      "type": "object",
+      "required": ["id", "type", "branches", "merge_strategy", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "id":             { "$ref": "#/$defs/NodeIdentifier" },
+        "type":           { "const": "parallel" },
+        "rationale":      { "type": "string", "minLength": 1, "maxLength": 500 },
+        "description":    { "type": "string" },
+        "branches": {
+          "type": "object",
+          "minProperties": 2,
+          "additionalProperties": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Node" } }
+        },
+        "merge_strategy": { "enum": ["concat", "object_merge", "first_success"] },
+        "branch_types":   { "type": "object", "additionalProperties": { "$ref": "#/$defs/TypeName" } },
+        "timeout_s":      { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "AgentNode": {
+      "type": "object",
+      "required": ["id", "type", "model", "tools", "input_schema", "output_schema", "budget", "on_budget_exhausted", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "id":                 { "$ref": "#/$defs/NodeIdentifier" },
+        "type":               { "const": "agent" },
+        "rationale":          { "type": "string", "minLength": 1, "maxLength": 500 },
+        "description":        { "type": "string" },
+        "model":              { "type": "string" },
+        "tools":              { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+        "input_schema":       { "$ref": "#/$defs/JSONSchemaLite" },
+        "output_schema":      { "$ref": "#/$defs/JSONSchemaLite" },
+        "inputs":             { "type": "object", "additionalProperties": { "$ref": "#/$defs/VarRef" } },
+        "system_prompt":      { "$ref": "#/$defs/VarRef" },
+        "budget":             { "$ref": "#/$defs/AgentBudget" },
+        "on_budget_exhausted": { "enum": ["fallback", "fail", "return_partial"] },
+        "fallback_edge":      { "$ref": "#/$defs/NodeIdentifier" },
+        "timeout_s":          { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "allOf": [
+        {
+          "if":   { "properties": { "on_budget_exhausted": { "const": "fallback" } } },
+          "then": { "required": ["fallback_edge"] }
+        }
+      ]
+    },
+    "OutputNode": {
+      "type": "object",
+      "required": ["id", "type", "bindings", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "id":          { "$ref": "#/$defs/NodeIdentifier" },
+        "type":        { "const": "output" },
+        "rationale":   { "type": "string", "minLength": 1, "maxLength": 500 },
+        "description": { "type": "string" },
+        "bindings":    { "type": "object", "minProperties": 1, "additionalProperties": { "$ref": "#/$defs/VarRef" } }
+      }
+    },
+    "Edge": {
+      "type": "object",
+      "required": ["from", "to"],
+      "additionalProperties": false,
+      "properties": {
+        "from": { "$ref": "#/$defs/NodeIdentifier" },
+        "to":   { "$ref": "#/$defs/NodeIdentifier" },
+        "when": { "type": "string" },
+        "data": { "type": "boolean", "default": true }
+      }
+    }
+  }
+}
