@@ -50,6 +50,7 @@ def compile_ir(ir: IRDocument) -> tuple[str, list[CompileWarning]]:
         for edge in ir.edges
     ]
 
+    warnings = _policy_warnings(ir)
     doc: dict[str, Any] = {
         "app": {
             "name": ir.metadata.name,
@@ -66,7 +67,7 @@ def compile_ir(ir: IRDocument) -> tuple[str, list[CompileWarning]]:
         "workflow": {
             "conversation_variables": [],
             "environment_variables": [],
-            "features": _features(),
+            "features": _features(ir),
             "graph": {
                 "edges": edges_dsl,
                 "nodes": nodes_dsl,
@@ -75,7 +76,10 @@ def compile_ir(ir: IRDocument) -> tuple[str, list[CompileWarning]]:
             "rag_pipeline_variables": [],
         },
     }
-    return cast("str", yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)), []
+    if ir.policy.audit is not None:
+        doc["workflow"]["audit_enabled"] = ir.policy.audit.log_inputs or ir.policy.audit.log_decisions
+        doc["workflow"]["audit_retention_days"] = ir.policy.audit.retention_days
+    return cast("str", yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)), warnings
 
 
 def _start_node_id(ir: IRDocument) -> str:
@@ -85,7 +89,12 @@ def _start_node_id(ir: IRDocument) -> str:
     return ir.nodes[0].id
 
 
-def _features() -> dict[str, Any]:
+def _features(ir: IRDocument) -> dict[str, Any]:
+    guardrails = ir.policy.guardrails
+    moderation_enabled = bool(
+        guardrails
+        and (guardrails.input_filters or guardrails.output_filters or guardrails.custom_patterns)
+    )
     return {
         "file_upload": {"enabled": False},
         "text_to_speech": {"enabled": False, "language": "", "voice": ""},
@@ -94,5 +103,25 @@ def _features() -> dict[str, Any]:
         "suggested_questions_after_answer": {"enabled": False},
         "speech_to_text": {"enabled": False},
         "retriever_resource": {"enabled": True},
-        "sensitive_word_avoidance": {"enabled": False},
+        "sensitive_word_avoidance": {
+            "enabled": moderation_enabled,
+            "configs": {
+                "input_filters": guardrails.input_filters if guardrails else [],
+                "output_filters": guardrails.output_filters if guardrails else [],
+                "custom_patterns": guardrails.custom_patterns if guardrails else [],
+            },
+        },
     }
+
+
+def _policy_warnings(ir: IRDocument) -> list[CompileWarning]:
+    warnings: list[CompileWarning] = []
+    if ir.policy.escalation is not None:
+        warnings.append(CompileWarning(
+            target="dify",
+            node_id=None,
+            field="policy.escalation",
+            message="Dify v1.14 escalation lowering needs a graph transformation layer; policy is retained as a compile warning.",
+            code="policy.escalation.unsupported",
+        ))
+    return warnings
