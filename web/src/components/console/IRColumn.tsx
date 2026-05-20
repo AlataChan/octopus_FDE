@@ -8,6 +8,7 @@ import { IRView } from "./IRView";
 import { ValidatorPanel } from "./ValidatorPanel";
 
 type Props = {
+  compileWarningCount?: number;
   diff: IRDiffResponse | null;
   errors: ValidationFailure[];
   highlightedPath?: string | null;
@@ -20,6 +21,7 @@ const tabs = ["yaml", "issues", "diff"] as const;
 type TabId = (typeof tabs)[number];
 
 export function IRColumn({
+  compileWarningCount = 0,
   diff,
   errors,
   highlightedPath,
@@ -127,13 +129,18 @@ export function IRColumn({
     <Card className="flex h-full min-h-0 min-w-0 flex-col">
       <CardHeader
         action={
-          <Chip variant={errors.length ? "failed" : ir ? "ok" : "draft"}>
-            {errors.length
-              ? t("validator.issueCount", { count: errors.length })
-              : ir
-                ? t("validator.ok")
-                : t("session.noIr")}
-          </Chip>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Chip variant={errors.length ? "failed" : ir ? "ok" : "draft"}>
+              {errors.length
+                ? t("validator.issueCount", { count: errors.length })
+                : ir
+                  ? t("validator.ok")
+                  : t("session.noIr")}
+            </Chip>
+            {compileWarningCount > 0 ? (
+              <Chip variant="warning">{t("compile.warningCount", { count: compileWarningCount })}</Chip>
+            ) : null}
+          </div>
         }
         subtitle={t("ir.panelSubtitle")}
         title={t("ir.panelTitle")}

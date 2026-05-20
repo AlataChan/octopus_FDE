@@ -19,7 +19,7 @@ import { DEFAULT_ACTOR } from "./useActor";
 type HealthResponse =
   paths["/v1/health"]["get"]["responses"][200]["content"]["application/json"];
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);

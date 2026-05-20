@@ -1,17 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { FileCode2, MoreVertical, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
+import { TemplateModal } from "../../components/console/TemplateModal";
 import { Button } from "../../components/ui/Button";
 import { Card, CardBody } from "../../components/ui/Card";
 import { Chip, type ChipVariant } from "../../components/ui/Chip";
-import { createSession, listSessions } from "../../lib/api";
+import { createSession, createSessionFromTemplate, listSessions } from "../../lib/api";
 import type { SessionSummary } from "../../lib/types";
 
 export default function SessionListPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const sessions = useQuery({
     queryKey: ["sessions"],
     queryFn: listSessions
@@ -23,6 +26,15 @@ export default function SessionListPage() {
       navigate(`/sessions/${row.session_id}`);
     }
   });
+  const createFromTemplate = useMutation({
+    mutationFn: (templateId: string) => createSessionFromTemplate(templateId),
+    onSuccess: async (row) => {
+      await queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      setTemplateModalOpen(false);
+      navigate(`/sessions/${row.session_id}`);
+    }
+  });
+  const isCreating = create.isPending || createFromTemplate.isPending;
 
   return (
     <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -36,12 +48,12 @@ export default function SessionListPage() {
         </div>
         <Button
           icon={<Plus aria-hidden className="h-4 w-4" />}
-          loading={create.isPending}
+          loading={isCreating}
           variant="primary"
-          disabled={create.isPending}
-          onClick={() => create.mutate()}
+          disabled={isCreating}
+          onClick={() => setTemplateModalOpen(true)}
         >
-          {create.isPending ? t("sessions.creating") : t("sessions.create")}
+          {isCreating ? t("sessions.creating") : t("sessions.create")}
         </Button>
       </div>
       <div className="mt-7">
@@ -65,6 +77,14 @@ export default function SessionListPage() {
           </div>
         )}
       </div>
+      <TemplateModal
+        creatingBlank={create.isPending}
+        creatingTemplateId={(createFromTemplate.variables as string | undefined) || null}
+        open={templateModalOpen}
+        onCreateBlank={() => create.mutate()}
+        onCreateTemplate={(templateId) => createFromTemplate.mutate(templateId)}
+        onOpenChange={setTemplateModalOpen}
+      />
     </section>
   );
 }
