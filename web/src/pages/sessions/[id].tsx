@@ -1,18 +1,28 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Link, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
-import { ArrowLeft, RotateCcw } from "lucide-react";
+import { Menu } from "lucide-react";
 import { ChatColumn } from "../../components/console/ChatColumn";
 import { CompileColumn } from "../../components/console/CompileColumn";
 import { IRColumn } from "../../components/console/IRColumn";
 import { LLMConfigModal } from "../../components/console/LLMConfigModal";
+import { SessionsSidebar } from "../../components/console/SessionsSidebar";
+import { StateStepper } from "../../components/console/StateStepper";
+import { TemplateModal } from "../../components/console/TemplateModal";
+import { WorkbenchHeader } from "../../components/console/WorkbenchHeader";
 import { Button } from "../../components/ui/Button";
-import { Chip, type ChipVariant } from "../../components/ui/Chip";
-import { downloadArtifact } from "../../lib/api";
+import {
+  createSession,
+  createSessionFromTemplate,
+  downloadArtifact,
+  renameSession
+} from "../../lib/api";
 import type { Artifact, CompileInput, LLMConfigInput, MarkImportedInput } from "../../lib/types";
 import { useCompileSession, useIRDiff, useMarkImported, useSession, useSetLLMConfig } from "../../hooks/useSession";
 import { usePlannerTurn } from "../../hooks/usePlannerTurn";
 import { useIsXl } from "../../hooks/useIsXl";
+import { useIsLg } from "../../hooks/useIsLg";
 import { useState } from "react";
 
 const PANEL_GROUP_AUTOSAVE_ID = "fde-session-panels-v1";
@@ -20,16 +30,46 @@ const PANEL_STORAGE_KEY = `react-resizable-panels:${PANEL_GROUP_AUTOSAVE_ID}`;
 
 export default function SessionDetailPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const params = useParams();
+  const queryClient = useQueryClient();
   const sessionId = params.id || "";
   const { bindings, ir, session, turns, workflows } = useSession(sessionId);
   const [highlightedPath, setHighlightedPath] = useState<string | null>(null);
   const [layoutResetVersion, setLayoutResetVersion] = useState(0);
+  const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const isLg = useIsLg();
   const isXl = useIsXl();
   const setConfig = useSetLLMConfig(sessionId);
   const plannerTurn = usePlannerTurn(sessionId);
   const compile = useCompileSession(sessionId);
   const markImported = useMarkImported();
+  const rename = useMutation({
+    mutationFn: (title: string) => renameSession(sessionId, title),
+    onSuccess: async (row) => {
+      queryClient.setQueryData(["session", sessionId], row);
+      await queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    }
+  });
+  const create = useMutation({
+    mutationFn: createSession,
+    onSuccess: async (row) => {
+      await queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      setTemplateModalOpen(false);
+      setMobileSidebarOpen(false);
+      navigate(`/sessions/${row.session_id}`);
+    }
+  });
+  const createFromTemplate = useMutation({
+    mutationFn: (templateId: string) => createSessionFromTemplate(templateId),
+    onSuccess: async (row) => {
+      await queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      setTemplateModalOpen(false);
+      setMobileSidebarOpen(false);
+      navigate(`/sessions/${row.session_id}`);
+    }
+  });
   const needsConfig = Boolean(session.data && !session.data.llm_model);
   const errors = ir.data?.validation_errors || [];
   const compileWarningCount = (session.data?.artifacts || []).reduce(
@@ -74,6 +114,10 @@ export default function SessionDetailPage() {
     setLayoutResetVersion((version) => version + 1);
   }
 
+  function openTemplateModal() {
+    setTemplateModalOpen(true);
+  }
+
   const chatCol = (
     <ChatColumn
       isSending={plannerTurn.isPending}
@@ -104,96 +148,113 @@ export default function SessionDetailPage() {
       onMarkImported={mark}
     />
   );
+  const header = (
+    <WorkbenchHeader
+      session={session.data || null}
+      onRename={(title) => rename.mutateAsync(title)}
+      onResetLayout={resetLayout}
+    />
+  );
+  const stepper = (
+    <div className="shrink-0 border-b border-border/30 bg-bg-surface/75 px-3 py-2">
+      <StateStepper state={session.data?.state || "init"} />
+    </div>
+  );
+  const desktopSidebar = (
+    <SessionsSidebar
+      currentSessionId={sessionId}
+      defaultCollapsed={!isXl}
+      onCreateSession={openTemplateModal}
+    />
+  );
+  const mobileSidebar = (
+    <SessionsSidebar
+      currentSessionId={sessionId}
+      forceExpanded
+      onCreateSession={openTemplateModal}
+    />
+  );
 
   return (
-    <section className="min-h-[calc(100vh-56px)] px-4 py-5 sm:px-6 lg:px-8 xl:flex xl:h-[calc(100dvh-56px)] xl:flex-col xl:overflow-hidden">
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <Link className="inline-flex" to="/">
-            <Button
-              icon={<ArrowLeft aria-hidden className="h-4 w-4" />}
-              size="sm"
-              variant="ghost"
-            >
-              {t("session.back")}
-            </Button>
-          </Link>
-          <h1 className="mt-3 truncate font-mono text-lg font-semibold text-fg">{sessionId}</h1>
-          <p className="mt-1 text-sm text-fg-muted">{t("session.subtitle")}</p>
+    <section className="min-h-[calc(100vh-56px)] lg:h-[calc(100dvh-56px)] lg:overflow-hidden">
+      <div className="flex h-12 items-center justify-between border-b border-border/30 bg-bg-surface/85 px-3 lg:hidden">
+        <Button
+          aria-label={t("sidebar.openMobile")}
+          icon={<Menu aria-hidden className="h-4 w-4" />}
+          size="sm"
+          variant="ghost"
+          onClick={() => setMobileSidebarOpen(true)}
+        >
+          {t("workbench.sessionsLink")}
+        </Button>
+      </div>
+      {mobileSidebarOpen && !isLg ? (
+        <div className="fixed inset-0 z-40 flex lg:hidden">
+          <button
+            aria-label={t("sidebar.closeMobile")}
+            className="absolute inset-0 bg-primary/40"
+            type="button"
+            onClick={() => setMobileSidebarOpen(false)}
+          />
+          <div className="relative z-10 h-full">
+            {mobileSidebar}
+          </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {isXl ? (
-            <Button
-              icon={<RotateCcw aria-hidden className="h-4 w-4" />}
-              size="sm"
-              variant="ghost"
-              onClick={resetLayout}
-            >
-              {t("layout.reset")}
-            </Button>
-          ) : null}
-          <Chip variant={chipForState(session.data?.state || "draft")}>
-            {session.data?.state || t("session.loading")}
-          </Chip>
+      ) : null}
+      <div className="lg:flex lg:h-full lg:min-h-0">
+        {isLg ? <div className="hidden lg:flex lg:h-full">{desktopSidebar}</div> : null}
+        <div className="min-w-0 flex-1 lg:min-h-0">
+          {isLg ? (
+            <div className="min-h-0 flex-1 lg:h-full">
+              <PanelGroup
+                autoSaveId={PANEL_GROUP_AUTOSAVE_ID}
+                className="h-full w-full"
+                direction="horizontal"
+                key={layoutResetVersion}
+              >
+                <Panel className="flex min-h-0 min-w-0 flex-col overflow-hidden" defaultSize={60} id="chat" minSize={36} order={1}>
+                  {header}
+                  {stepper}
+                  <div className="min-h-0 flex-1 p-3">{chatCol}</div>
+                </Panel>
+                <PanelResizeHandle
+                  aria-label={t("layout.resizeChatIr")}
+                  className="group relative w-3 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border/45 transition-colors group-hover:bg-accent/80 group-data-[resize-handle-state=drag]:bg-accent" />
+                </PanelResizeHandle>
+                <Panel className="flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto p-3" defaultSize={40} id="context" minSize={28} order={2}>
+                  <div className="min-h-[320px] flex-1 overflow-hidden">{irCol}</div>
+                  <div className="shrink-0 overflow-visible">{compileCol}</div>
+                </Panel>
+              </PanelGroup>
+            </div>
+          ) : (
+            <div className="grid gap-4 p-4 md:grid-cols-8 lg:h-full lg:min-h-0 lg:overflow-y-auto">
+              <div className="md:col-span-8">
+                {header}
+                {stepper}
+              </div>
+              <div className="md:col-span-8">{chatCol}</div>
+              <div className="max-h-[70vh] overflow-auto md:col-span-5">{irCol}</div>
+              <div className="md:col-span-3">{compileCol}</div>
+            </div>
+          )}
         </div>
       </div>
-      {isXl ? (
-        <div className="min-h-0 flex-1">
-          {/* The xl workbench needs a complete h-full/min-h-0 chain so panels scroll internally. */}
-          <PanelGroup
-            autoSaveId={PANEL_GROUP_AUTOSAVE_ID}
-            className="h-full w-full"
-            direction="horizontal"
-            key={layoutResetVersion}
-          >
-            <Panel className="flex min-h-0 min-w-0 flex-col overflow-hidden" defaultSize={36} id="chat" minSize={20} order={1}>
-              {chatCol}
-            </Panel>
-            <PanelResizeHandle
-              aria-label={t("layout.resizeChatIr")}
-              className="group relative w-3 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border/45 transition-colors group-hover:bg-accent/80 group-data-[resize-handle-state=drag]:bg-accent" />
-            </PanelResizeHandle>
-            <Panel className="flex min-h-0 min-w-0 flex-col overflow-hidden" defaultSize={36} id="ir" minSize={20} order={2}>
-              {irCol}
-            </Panel>
-            <PanelResizeHandle
-              aria-label={t("layout.resizeIrCompile")}
-              className="group relative w-3 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border/45 transition-colors group-hover:bg-accent/80 group-data-[resize-handle-state=drag]:bg-accent" />
-            </PanelResizeHandle>
-            <Panel className="flex min-h-0 min-w-0 flex-col overflow-hidden" defaultSize={28} id="compile" minSize={20} order={3}>
-              {compileCol}
-            </Panel>
-          </PanelGroup>
-        </div>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-8">
-          <div className="md:col-span-8">{chatCol}</div>
-          <div className="max-h-[70vh] overflow-auto md:col-span-5">{irCol}</div>
-          <div className="md:col-span-3">{compileCol}</div>
-        </div>
-      )}
       <LLMConfigModal
         isSaving={setConfig.isPending}
         open={needsConfig}
         onSubmit={saveConfig}
       />
+      <TemplateModal
+        creatingBlank={create.isPending}
+        creatingTemplateId={(createFromTemplate.variables as string | undefined) || null}
+        open={templateModalOpen}
+        onCreateBlank={() => create.mutate()}
+        onCreateTemplate={(templateId) => createFromTemplate.mutate(templateId)}
+        onOpenChange={setTemplateModalOpen}
+      />
     </section>
   );
-}
-
-function chipForState(state: string): ChipVariant {
-  if (state === "compiled") {
-    return "compiled";
-  }
-  if (state === "validated") {
-    return "validated";
-  }
-  if (state === "llm_config_set") {
-    return "llm_config_set";
-  }
-  return "draft";
 }
