@@ -26,6 +26,19 @@ class SessionRow(BaseModel):
     updated_at: datetime
 
 
+class ActorLLMConfigRow(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    actor_id: str
+    llm_provider: str | None = None
+    llm_base_url: str
+    llm_model: str
+    llm_api_key_encrypted: bytes
+    llm_key_version: int
+    created_at: datetime
+    updated_at: datetime
+
+
 class TurnRow(BaseModel):
     model_config = ConfigDict(frozen=True)
 

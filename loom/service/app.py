@@ -16,6 +16,7 @@ from loom.planner.types import IntentRequest
 from loom.registry.store import WorkflowRegistryStore
 from loom.registry.templates import TemplateCatalog
 from loom.service.deps import Settings
+from loom.service.routes.actor import router as actor_router
 from loom.service.routes.health import router as health_router
 from loom.service.routes.registry import router as registry_router
 from loom.service.routes.sessions import router as sessions_router
@@ -74,6 +75,7 @@ def create_app(
     app.state.template_catalog = TemplateCatalog.load()
     app.state.planner = planner or _default_planner
     app.include_router(health_router)
+    app.include_router(actor_router)
     app.include_router(sessions_router)
     app.include_router(registry_router)
     app.include_router(templates_router)

@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 ArchiveEventType = Literal[
     "session.created",
+    "llm_config_inherited",
     "session.llm_config_set",
     "turn.started",
     "turn.succeeded",

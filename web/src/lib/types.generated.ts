@@ -38,6 +38,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/actor/llm-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Actor Llm Config */
+        get: operations["get_actor_llm_config_v1_actor_llm_config_get"];
+        /** Put Actor Llm Config */
+        put: operations["put_actor_llm_config_v1_actor_llm_config_put"];
+        post?: never;
+        /** Delete Actor Llm Config */
+        delete: operations["delete_actor_llm_config_v1_actor_llm_config_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sessions": {
         parameters: {
             query?: never;
@@ -278,10 +297,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Templates */
+        get: operations["list_templates_v1_templates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/templates/{template_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Template */
+        get: operations["get_template_v1_templates__template_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ActorLLMConfigInput */
+        ActorLLMConfigInput: {
+            /** Provider */
+            provider?: ("deepseek" | "openai" | "custom") | null;
+            /** Base Url */
+            base_url: string;
+            /** Model */
+            model: string;
+            /** Api Key */
+            api_key?: string | null;
+        };
+        /** ActorLLMConfigResponse */
+        ActorLLMConfigResponse: {
+            /** Provider */
+            provider: string | null;
+            /** Base Url */
+            base_url: string | null;
+            /** Model */
+            model: string | null;
+            /** Has Key */
+            has_key: boolean;
+            /** Updated At */
+            updated_at: string | null;
+        };
         /** CompileRequest */
         CompileRequest: {
             /**
@@ -299,8 +376,10 @@ export interface components {
         };
         /** CreateSessionRequest */
         CreateSessionRequest: {
-            /** Actor */
-            actor?: string | null;
+            /** Template Id */
+            template_id?: string | null;
+            /** Scope */
+            scope?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -316,12 +395,49 @@ export interface components {
             /** Model */
             model: string;
         };
+        /** LocalizedText */
+        LocalizedText: {
+            /** Zh */
+            zh: string;
+            /** En */
+            en: string;
+        };
         /** MarkDeployedRequest */
         MarkDeployedRequest: {
             /** Platform App Id */
             platform_app_id?: string | null;
             /** Deployment Note */
             deployment_note?: string | null;
+        };
+        /** PublicTemplate */
+        PublicTemplate: {
+            /** Id */
+            id: string;
+            name: components["schemas"]["LocalizedText"];
+            description: components["schemas"]["LocalizedText"];
+            /** Tags */
+            tags: string[];
+            /** Scopes */
+            scopes: string[];
+            /** Compile Targets */
+            compile_targets: ("hiagent" | "dify")[];
+        };
+        /** TemplateIRResponse */
+        TemplateIRResponse: {
+            /** Id */
+            id: string;
+            name: components["schemas"]["LocalizedText"];
+            description: components["schemas"]["LocalizedText"];
+            /** Tags */
+            tags: string[];
+            /** Scopes */
+            scopes: string[];
+            /** Compile Targets */
+            compile_targets: ("hiagent" | "dify")[];
+            /** Ir */
+            ir: {
+                [key: string]: unknown;
+            };
         };
         /** TurnRequest */
         TurnRequest: {
@@ -336,10 +452,6 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
-            /** Input */
-            input?: unknown;
-            /** Context */
-            ctx?: Record<string, never>;
         };
     };
     responses: never;
@@ -390,6 +502,101 @@ export interface operations {
                     "application/json": {
                         [key: string]: boolean;
                     };
+                };
+            };
+        };
+    };
+    get_actor_llm_config_v1_actor_llm_config_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Actor-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActorLLMConfigResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_actor_llm_config_v1_actor_llm_config_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Actor-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActorLLMConfigInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActorLLMConfigResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_actor_llm_config_v1_actor_llm_config_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Actor-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -956,6 +1163,69 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_templates_v1_templates_get: {
+        parameters: {
+            query?: {
+                scope?: string | null;
+                target?: ("hiagent" | "dify") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicTemplate"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_template_v1_templates__template_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TemplateIRResponse"];
                 };
             };
             /** @description Validation Error */

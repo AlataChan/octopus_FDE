@@ -7,14 +7,16 @@ import sqlite3
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003
-from typing import Literal
+from typing import Callable, Literal
 from uuid import UUID, uuid4
 
 from cryptography.fernet import Fernet  # noqa: TC002
 
-from loom.state.models import ArtifactRow, SessionRow, TurnRow
+from loom.state.models import ActorLLMConfigRow, ArtifactRow, SessionRow, TurnRow
 from loom.state.sm import SessionState, transition
 from loom.runtimes.warnings import CompileWarning
+
+AuditEventWriter = Callable[[UUID, list[tuple[str, dict[str, object]]]], None]
 
 
 class SessionStore:
@@ -44,6 +46,133 @@ class SessionStore:
         row = self.get_session(sid, actor_id=actor_id)
         assert row is not None
         return row
+
+    def create_session_with_actor_defaults(
+        self,
+        *,
+        actor_id: str,
+        fernet: Fernet,
+        audit_writer: AuditEventWriter | None = None,
+    ) -> SessionRow:
+        del fernet  # actor defaults are already encrypted with the same service key.
+        now = _now()
+        sid = uuid4()
+        with self._connect() as con:
+            con.execute(
+                """
+                INSERT INTO sessions (session_id, actor_id, state, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (str(sid), actor_id, SessionState.INIT.value, now, now),
+            )
+            events: list[tuple[str, dict[str, object]]] = [
+                ("session.created", {"actor_id": actor_id})
+            ]
+            defaults = self._get_actor_llm_config_con(con, actor_id=actor_id)
+            if defaults is not None:
+                state = transition(SessionState.INIT.value, "llm_config_set").value
+                con.execute(
+                    """
+                    UPDATE sessions
+                    SET state = ?, llm_api_key_encrypted = ?, llm_base_url = ?,
+                        llm_model = ?, llm_key_version = ?, updated_at = ?
+                    WHERE session_id = ? AND actor_id = ?
+                    """,
+                    (
+                        state,
+                        defaults.llm_api_key_encrypted,
+                        defaults.llm_base_url,
+                        defaults.llm_model,
+                        defaults.llm_key_version,
+                        now,
+                        str(sid),
+                        actor_id,
+                    ),
+                )
+                events.append((
+                    "llm_config_inherited",
+                    {
+                        "source": "actor_default",
+                        "provider": defaults.llm_provider,
+                        "model": defaults.llm_model,
+                    },
+                ))
+            if audit_writer is not None:
+                audit_writer(sid, events)
+            row = con.execute(
+                "SELECT * FROM sessions WHERE session_id = ? AND actor_id = ?",
+                (str(sid), actor_id),
+            ).fetchone()
+        assert row is not None
+        return _session_row(row)
+
+    def get_actor_llm_config(self, *, actor_id: str) -> ActorLLMConfigRow | None:
+        with self._connect() as con:
+            return self._get_actor_llm_config_con(con, actor_id=actor_id)
+
+    def upsert_actor_llm_config(
+        self,
+        *,
+        actor_id: str,
+        provider: str | None,
+        base_url: str,
+        model: str,
+        api_key: str | None,
+        fernet: Fernet,
+    ) -> ActorLLMConfigRow:
+        now = _now()
+        with self._connect() as con:
+            existing = self._get_actor_llm_config_con(con, actor_id=actor_id)
+            has_new_key = bool(api_key)
+            if existing is None and not has_new_key:
+                raise ValueError("api_key_required_for_initial_setup")
+            if existing is None:
+                encrypted = fernet.encrypt(str(api_key).encode("utf-8"))
+                con.execute(
+                    """
+                    INSERT INTO actor_llm_config (
+                        actor_id, llm_provider, llm_base_url, llm_model,
+                        llm_api_key_encrypted, llm_key_version, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                    """,
+                    (actor_id, provider, base_url, model, encrypted, now, now),
+                )
+            elif has_new_key:
+                encrypted = fernet.encrypt(str(api_key).encode("utf-8"))
+                con.execute(
+                    """
+                    UPDATE actor_llm_config
+                    SET llm_provider = ?, llm_base_url = ?, llm_model = ?,
+                        llm_api_key_encrypted = ?, llm_key_version = ?, updated_at = ?
+                    WHERE actor_id = ?
+                    """,
+                    (
+                        provider,
+                        base_url,
+                        model,
+                        encrypted,
+                        existing.llm_key_version + 1,
+                        now,
+                        actor_id,
+                    ),
+                )
+            else:
+                con.execute(
+                    """
+                    UPDATE actor_llm_config
+                    SET llm_provider = ?, llm_base_url = ?, llm_model = ?, updated_at = ?
+                    WHERE actor_id = ?
+                    """,
+                    (provider, base_url, model, now, actor_id),
+                )
+            row = self._get_actor_llm_config_con(con, actor_id=actor_id)
+        assert row is not None
+        return row
+
+    def delete_actor_llm_config(self, *, actor_id: str) -> None:
+        with self._connect() as con:
+            con.execute("DELETE FROM actor_llm_config WHERE actor_id = ?", (actor_id,))
 
     def list_sessions(self, *, actor_id: str) -> list[SessionRow]:
         with self._connect() as con:
@@ -349,11 +478,33 @@ class SessionStore:
                     compile_warnings_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS actor_llm_config (
+                    actor_id TEXT PRIMARY KEY,
+                    llm_provider TEXT,
+                    llm_base_url TEXT NOT NULL,
+                    llm_model TEXT NOT NULL,
+                    llm_api_key_encrypted BLOB NOT NULL,
+                    llm_key_version INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             columns = {row["name"] for row in con.execute("PRAGMA table_info(artifacts)").fetchall()}
             if "compile_warnings_json" not in columns:
                 con.execute("ALTER TABLE artifacts ADD COLUMN compile_warnings_json TEXT NOT NULL DEFAULT '[]'")
+
+    @staticmethod
+    def _get_actor_llm_config_con(
+        con: sqlite3.Connection,
+        *,
+        actor_id: str,
+    ) -> ActorLLMConfigRow | None:
+        row = con.execute(
+            "SELECT * FROM actor_llm_config WHERE actor_id = ?",
+            (actor_id,),
+        ).fetchone()
+        return _actor_llm_config_row(row) if row else None
 
 
 def _now() -> str:
@@ -370,6 +521,19 @@ def _session_row(row: sqlite3.Row) -> SessionRow:
         llm_api_key_encrypted=row["llm_api_key_encrypted"],
         llm_base_url=row["llm_base_url"],
         llm_model=row["llm_model"],
+        llm_key_version=row["llm_key_version"],
+        created_at=datetime.fromisoformat(row["created_at"]),
+        updated_at=datetime.fromisoformat(row["updated_at"]),
+    )
+
+
+def _actor_llm_config_row(row: sqlite3.Row) -> ActorLLMConfigRow:
+    return ActorLLMConfigRow(
+        actor_id=row["actor_id"],
+        llm_provider=row["llm_provider"],
+        llm_base_url=row["llm_base_url"],
+        llm_model=row["llm_model"],
+        llm_api_key_encrypted=row["llm_api_key_encrypted"],
         llm_key_version=row["llm_key_version"],
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
