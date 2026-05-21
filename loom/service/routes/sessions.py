@@ -22,6 +22,8 @@ from loom.runtimes.hiagent.v2_6.compiler import compile_ir, compile_ir_chatflow
 from loom.runtimes.warnings import CompileWarning
 from loom.service.deps import Actor, get_actor
 from loom.service.errors import bad_request, conflict, not_found
+from loom.service.models import SessionDetail, SessionPatchInput, SessionSummary
+from loom.state.models import SessionRow, TurnRow
 from loom.validator.validate import validate
 
 router = APIRouter(prefix="/v1")
@@ -50,15 +52,9 @@ class CompileRequest(BaseModel):
 
 
 @router.get("/sessions")
-def list_sessions(request: Request, actor: ActorDep) -> list[dict[str, object]]:
+def list_sessions(request: Request, actor: ActorDep) -> list[SessionSummary]:
     return [
-        {
-            "session_id": str(row.session_id),
-            "state": row.state,
-            "latest_ir_sha256": row.latest_ir_sha256,
-            "created_at": row.created_at.isoformat(),
-            "updated_at": row.updated_at.isoformat(),
-        }
+        _session_summary_response(row, request, actor.id)
         for row in request.app.state.session_store.list_sessions(actor_id=actor.id)
     ]
 
@@ -91,17 +87,30 @@ def get_session(
     session_id: UUID,
     request: Request,
     actor: ActorDep,
-) -> dict[str, object]:
+) -> SessionDetail:
     session = request.app.state.session_store.get_session(session_id, actor_id=actor.id)
     if session is None:
         raise not_found("session not found")
-    return {
-        **session.model_dump(mode="json", exclude={"llm_api_key_encrypted"}),
-        "artifacts": [
-            artifact.model_dump(mode="json")
-            for artifact in request.app.state.session_store.list_artifacts(session_id, actor_id=actor.id)
-        ],
-    }
+    return _session_detail_response(session, request, actor.id)
+
+
+@router.patch("/sessions/{session_id}")
+def patch_session(
+    session_id: UUID,
+    body: SessionPatchInput,
+    request: Request,
+    actor: ActorDep,
+) -> SessionDetail:
+    session = request.app.state.session_store.get_session(session_id, actor_id=actor.id)
+    if session is None:
+        raise not_found("session not found")
+    if "title" in body.model_fields_set:
+        session = request.app.state.session_store.update_session_title(
+            session_id,
+            actor_id=actor.id,
+            title=body.title,
+        )
+    return _session_detail_response(session, request, actor.id)
 
 
 @router.patch("/sessions/{session_id}/llm-config")
@@ -560,6 +569,60 @@ def _turn_response(row: Any) -> dict[str, object]:
         "errors": row.validation_errors,
         "ir_diff": None,
     }
+
+
+def _session_summary_response(row: SessionRow, request: Request, actor_id: str) -> SessionSummary:
+    turns = request.app.state.session_store.list_turns(row.session_id, actor_id=actor_id)
+    return SessionSummary(
+        session_id=str(row.session_id),
+        state=row.state,
+        latest_ir_sha256=row.latest_ir_sha256,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        display_title=_to_session_display(row, turns, request.app.state.template_catalog),
+    )
+
+
+def _session_detail_response(row: SessionRow, request: Request, actor_id: str) -> SessionDetail:
+    artifacts = [
+        artifact.model_dump(mode="json")
+        for artifact in request.app.state.session_store.list_artifacts(row.session_id, actor_id=actor_id)
+    ]
+    return SessionDetail(
+        session_id=str(row.session_id),
+        actor_id=row.actor_id,
+        state=row.state,
+        latest_ir_json=row.latest_ir_json,
+        latest_ir_sha256=row.latest_ir_sha256,
+        title=row.title,
+        llm_base_url=row.llm_base_url,
+        llm_model=row.llm_model,
+        llm_key_version=row.llm_key_version,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        artifacts=artifacts,
+        display_title=_to_session_display(
+            row,
+            request.app.state.session_store.list_turns(row.session_id, actor_id=actor_id),
+            request.app.state.template_catalog,
+        ),
+    )
+
+
+def _to_session_display(row: SessionRow, turns: list[TurnRow], catalog: Any) -> str:
+    if row.title and row.title.strip():
+        return row.title.strip()
+    if turns:
+        first_message = turns[0].user_message.strip()
+        if first_message.startswith("template:"):
+            template_id = first_message.removeprefix("template:").strip()
+            record = catalog.get(template_id) if catalog is not None else None
+            if record is not None:
+                return record.entry.name.zh or record.entry.name.en
+            return f"Session {str(row.session_id)[:8]}"
+        if first_message:
+            return first_message[:24]
+    return f"Session {str(row.session_id)[:8]}"
 
 
 def _turn_snapshot(row: Any) -> str | None:

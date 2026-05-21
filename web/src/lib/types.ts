@@ -6,6 +6,7 @@ export type SessionSummary = {
   latest_ir_sha256: string | null;
   created_at: string;
   updated_at: string;
+  display_title: string;
 };
 
 export type ArtifactKind = "zip" | "yaml";
@@ -40,6 +41,7 @@ export type Artifact = {
 export type SessionDetail = SessionSummary & {
   actor_id: string;
   latest_ir_json: string | null;
+  title: string | null;
   llm_base_url: string | null;
   llm_model: string | null;
   llm_key_version: number | null;

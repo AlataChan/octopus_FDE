@@ -95,6 +95,13 @@ export function getSession(sessionId: string): Promise<SessionDetail> {
   return apiFetch<SessionDetail>(`/v1/sessions/${sessionId}`);
 }
 
+export function renameSession(sessionId: string, title: string | null): Promise<SessionDetail> {
+  return apiFetch<SessionDetail>(`/v1/sessions/${sessionId}`, {
+    body: JSON.stringify({ title }),
+    method: "PATCH"
+  });
+}
+
 export function setLLMConfig(sessionId: string, input: LLMConfigInput): Promise<{ ok: boolean }> {
   return apiFetch<{ ok: boolean }>(`/v1/sessions/${sessionId}/llm-config`, {
     body: JSON.stringify(input),

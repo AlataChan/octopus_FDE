@@ -89,7 +89,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** Patch Session */
+        patch: operations["patch_session_v1_sessions__session_id__patch"];
         trace?: never;
     };
     "/v1/sessions/{session_id}/llm-config": {
@@ -422,6 +423,69 @@ export interface components {
             /** Compile Targets */
             compile_targets: ("hiagent" | "dify")[];
         };
+        /** SessionDetail */
+        SessionDetail: {
+            /** Session Id */
+            session_id: string;
+            /** State */
+            state: string;
+            /** Latest Ir Sha256 */
+            latest_ir_sha256: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Display Title */
+            display_title: string;
+            /** Actor Id */
+            actor_id: string;
+            /** Latest Ir Json */
+            latest_ir_json: string | null;
+            /** Title */
+            title: string | null;
+            /** Llm Base Url */
+            llm_base_url: string | null;
+            /** Llm Model */
+            llm_model: string | null;
+            /** Llm Key Version */
+            llm_key_version: number | null;
+            /** Artifacts */
+            artifacts: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** SessionPatchInput */
+        SessionPatchInput: {
+            /** Title */
+            title?: string | null;
+        };
+        /** SessionSummary */
+        SessionSummary: {
+            /** Session Id */
+            session_id: string;
+            /** State */
+            state: string;
+            /** Latest Ir Sha256 */
+            latest_ir_sha256: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Display Title */
+            display_title: string;
+        };
         /** TemplateIRResponse */
         TemplateIRResponse: {
             /** Id */
@@ -452,6 +516,10 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
         };
     };
     responses: never;
@@ -618,9 +686,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["SessionSummary"][];
                 };
             };
             /** @description Validation Error */
@@ -690,9 +756,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SessionDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_session_v1_sessions__session_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Actor-Id"?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionPatchInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionDetail"];
                 };
             };
             /** @description Validation Error */
