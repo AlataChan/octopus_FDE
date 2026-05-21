@@ -55,6 +55,116 @@
       "compile_targets": ["hiagent", "dify"],
       "_internal_source": "Ahmad (2026) Ch.18",
       "_internal_pattern": "trigger -> llm -> llm -> http -> condition -> output"
+    },
+    {
+      "id": "autonomous-decision-making",
+      "name": {"zh": "自主决策", "en": "Autonomous Decision Making"},
+      "description": {"zh": "感知上下文、推理选项并输出自主建议。", "en": "Perceive context, reason over options, and return an autonomous recommendation."},
+      "tags": ["decision", "reasoning", "autonomy"],
+      "ir_file": "autonomous-decision-making.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.5 — Autonomous Decision Making",
+      "_internal_pattern": "trigger -> http -> llm -> output"
+    },
+    {
+      "id": "memory-augmented",
+      "name": {"zh": "记忆增强", "en": "Memory Augmented"},
+      "description": {"zh": "读取记忆、生成回复并写回记忆摘要。", "en": "Fetch relevant memory, answer with context, and write a compact memory update."},
+      "tags": ["memory", "personalization", "continuity"],
+      "ir_file": "memory-augmented.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.5 — Memory-Augmented Agent",
+      "_internal_pattern": "trigger -> http -> llm -> http -> output"
+    },
+    {
+      "id": "document-intelligence",
+      "name": {"zh": "文档智能", "en": "Document Intelligence"},
+      "description": {"zh": "解析上传文档并抽取结构化字段。", "en": "Parse an uploaded document and extract structured fields."},
+      "tags": ["document", "extraction", "files"],
+      "ir_file": "document-intelligence.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.6 — Document Intelligence Agent",
+      "_internal_pattern": "trigger(file) -> http -> llm -> output"
+    },
+    {
+      "id": "scientific-research",
+      "name": {"zh": "科学研究", "en": "Scientific Research"},
+      "description": {"zh": "检索证据、形成假设并合成研究简报。", "en": "Retrieve evidence, form hypotheses, and synthesize a research brief."},
+      "tags": ["research", "hypothesis", "synthesis"],
+      "ir_file": "scientific-research.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.6 — Scientific Research Agent",
+      "_internal_pattern": "trigger -> retrieval -> llm -> llm -> output"
+    },
+    {
+      "id": "chain-of-agents",
+      "name": {"zh": "智能体链", "en": "Chain of Agents"},
+      "description": {"zh": "经理分配任务，多个专家并行分析后汇总。", "en": "A manager assigns work to specialists and synthesizes their outputs."},
+      "tags": ["multi-agent", "parallel", "synthesis"],
+      "ir_file": "chain-of-agents.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent"],
+      "_internal_source": "Ahmad (2026) Ch.7 — Chain-of-Agents",
+      "_internal_pattern": "trigger -> llm -> parallel -> llm -> output"
+    },
+    {
+      "id": "memory-multi-agent",
+      "name": {"zh": "记忆多智能体", "en": "Memory Multi-Agent"},
+      "description": {"zh": "读取共享记忆，让两个智能体并行推理。", "en": "Fetch shared memory, let two agents reason, and return their combined result."},
+      "tags": ["memory", "multi-agent", "parallel"],
+      "ir_file": "memory-multi-agent.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent"],
+      "_internal_source": "Ahmad (2026) Ch.7 — Memory Multi-Agent",
+      "_internal_pattern": "trigger -> http -> llm -> parallel -> output"
+    },
+    {
+      "id": "agentic-workflow",
+      "name": {"zh": "智能体工作流", "en": "Agentic Workflow"},
+      "description": {"zh": "生成工作流方案，并把低置信方案转人工复核。", "en": "Propose a workflow and route low-confidence plans to review."},
+      "tags": ["workflow", "review", "escalation"],
+      "ir_file": "agentic-workflow.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.7 — Agentic Workflow",
+      "_internal_pattern": "trigger -> llm -> condition -> output"
+    },
+    {
+      "id": "data-analysis",
+      "name": {"zh": "数据分析", "en": "Data Analysis"},
+      "description": {"zh": "计算统计摘要并解释业务含义。", "en": "Compute summary statistics and interpret the result."},
+      "tags": ["analysis", "code", "insight"],
+      "ir_file": "data-analysis.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.8 — Data Analysis Agent",
+      "_internal_pattern": "trigger -> code -> llm -> output"
+    },
+    {
+      "id": "general-problem-solver",
+      "name": {"zh": "通用问题求解", "en": "General Problem Solver"},
+      "description": {"zh": "分解问题、逐步求解并合成最终答案。", "en": "Decompose a problem, solve each step, and synthesize the result."},
+      "tags": ["planning", "loop", "problem-solving"],
+      "ir_file": "general-problem-solver.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent"],
+      "_internal_source": "Ahmad (2026) Ch.8 — General Problem Solver",
+      "_internal_pattern": "trigger -> llm -> loop -> llm -> output"
+    },
+    {
+      "id": "compliance-driven",
+      "name": {"zh": "合规驱动", "en": "Compliance Driven"},
+      "description": {"zh": "检索政策、检查合规并路由失败项。", "en": "Retrieve policy, check compliance, and route failures for review."},
+      "tags": ["compliance", "policy", "guardrails"],
+      "ir_file": "compliance-driven.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.9 — Compliance-Driven Agent",
+      "_internal_pattern": "trigger -> retrieval -> llm -> condition -> output"
     }
   ]
 }

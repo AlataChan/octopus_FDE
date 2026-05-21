@@ -1,0 +1,57 @@
+ir_version: "0.4"
+metadata:
+  name: Agentic Workflow
+  description: Propose a workflow and route low-confidence plans to review.
+  owner: template-gallery
+  rationale: User-facing template for review-aware agentic workflow planning.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: [policy_kb]
+  credentials: []
+policy:
+  default_timeout_s: 120
+  default_retry: {max_attempts: 3, backoff: exponential, retry_on: [5xx, timeout, network]}
+  agent_budget: {max_iterations: 6, max_tokens: 22000, max_wall_clock_s: 240}
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+  escalation: {confidence_min: 0.7, confidence_from: "${propose.confidence}", handoff_node: review_out}
+inputs:
+  - {name: objective, type: string, required: true}
+outputs:
+  - {name: plan, type: string}
+  - {name: confidence, type: number}
+  - {name: route, type: string}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept an objective for workflow proposal.}
+  - id: propose
+    type: llm
+    model: configured-planner-model
+    prompt: "Objective: ${input.objective}\nPropose an executable workflow and confidence."
+    temperature: 0.1
+    output_schema:
+      type: object
+      properties:
+        plan: {type: string}
+        confidence: {type: number}
+        needs_review: {type: boolean}
+    rationale: Generate a plan and confidence score for routing.
+  - id: route
+    type: condition
+    branches:
+      - {when: "${propose.needs_review} == true", next: review_out}
+      - {when: "${propose.confidence} < 0.7", next: review_out}
+    default: out
+    rationale: Route low-confidence or review-needed plans to handoff output.
+  - id: review_out
+    type: output
+    bindings: {plan: "${propose.plan}", confidence: "${propose.confidence}", route: review}
+    rationale: Hand off the proposed workflow for human review.
+  - id: out
+    type: output
+    bindings: {plan: "${propose.plan}", confidence: "${propose.confidence}", route: automatic}
+    rationale: Return the proposed workflow for automatic execution.
+edges:
+  - {from: start, to: propose}
+  - {from: propose, to: route}
+  - {from: route, to: review_out, when: review}
+  - {from: route, to: out, when: automatic}

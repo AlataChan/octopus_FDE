@@ -1,0 +1,49 @@
+ir_version: "0.4"
+metadata:
+  name: Autonomous Decision Making
+  description: Perceive context, reason over options, and return an autonomous recommendation.
+  owner: template-gallery
+  rationale: User-facing template for bounded autonomous decisions with explicit evidence.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: [policy_kb]
+  credentials: []
+policy:
+  default_timeout_s: 90
+  default_retry: {max_attempts: 3, backoff: exponential, retry_on: [5xx, timeout, network]}
+  agent_budget: {max_iterations: 4, max_tokens: 16000, max_wall_clock_s: 180}
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+inputs:
+  - {name: situation, type: string, required: true, description: Situation to assess}
+outputs:
+  - {name: decision, type: string}
+  - {name: rationale, type: string}
+  - {name: confidence, type: number}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept the decision context from an operator.}
+  - id: perceive
+    type: http
+    method: GET
+    url: https://example.invalid/fde/perception?situation=${input.situation}
+    rationale: Gather current observable signals before reasoning.
+  - id: reason
+    type: llm
+    model: configured-planner-model
+    prompt: "Situation: ${input.situation}\nSignals: ${perceive.body}\nReturn decision, rationale, and confidence."
+    temperature: 0.1
+    output_schema:
+      type: object
+      properties:
+        decision: {type: string}
+        rationale: {type: string}
+        confidence: {type: number}
+    rationale: Compare options and choose the highest-confidence action.
+  - id: out
+    type: output
+    bindings: {decision: "${reason.decision}", rationale: "${reason.rationale}", confidence: "${reason.confidence}"}
+    rationale: Return the decision package for downstream use.
+edges:
+  - {from: start, to: perceive}
+  - {from: perceive, to: reason}
+  - {from: reason, to: out}

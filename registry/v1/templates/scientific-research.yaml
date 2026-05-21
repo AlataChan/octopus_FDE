@@ -1,0 +1,61 @@
+ir_version: "0.4"
+metadata:
+  name: Scientific Research
+  description: Retrieve evidence, form hypotheses, and synthesize a research brief.
+  owner: template-gallery
+  rationale: User-facing template for evidence-backed research synthesis.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: [product_kb, policy_kb]
+  credentials: []
+policy:
+  default_timeout_s: 120
+  default_retry: {max_attempts: 3, backoff: exponential, retry_on: [5xx, timeout, rate_limit]}
+  agent_budget: {max_iterations: 5, max_tokens: 22000, max_wall_clock_s: 240}
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+inputs:
+  - {name: question, type: string, required: true}
+outputs:
+  - {name: hypothesis, type: string}
+  - {name: brief, type: string}
+  - {name: sources, type: "string[]"}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept a research question.}
+  - id: retrieve
+    type: retrieval
+    dataset: policy_kb
+    query: ${input.question}
+    top_k: 10
+    rerank: true
+    rationale: Gather source material before hypothesis generation.
+  - id: hypothesis
+    type: llm
+    model: configured-small-model
+    prompt: "Question: ${input.question}\nSources: ${retrieve.chunks}\nReturn plausible hypotheses and evidence gaps."
+    temperature: 0.2
+    output_schema:
+      type: object
+      properties:
+        hypothesis: {type: string}
+        sources: {type: array, items: {type: string}}
+    rationale: Form evidence-aware hypotheses and identify useful sources.
+  - id: synthesize
+    type: llm
+    model: configured-planner-model
+    prompt: "Question: ${input.question}\nHypothesis: ${hypothesis.hypothesis}\nSources: ${retrieve.chunks}\nWrite a concise research brief."
+    temperature: 0.2
+    output_schema:
+      type: object
+      properties:
+        brief: {type: string}
+    rationale: Synthesize the findings into a usable brief.
+  - id: out
+    type: output
+    bindings: {hypothesis: "${hypothesis.hypothesis}", brief: "${synthesize.brief}", sources: "${hypothesis.sources}"}
+    rationale: Return hypotheses, synthesis, and cited sources.
+edges:
+  - {from: start, to: retrieve}
+  - {from: retrieve, to: hypothesis}
+  - {from: hypothesis, to: synthesize}
+  - {from: synthesize, to: out}

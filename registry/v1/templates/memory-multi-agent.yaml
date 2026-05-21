@@ -1,0 +1,73 @@
+ir_version: "0.4"
+metadata:
+  name: Memory Multi Agent
+  description: Fetch shared memory, let two agents reason, and return their combined result.
+  owner: template-gallery
+  rationale: User-facing template for multi-agent reasoning with shared memory context.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: []
+  credentials: []
+policy:
+  default_timeout_s: 180
+  default_retry: {max_attempts: 2, backoff: exponential, retry_on: [5xx, timeout, network]}
+  agent_budget: {max_iterations: 8, max_tokens: 30000, max_wall_clock_s: 300}
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+inputs:
+  - {name: topic, type: string, required: true}
+  - {name: memory_key, type: string, required: true}
+outputs:
+  - {name: result, type: json}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept a topic and memory key for shared-context analysis.}
+  - id: memory_fetch
+    type: http
+    method: GET
+    url: https://example.invalid/fde/memory/${input.memory_key}
+    rationale: Load prior context that both agents should use.
+  - id: manager
+    type: llm
+    model: configured-planner-model
+    prompt: "Topic: ${input.topic}\nMemory: ${memory_fetch.body}\nDefine analysis and critique tasks."
+    output_schema:
+      type: object
+      properties:
+        analysis_task: {type: string}
+        critique_task: {type: string}
+    rationale: Prepare complementary tasks for two agents.
+  - id: agents
+    type: parallel
+    merge_strategy: object_merge
+    branch_types: {analysis: json, critique: json}
+    branches:
+      analysis:
+        - id: analysis_agent
+          type: llm
+          model: configured-small-model
+          prompt: "Topic: ${input.topic}\nMemory: ${memory_fetch.body}\nTask: ${manager.analysis_task}"
+          output_schema:
+            type: object
+            properties:
+              result: {type: string}
+          rationale: Analyze the topic using shared memory.
+      critique:
+        - id: critique_agent
+          type: llm
+          model: configured-small-model
+          prompt: "Topic: ${input.topic}\nMemory: ${memory_fetch.body}\nTask: ${manager.critique_task}"
+          output_schema:
+            type: object
+            properties:
+              result: {type: string}
+          rationale: Critique assumptions using shared memory.
+    rationale: Run analysis and critique in parallel with the same memory base.
+  - id: out
+    type: output
+    bindings: {result: "${agents.results}"}
+    rationale: Return the merged multi-agent result.
+edges:
+  - {from: start, to: memory_fetch}
+  - {from: memory_fetch, to: manager}
+  - {from: manager, to: agents}
+  - {from: agents, to: out}

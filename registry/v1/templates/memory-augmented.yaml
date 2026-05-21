@@ -1,0 +1,56 @@
+ir_version: "0.4"
+metadata:
+  name: Memory Augmented
+  description: Fetch relevant memory, answer with context, and write a compact memory update.
+  owner: template-gallery
+  rationale: User-facing template for workflows that need continuity across sessions.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: []
+  credentials: []
+policy:
+  default_timeout_s: 90
+  default_retry: {max_attempts: 3, backoff: exponential, retry_on: [5xx, timeout, network]}
+  agent_budget: {max_iterations: 4, max_tokens: 16000, max_wall_clock_s: 180}
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+inputs:
+  - {name: user_id, type: string, required: true}
+  - {name: request, type: string, required: true}
+outputs:
+  - {name: answer, type: string}
+  - {name: memory_update_status, type: string}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept a user request that may depend on prior memory.}
+  - id: memory_fetch
+    type: http
+    method: GET
+    url: https://example.invalid/fde/memory/${input.user_id}
+    rationale: Retrieve durable memory snippets for the user.
+  - id: answer
+    type: llm
+    model: configured-planner-model
+    prompt: "Request: ${input.request}\nMemory: ${memory_fetch.body}\nAnswer and summarize any memory update."
+    temperature: 0.2
+    output_schema:
+      type: object
+      properties:
+        answer: {type: string}
+        memory_note: {type: string}
+    rationale: Ground the response in retrieved memory and derive an update note.
+  - id: memory_write
+    type: http
+    method: POST
+    url: https://example.invalid/fde/memory/${input.user_id}
+    body: {note: "${answer.memory_note}"}
+    idempotency_key: ${input.user_id}
+    rationale: Persist a compact memory note for future turns.
+  - id: out
+    type: output
+    bindings: {answer: "${answer.answer}", memory_update_status: "${memory_write.status}"}
+    rationale: Return the answer and memory write status.
+edges:
+  - {from: start, to: memory_fetch}
+  - {from: memory_fetch, to: answer}
+  - {from: answer, to: memory_write}
+  - {from: memory_write, to: out}

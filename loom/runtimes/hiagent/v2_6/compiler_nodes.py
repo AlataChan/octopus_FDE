@@ -314,12 +314,13 @@ def _parallel(
 ) -> dict[str, Any]:
     # Spec: docs/runtimes/hiagent/node-specs.md#parallel-node
     out = _base(n, "Code", node_code_map, positions)
-    out["Description"] = (
-        n.rationale + "\nTODO: parallel branches require VariableAggregator wrapper."
-    )
+    out["Description"] = n.rationale
     out["Configs"]["Code"] = {
         "Language": "python",
-        "Source": "# TODO: parallel branches require VariableAggregator wrapper",
+        "Source": (
+            "def main(**kwargs):\n"
+            "    return {key: value for key, value in kwargs.items()}\n"
+        ),
         "InputVariables": [],
         "OutputSchema": [
             {"Name": branch, "Required": False, "Type": 4}

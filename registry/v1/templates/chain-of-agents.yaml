@@ -1,0 +1,90 @@
+ir_version: "0.4"
+metadata:
+  name: Chain of Agents
+  description: A manager assigns work to specialists and synthesizes their outputs.
+  owner: template-gallery
+  rationale: User-facing multi-agent template for specialist collaboration.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: []
+  credentials: []
+policy:
+  default_timeout_s: 180
+  default_retry: {max_attempts: 2, backoff: exponential, retry_on: [5xx, timeout, network]}
+  agent_budget: {max_iterations: 8, max_tokens: 30000, max_wall_clock_s: 300}
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+inputs:
+  - {name: objective, type: string, required: true}
+outputs:
+  - {name: synthesis, type: string}
+  - {name: specialist_notes, type: json}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept a complex objective for specialist analysis.}
+  - id: manager
+    type: llm
+    model: configured-planner-model
+    prompt: "Objective: ${input.objective}\nAssign subquestions for research, risk, and execution specialists."
+    temperature: 0.1
+    output_schema:
+      type: object
+      properties:
+        research_task: {type: string}
+        risk_task: {type: string}
+        execution_task: {type: string}
+    rationale: Split the objective into specialist-ready work packages.
+  - id: specialists
+    type: parallel
+    merge_strategy: object_merge
+    branch_types: {research: json, risk: json, execution: json}
+    branches:
+      research:
+        - id: research_agent
+          type: llm
+          model: configured-small-model
+          prompt: "Objective: ${input.objective}\nResearch task: ${manager.research_task}\nReturn research notes."
+          output_schema:
+            type: object
+            properties:
+              notes: {type: string}
+          rationale: Produce research notes for the manager.
+      risk:
+        - id: risk_agent
+          type: llm
+          model: configured-small-model
+          prompt: "Objective: ${input.objective}\nRisk task: ${manager.risk_task}\nReturn risk notes."
+          output_schema:
+            type: object
+            properties:
+              notes: {type: string}
+          rationale: Produce risk notes for the manager.
+      execution:
+        - id: execution_agent
+          type: llm
+          model: configured-small-model
+          prompt: "Objective: ${input.objective}\nExecution task: ${manager.execution_task}\nReturn execution notes."
+          output_schema:
+            type: object
+            properties:
+              notes: {type: string}
+          rationale: Produce execution notes for the manager.
+    rationale: Run specialist analyses independently before synthesis.
+  - id: synthesize
+    type: llm
+    model: configured-planner-model
+    prompt: "Objective: ${input.objective}\nSpecialist outputs: ${specialists.results}\nWrite one coordinated answer."
+    temperature: 0.2
+    output_schema:
+      type: object
+      properties:
+        synthesis: {type: string}
+    rationale: Merge specialist outputs into one coherent response.
+  - id: out
+    type: output
+    bindings: {synthesis: "${synthesize.synthesis}", specialist_notes: "${specialists.results}"}
+    rationale: Return the synthesis and specialist notes.
+edges:
+  - {from: start, to: manager}
+  - {from: manager, to: specialists}
+  - {from: specialists, to: synthesize}
+  - {from: synthesize, to: out}
