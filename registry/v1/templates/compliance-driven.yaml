@@ -1,0 +1,67 @@
+ir_version: "0.4"
+metadata:
+  name: Compliance Driven
+  description: Retrieve policy, check compliance, and route failures for review.
+  owner: template-gallery
+  rationale: User-facing template for policy-grounded compliance checks.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: [policy_kb]
+  credentials: []
+policy:
+  default_timeout_s: 120
+  default_retry: {max_attempts: 3, backoff: exponential, retry_on: [5xx, timeout, rate_limit]}
+  agent_budget: {max_iterations: 5, max_tokens: 22000, max_wall_clock_s: 240}
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+  guardrails:
+    input_filters: [pii]
+    output_filters: [policy_violation]
+    custom_patterns: ["(?i)restricted\\s+claim"]
+inputs:
+  - {name: action, type: string, required: true}
+outputs:
+  - {name: verdict, type: string}
+  - {name: rationale, type: string}
+  - {name: route, type: string}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept an action or message for compliance review.}
+  - id: retrieve_policy
+    type: retrieval
+    dataset: policy_kb
+    query: ${input.action}
+    top_k: 8
+    rerank: true
+    rationale: Retrieve relevant policy passages before checking.
+  - id: check
+    type: llm
+    model: configured-small-model
+    prompt: "Action: ${input.action}\nPolicy: ${retrieve_policy.chunks}\nReturn verdict, rationale, and fail flag."
+    temperature: 0
+    output_schema:
+      type: object
+      properties:
+        verdict: {type: string}
+        rationale: {type: string}
+        fail: {type: boolean}
+    rationale: Check the action against retrieved policy.
+  - id: route
+    type: condition
+    branches:
+      - {when: "${check.fail} == true", next: fail_out}
+    default: pass_out
+    rationale: Separate failed compliance checks from passing cases.
+  - id: fail_out
+    type: output
+    bindings: {verdict: "${check.verdict}", rationale: "${check.rationale}", route: review}
+    rationale: Return failed compliance result for review.
+  - id: pass_out
+    type: output
+    bindings: {verdict: "${check.verdict}", rationale: "${check.rationale}", route: pass}
+    rationale: Return passing compliance result.
+edges:
+  - {from: start, to: retrieve_policy}
+  - {from: retrieve_policy, to: check}
+  - {from: check, to: route}
+  - {from: route, to: fail_out, when: fail}
+  - {from: route, to: pass_out, when: pass}

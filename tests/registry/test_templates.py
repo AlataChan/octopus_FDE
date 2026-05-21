@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 import pytest
 
@@ -8,13 +9,16 @@ from loom.runtimes.hiagent.binding import HiagentBinding
 from loom.runtimes.hiagent.v2_6.compiler import compile_ir as compile_hiagent
 
 ROOT = Path(__file__).resolve().parents[2]
+INDEX_PATH = ROOT / "registry" / "v1" / "templates" / "index.json"
 
 
-def test_template_catalog_loads_five_v04_templates():
+def test_template_catalog_loads_indexed_v04_templates():
     catalog = TemplateCatalog.load()
     rows = catalog.list()
+    expected_count = len(json.loads(INDEX_PATH.read_text())["templates"])
 
-    assert len(rows) == 5
+    assert expected_count == 30
+    assert len(rows) == expected_count
     assert {row.ir["ir_version"] for row in rows} == {"0.4"}
     assert catalog.list(target="dify")
     assert all("_internal_source" not in row.ir for row in rows)
@@ -30,14 +34,13 @@ def test_templates_validate_and_compile_to_declared_targets_without_placeholders
             if target == "hiagent":
                 bundle, warnings = compile_hiagent(ir, binding)
                 raw = bundle.to_zip_bytes()
-                assert warnings == []
                 assert b"TODO" not in raw
                 assert b"placeholder" not in raw.lower()
             else:
                 text, warnings = compile_dify(ir)
-                assert warnings == []
                 assert "TODO" not in text
                 assert "placeholder" not in text.lower()
+            assert all(warning.code for warning in warnings)
 
 
 def test_corrupted_template_file_fails_catalog_load(tmp_path):

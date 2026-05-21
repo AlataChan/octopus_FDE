@@ -1,0 +1,56 @@
+ir_version: "0.4"
+metadata:
+  name: Domain Transforming Integration
+  description: Read from one system, map fields, and write to a target system.
+  owner: template-gallery
+  rationale: User-facing template for cross-domain workflow integration.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: []
+  credentials: []
+policy:
+  default_timeout_s: 120
+  default_retry: {max_attempts: 3, backoff: exponential, retry_on: [5xx, timeout, network]}
+  agent_budget: {max_iterations: 5, max_tokens: 22000, max_wall_clock_s: 240}
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+inputs:
+  - {name: source_id, type: string, required: true}
+  - {name: target_system, type: string, required: true}
+outputs:
+  - {name: mapped_payload, type: json}
+  - {name: write_status, type: string}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept source and target details for integration.}
+  - id: source_read
+    type: http
+    method: GET
+    url: https://example.invalid/fde/source/${input.source_id}
+    rationale: Read source-domain payload for transformation.
+  - id: map
+    type: llm
+    model: configured-small-model
+    prompt: "Source payload: ${source_read.body}\nTarget system: ${input.target_system}\nMap the payload to the target schema."
+    temperature: 0
+    output_schema:
+      type: object
+      properties:
+        mapped_payload: {type: object}
+        notes: {type: string}
+    rationale: Convert source-domain fields into the target system contract.
+  - id: target_write
+    type: http
+    method: POST
+    url: https://example.invalid/fde/targets/${input.target_system}/records
+    body: {payload: "${map.mapped_payload}", notes: "${map.notes}"}
+    idempotency_key: ${input.source_id}
+    rationale: Write the mapped payload to the target system.
+  - id: out
+    type: output
+    bindings: {mapped_payload: "${map.mapped_payload}", write_status: "${target_write.status}"}
+    rationale: Return mapped payload and target write status.
+edges:
+  - {from: start, to: source_read}
+  - {from: source_read, to: map}
+  - {from: map, to: target_write}
+  - {from: target_write, to: out}

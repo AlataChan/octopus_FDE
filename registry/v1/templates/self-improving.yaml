@@ -1,0 +1,60 @@
+ir_version: "0.4"
+metadata:
+  name: Self Improving
+  description: Draft an answer, fetch feedback, and refine the result.
+  owner: template-gallery
+  rationale: User-facing template for feedback-driven response improvement.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: []
+  credentials: []
+policy:
+  default_timeout_s: 120
+  default_retry: {max_attempts: 3, backoff: exponential, retry_on: [5xx, timeout, network]}
+  agent_budget: {max_iterations: 5, max_tokens: 22000, max_wall_clock_s: 240}
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+inputs:
+  - {name: task, type: string, required: true}
+outputs:
+  - {name: initial_answer, type: string}
+  - {name: refined_answer, type: string}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept a task for iterative improvement.}
+  - id: initial
+    type: llm
+    model: configured-planner-model
+    prompt: "Task: ${input.task}\nDraft a first answer and note assumptions."
+    temperature: 0.2
+    output_schema:
+      type: object
+      properties:
+        answer: {type: string}
+        assumptions: {type: string}
+    rationale: Produce a first-pass answer for feedback.
+  - id: feedback_fetch
+    type: http
+    method: POST
+    url: https://example.invalid/fde/feedback
+    body: {task: "${input.task}", answer: "${initial.answer}", assumptions: "${initial.assumptions}"}
+    idempotency_key: ${input.task}
+    rationale: Request feedback signals on the first draft.
+  - id: refine
+    type: llm
+    model: configured-planner-model
+    prompt: "Task: ${input.task}\nInitial answer: ${initial.answer}\nFeedback: ${feedback_fetch.body}\nRefine the answer."
+    temperature: 0.1
+    output_schema:
+      type: object
+      properties:
+        refined_answer: {type: string}
+    rationale: Improve the draft using external feedback.
+  - id: out
+    type: output
+    bindings: {initial_answer: "${initial.answer}", refined_answer: "${refine.refined_answer}"}
+    rationale: Return both the initial and refined answers.
+edges:
+  - {from: start, to: initial}
+  - {from: initial, to: feedback_fetch}
+  - {from: feedback_fetch, to: refine}
+  - {from: refine, to: out}

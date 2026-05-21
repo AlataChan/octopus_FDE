@@ -41,6 +41,26 @@
       "handle": "clinic_kb",
       "description": "Clinic FAQ and service-policy knowledge base (shadow vertical).",
       "scopes": ["clinic/kb", "clinic/ops"]
+    },
+    {
+      "handle": "finance_market_kb",
+      "description": "Curated public-market context, risk policy notes, and market terminology for finance-oriented templates.",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"]
+    },
+    {
+      "handle": "legal_case_law_kb",
+      "description": "General legal precedent summaries and citation snippets for legal-reasoning templates.",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"]
+    },
+    {
+      "handle": "learner_profile_kb",
+      "description": "Learning profile snapshots, course catalog summaries, and progress rubric examples.",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"]
+    },
+    {
+      "handle": "ehr_kb",
+      "description": "Structured EHR-derived feature definitions and clinical measurement references for patient analytics.",
+      "scopes": ["clinic/kb", "clinic/ops"]
     }
   ],
   "credentials": [
