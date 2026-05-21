@@ -9,6 +9,7 @@ export default function App() {
       <TopBar />
       <Routes>
         <Route element={<SessionListPage />} path="/" />
+        <Route element={<SessionListPage />} path="/sessions" />
         <Route element={<SessionDetailPage />} path="/sessions/:id" />
       </Routes>
     </main>
