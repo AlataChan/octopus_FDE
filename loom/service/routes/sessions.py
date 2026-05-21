@@ -29,7 +29,6 @@ ActorDep = Annotated[Actor, Depends(get_actor)]
 
 
 class CreateSessionRequest(BaseModel):
-    actor: str | None = None
     template_id: str | None = None
     scope: str | None = None
 
@@ -70,13 +69,11 @@ def create_session(
     request: Request,
     actor: ActorDep,
 ) -> dict[str, object]:
-    actor_id = body.actor or actor.id
-    session = request.app.state.session_store.create_session(actor_id=actor_id)
-    request.app.state.archive_writer.append(
-        session.session_id,
+    actor_id = actor.id
+    session = request.app.state.session_store.create_session_with_actor_defaults(
         actor_id=actor_id,
-        event_type="session.created",
-        payload={"actor_id": actor_id},
+        fernet=request.app.state.fernet,
+        audit_writer=_session_audit_writer(request, actor_id),
     )
     if body.template_id:
         session = _seed_session_from_template(
@@ -420,6 +417,19 @@ def _content_disposition(filename: str) -> str:
         ascii_fallback = f"artifact{ascii_fallback}"
     encoded = quote(filename, safe="")
     return f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded}'
+
+
+def _session_audit_writer(request: Request, actor_id: str):
+    def write(session_id: UUID, events: list[tuple[str, dict[str, object]]]) -> None:
+        for event_type, payload in events:
+            request.app.state.archive_writer.append(
+                session_id,
+                actor_id=actor_id,
+                event_type=cast(Any, event_type),
+                payload=payload,
+            )
+
+    return write
 
 
 @router.get("/bindings")

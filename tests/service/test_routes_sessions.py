@@ -196,6 +196,18 @@ def test_create_session_from_template_seeds_validated_ir_and_sentinel_turn(tmp_p
     assert "template_seeded" in archive
 
 
+def test_post_sessions_ignores_unknown_extra_actor_field(tmp_path):
+    client = _client(tmp_path)
+    created = client.post(
+        "/v1/sessions",
+        headers={"X-Actor-Id": "header-actor"},
+        json={"actor": "evil"},
+    ).json()
+
+    assert client.app.state.session_store.get_session(created["session_id"], actor_id="header-actor") is not None
+    assert client.app.state.session_store.get_session(created["session_id"], actor_id="evil") is None
+
+
 def test_hiagent_only_template_rejects_dify_compile(tmp_path):
     client = _client(tmp_path)
     created = client.post(
