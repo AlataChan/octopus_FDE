@@ -16,8 +16,10 @@ def _client(tmp_path) -> TestClient:
 
 def test_templates_routes_return_whitelisted_public_payloads(tmp_path):
     client = _client(tmp_path)
+    all_rows = client.get("/v1/templates").json()
     rows = client.get("/v1/templates?scope=ecommerce/kb&target=dify").json()
 
+    assert len(all_rows) == 30
     assert rows
     assert all("dify" in row["compile_targets"] for row in rows)
     assert "_internal_source" not in rows[0]

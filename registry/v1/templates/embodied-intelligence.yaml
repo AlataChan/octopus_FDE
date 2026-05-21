@@ -1,0 +1,57 @@
+ir_version: "0.4"
+metadata:
+  name: Embodied Intelligence
+  description: Interpret perception and issue a bounded action command.
+  owner: template-gallery
+  rationale: User-facing template for embodied perception-to-action loops.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: []
+  credentials: []
+policy:
+  default_timeout_s: 90
+  default_retry: {max_attempts: 3, backoff: exponential, retry_on: [5xx, timeout, network]}
+  agent_budget: {max_iterations: 4, max_tokens: 16000, max_wall_clock_s: 180}
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+inputs:
+  - {name: device_id, type: string, required: true}
+  - {name: objective, type: string, required: true}
+outputs:
+  - {name: perception, type: json}
+  - {name: action, type: string}
+  - {name: status, type: string}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept a device and objective for embodied control.}
+  - id: perception
+    type: http
+    method: GET
+    url: https://example.invalid/fde/devices/${input.device_id}/perception
+    rationale: Fetch current perception state from the embodied system.
+  - id: reason
+    type: llm
+    model: configured-small-model
+    prompt: "Objective: ${input.objective}\nPerception: ${perception.body}\nChoose the next safe action and explain status."
+    temperature: 0
+    output_schema:
+      type: object
+      properties:
+        action: {type: string}
+        status: {type: string}
+    rationale: Reason over perception and choose a bounded action command.
+  - id: action_command
+    type: http
+    method: POST
+    url: https://example.invalid/fde/devices/${input.device_id}/actions
+    body: {action: "${reason.action}", objective: "${input.objective}"}
+    idempotency_key: ${input.device_id}
+    rationale: Send the chosen action to the device command endpoint.
+  - id: out
+    type: output
+    bindings: {perception: "${perception.body}", action: "${reason.action}", status: "${reason.status}"}
+    rationale: Return perception context, action, and execution status.
+edges:
+  - {from: start, to: perception}
+  - {from: perception, to: reason}
+  - {from: reason, to: action_command}
+  - {from: action_command, to: out}

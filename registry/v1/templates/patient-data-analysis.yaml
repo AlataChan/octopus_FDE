@@ -1,0 +1,69 @@
+ir_version: "0.4"
+metadata:
+  name: Patient Data Analysis
+  description: Fetch patient data, calculate risk features, and explain trends.
+  owner: template-gallery
+  rationale: User-facing template for clinic analytics with auditable decisions.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: [ehr_kb]
+  credentials: []
+policy:
+  default_timeout_s: 120
+  default_retry: {max_attempts: 3, backoff: exponential, retry_on: [5xx, timeout, network]}
+  agent_budget: {max_iterations: 5, max_tokens: 24000, max_wall_clock_s: 240}
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+  guardrails:
+    input_filters: [pii]
+    output_filters: [medical_advice]
+    custom_patterns: []
+inputs:
+  - {name: patient_id, type: string, required: true}
+  - {name: analysis_window, type: string, required: true}
+outputs:
+  - {name: risk_summary, type: string}
+  - {name: record_count, type: number}
+  - {name: risk_score, type: number}
+  - {name: recommendation, type: string}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept a patient identifier and analysis window.}
+  - id: ehr_fetch
+    type: http
+    method: GET
+    url: https://example.invalid/fde/ehr/${input.patient_id}?window=${input.analysis_window}
+    rationale: Fetch de-identified patient measurements for the requested window.
+  - id: stats
+    type: code
+    language: python
+    source: |
+      def main(records):
+          values = records if isinstance(records, list) else []
+          return {"count": len(values), "risk_score": 0.5 if values else 0.0}
+    inputs: {records: "${ehr_fetch.body}"}
+    output_schema:
+      type: object
+      properties:
+        count: {type: integer}
+        risk_score: {type: number}
+    rationale: Calculate compact risk features from the patient record payload.
+  - id: predict
+    type: llm
+    model: configured-small-model
+    prompt: "Patient: ${input.patient_id}\nWindow: ${input.analysis_window}\nRecord count: ${stats.count}\nRisk score: ${stats.risk_score}\nExplain the trend and recommend clinician follow-up if needed."
+    temperature: 0
+    output_schema:
+      type: object
+      properties:
+        risk_summary: {type: string}
+        recommendation: {type: string}
+    rationale: Interpret calculated features for clinician review.
+  - id: out
+    type: output
+    bindings: {risk_summary: "${predict.risk_summary}", record_count: "${stats.count}", risk_score: "${stats.risk_score}", recommendation: "${predict.recommendation}"}
+    rationale: Return risk summary, computed statistics, and follow-up recommendation.
+edges:
+  - {from: start, to: ehr_fetch}
+  - {from: ehr_fetch, to: stats}
+  - {from: stats, to: predict}
+  - {from: predict, to: out}

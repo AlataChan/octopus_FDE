@@ -242,6 +242,94 @@
       "compile_targets": ["hiagent", "dify"],
       "_internal_source": "Ahmad (2026) Ch.11 — Physical World Sensing Agent",
       "_internal_pattern": "trigger(schedule) -> http -> llm -> output"
+    },
+    {
+      "id": "ethical-explainable",
+      "name": {"zh": "伦理可解释", "en": "Ethical Explainable"},
+      "description": {"zh": "生成透明决策，并把安全风险转人工复核。", "en": "Make transparent decisions and route safety risks to review."},
+      "tags": ["ethics", "explainability", "guardrails"],
+      "ir_file": "ethical-explainable.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.12 — Ethical Explainable Agent",
+      "_internal_pattern": "trigger -> llm -> llm -> condition -> output"
+    },
+    {
+      "id": "medical-knowledge",
+      "name": {"zh": "医疗知识", "en": "Medical Knowledge"},
+      "description": {"zh": "检索诊所知识并生成谨慎、有依据的回答。", "en": "Retrieve clinical knowledge and produce a cautious grounded answer."},
+      "tags": ["medical", "retrieval", "clinic"],
+      "ir_file": "medical-knowledge.yaml",
+      "scopes": ["clinic/kb", "clinic/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.13 — Medical Knowledge Agent",
+      "_internal_pattern": "trigger -> retrieval -> llm -> output"
+    },
+    {
+      "id": "patient-data-analysis",
+      "name": {"zh": "患者数据分析", "en": "Patient Data Analysis"},
+      "description": {"zh": "获取患者数据、计算指标并解释风险趋势。", "en": "Fetch patient data, compute features, and explain risk trends."},
+      "tags": ["healthcare", "analytics", "ehr"],
+      "ir_file": "patient-data-analysis.yaml",
+      "scopes": ["clinic/kb", "clinic/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.13 — Patient Data Analysis Agent",
+      "_internal_pattern": "trigger -> http -> code -> llm -> output"
+    },
+    {
+      "id": "financial-market",
+      "name": {"zh": "金融市场", "en": "Financial Market"},
+      "description": {"zh": "定时获取行情并输出风险简报。", "en": "Poll market data on a schedule and produce a risk brief."},
+      "tags": ["finance", "market", "risk"],
+      "ir_file": "financial-market.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.14 — Financial Market Agent",
+      "_internal_pattern": "trigger(schedule) -> http -> llm -> output"
+    },
+    {
+      "id": "legal-knowledge",
+      "name": {"zh": "法律知识", "en": "Legal Knowledge"},
+      "description": {"zh": "检索判例知识并生成带引用的法律推理。", "en": "Retrieve case-law knowledge and produce cited legal reasoning."},
+      "tags": ["legal", "retrieval", "case-law"],
+      "ir_file": "legal-knowledge.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.14 — Legal Knowledge Agent",
+      "_internal_pattern": "trigger -> retrieval -> llm -> output"
+    },
+    {
+      "id": "personalized-learning",
+      "name": {"zh": "个性化学习", "en": "Personalized Learning"},
+      "description": {"zh": "读取学习者画像并生成自适应课程计划。", "en": "Fetch a learner profile and create an adaptive curriculum plan."},
+      "tags": ["learning", "personalization", "curriculum"],
+      "ir_file": "personalized-learning.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.15 — Personalized Learning Agent",
+      "_internal_pattern": "trigger -> http -> llm -> output"
+    },
+    {
+      "id": "embodied-intelligence",
+      "name": {"zh": "具身智能", "en": "Embodied Intelligence"},
+      "description": {"zh": "感知环境、推理动作并下发受控指令。", "en": "Interpret perception, reason, and issue a bounded action command."},
+      "tags": ["embodied", "perception", "action"],
+      "ir_file": "embodied-intelligence.yaml",
+      "scopes": ["ecommerce/ops"],
+      "compile_targets": ["hiagent"],
+      "_internal_source": "Ahmad (2026) Ch.16 — Embodied Intelligence Agent",
+      "_internal_pattern": "trigger -> http -> llm -> http -> output"
+    },
+    {
+      "id": "domain-transforming-integration",
+      "name": {"zh": "领域转换集成", "en": "Domain Transforming Integration"},
+      "description": {"zh": "读取源系统、映射字段并写入目标系统。", "en": "Read from a source system, map fields, and write to a target system."},
+      "tags": ["integration", "mapping", "automation"],
+      "ir_file": "domain-transforming-integration.yaml",
+      "scopes": ["ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.16 — Domain-Transforming Integration Agent",
+      "_internal_pattern": "trigger -> http -> llm -> http -> output"
     }
   ]
 }

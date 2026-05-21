@@ -17,6 +17,7 @@ def test_template_catalog_loads_indexed_v04_templates():
     rows = catalog.list()
     expected_count = len(json.loads(INDEX_PATH.read_text())["templates"])
 
+    assert expected_count == 30
     assert len(rows) == expected_count
     assert {row.ir["ir_version"] for row in rows} == {"0.4"}
     assert catalog.list(target="dify")

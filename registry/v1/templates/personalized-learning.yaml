@@ -1,0 +1,48 @@
+ir_version: "0.4"
+metadata:
+  name: Personalized Learning
+  description: Fetch a learner profile and create an adaptive curriculum plan.
+  owner: template-gallery
+  rationale: User-facing template for education personalization.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: [learner_profile_kb]
+  credentials: []
+policy:
+  default_timeout_s: 120
+  default_retry: {max_attempts: 3, backoff: exponential, retry_on: [5xx, timeout, network]}
+  agent_budget: {max_iterations: 5, max_tokens: 22000, max_wall_clock_s: 240}
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+inputs:
+  - {name: learner_id, type: string, required: true}
+  - {name: goal, type: string, required: true}
+outputs:
+  - {name: curriculum, type: string}
+  - {name: profile_summary, type: string}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept a learner and goal for personalized planning.}
+  - id: learner_profile
+    type: http
+    method: GET
+    url: https://example.invalid/fde/learners/${input.learner_id}/profile
+    rationale: Fetch learner profile data used for curriculum adaptation.
+  - id: curriculum
+    type: llm
+    model: configured-planner-model
+    prompt: "Learner profile: ${learner_profile.body}\nGoal: ${input.goal}\nCreate a paced curriculum with checkpoints."
+    temperature: 0.1
+    output_schema:
+      type: object
+      properties:
+        curriculum: {type: string}
+        profile_summary: {type: string}
+    rationale: Generate a curriculum adapted to profile and stated goal.
+  - id: out
+    type: output
+    bindings: {curriculum: "${curriculum.curriculum}", profile_summary: "${curriculum.profile_summary}"}
+    rationale: Return the personalized curriculum and profile summary.
+edges:
+  - {from: start, to: learner_profile}
+  - {from: learner_profile, to: curriculum}
+  - {from: curriculum, to: out}

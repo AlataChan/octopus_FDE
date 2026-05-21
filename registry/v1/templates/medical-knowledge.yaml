@@ -1,0 +1,54 @@
+ir_version: "0.4"
+metadata:
+  name: Medical Knowledge
+  description: Retrieve clinical knowledge and produce a cautious reasoning note.
+  owner: template-gallery
+  rationale: User-facing template for clinic knowledge assistance with bounded claims.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: [clinic_kb]
+  credentials: []
+policy:
+  default_timeout_s: 120
+  default_retry: {max_attempts: 3, backoff: exponential, retry_on: [5xx, timeout, rate_limit]}
+  agent_budget: {max_iterations: 4, max_tokens: 20000, max_wall_clock_s: 240}
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+  guardrails:
+    input_filters: [pii]
+    output_filters: [medical_advice]
+    custom_patterns: ["(?i)diagnose\\s+without\\s+clinician"]
+inputs:
+  - {name: question, type: string, required: true}
+outputs:
+  - {name: answer, type: string}
+  - {name: evidence, type: chunks}
+  - {name: caveat, type: string}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept a clinical knowledge question.}
+  - id: retrieve_clinical
+    type: retrieval
+    dataset: clinic_kb
+    query: ${input.question}
+    top_k: 8
+    rerank: true
+    rationale: Retrieve clinic knowledge passages relevant to the question.
+  - id: reason
+    type: llm
+    model: configured-small-model
+    prompt: "Question: ${input.question}\nClinical evidence: ${retrieve_clinical.chunks}\nAnswer cautiously and include a clinician review caveat."
+    temperature: 0
+    output_schema:
+      type: object
+      properties:
+        answer: {type: string}
+        caveat: {type: string}
+    rationale: Generate a cautious answer grounded in retrieved clinical knowledge.
+  - id: out
+    type: output
+    bindings: {answer: "${reason.answer}", evidence: "${retrieve_clinical.chunks}", caveat: "${reason.caveat}"}
+    rationale: Return the grounded medical knowledge response and caveat.
+edges:
+  - {from: start, to: retrieve_clinical}
+  - {from: retrieve_clinical, to: reason}
+  - {from: reason, to: out}
