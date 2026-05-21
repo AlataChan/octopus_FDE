@@ -190,6 +190,27 @@ class SessionStore:
             ).fetchone()
         return _session_row(row) if row else None
 
+    def update_session_title(
+        self,
+        session_id: UUID | str,
+        *,
+        actor_id: str,
+        title: str | None,
+    ) -> SessionRow:
+        self.require_session(session_id, actor_id=actor_id)
+        with self._connect() as con:
+            con.execute(
+                """
+                UPDATE sessions
+                SET title = ?, updated_at = ?
+                WHERE session_id = ? AND actor_id = ?
+                """,
+                (title, _now(), str(session_id), actor_id),
+            )
+        row = self.get_session(session_id, actor_id=actor_id)
+        assert row is not None
+        return row
+
     def set_llm_config(
         self,
         session_id: UUID | str,
@@ -443,6 +464,7 @@ class SessionStore:
                     state TEXT NOT NULL,
                     latest_ir_json TEXT,
                     latest_ir_sha256 TEXT,
+                    title TEXT,
                     llm_api_key_encrypted BLOB,
                     llm_base_url TEXT,
                     llm_model TEXT,
@@ -493,6 +515,9 @@ class SessionStore:
             columns = {row["name"] for row in con.execute("PRAGMA table_info(artifacts)").fetchall()}
             if "compile_warnings_json" not in columns:
                 con.execute("ALTER TABLE artifacts ADD COLUMN compile_warnings_json TEXT NOT NULL DEFAULT '[]'")
+            session_columns = {row["name"] for row in con.execute("PRAGMA table_info(sessions)").fetchall()}
+            if "title" not in session_columns:
+                con.execute("ALTER TABLE sessions ADD COLUMN title TEXT")
 
     @staticmethod
     def _get_actor_llm_config_con(
@@ -518,6 +543,7 @@ def _session_row(row: sqlite3.Row) -> SessionRow:
         state=row["state"],
         latest_ir_json=row["latest_ir_json"],
         latest_ir_sha256=row["latest_ir_sha256"],
+        title=row["title"] if "title" in row.keys() else None,
         llm_api_key_encrypted=row["llm_api_key_encrypted"],
         llm_base_url=row["llm_base_url"],
         llm_model=row["llm_model"],

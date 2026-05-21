@@ -220,3 +220,110 @@ def test_hiagent_only_template_rejects_dify_compile(tmp_path):
     )
     assert resp.status_code == 400
     assert "does not support compile target dify" in resp.text
+
+
+def test_display_title_uses_user_title_when_set(tmp_path):
+    client = _client(tmp_path)
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+
+    patched = client.patch(f"/v1/sessions/{sid}", json={"title": "  我的流程  "})
+    assert patched.status_code == 200
+    assert patched.json()["title"] == "我的流程"
+    assert patched.json()["display_title"] == "我的流程"
+
+    detail = client.get(f"/v1/sessions/{sid}").json()
+    assert detail["title"] == "我的流程"
+    assert detail["display_title"] == "我的流程"
+    listed = client.get("/v1/sessions").json()
+    assert listed[0]["display_title"] == "我的流程"
+
+
+def test_display_title_falls_back_to_template_name_for_seeded_session(tmp_path):
+    client = _client(tmp_path)
+    created = client.post(
+        "/v1/sessions",
+        json={"template_id": "knowledge-retrieval-rag", "scope": "ecommerce/kb"},
+    ).json()
+    sid = created["session_id"]
+
+    detail = client.get(f"/v1/sessions/{sid}").json()
+    assert detail["display_title"] == "知识检索（RAG）"
+    listed = client.get("/v1/sessions").json()
+    assert listed[0]["display_title"] == "知识检索（RAG）"
+
+
+def test_display_title_falls_back_to_first_user_message_truncated(tmp_path):
+    client = _client(tmp_path)
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+    message = "  这是一个很长的用户消息用于测试标题截断🙂继续很多字  "
+    client.app.state.session_store.create_turn(
+        sid,
+        actor_id="single-user",
+        user_message=message,
+        ir_before=None,
+    )
+
+    expected = message.strip()[:24]
+    detail = client.get(f"/v1/sessions/{sid}").json()
+    assert detail["display_title"] == expected
+
+
+def test_display_title_falls_back_to_short_id(tmp_path):
+    client = _client(tmp_path)
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+
+    detail = client.get(f"/v1/sessions/{sid}").json()
+    assert detail["display_title"] == f"Session {sid[:8]}"
+    listed = client.get("/v1/sessions").json()
+    assert listed[0]["display_title"] == f"Session {sid[:8]}"
+
+
+def test_patch_session_title_persists_and_appears_in_display_title(tmp_path):
+    client = _client(tmp_path)
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+
+    resp = client.patch(f"/v1/sessions/{sid}", json={"title": "  TCM triage flow  "})
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["title"] == "TCM triage flow"
+    assert payload["display_title"] == "TCM triage flow"
+    detail = client.get(f"/v1/sessions/{sid}").json()
+    assert detail["title"] == "TCM triage flow"
+    assert detail["display_title"] == "TCM triage flow"
+
+
+def test_patch_session_title_null_clears_to_derivation(tmp_path):
+    client = _client(tmp_path)
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+    client.app.state.session_store.create_turn(
+        sid,
+        actor_id="single-user",
+        user_message="derive from this message",
+        ir_before=None,
+    )
+    assert client.patch(f"/v1/sessions/{sid}", json={"title": "custom"}).status_code == 200
+
+    resp = client.patch(f"/v1/sessions/{sid}", json={"title": None})
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["title"] is None
+    assert payload["display_title"] == "derive from this message"
+
+
+def test_patch_session_title_rejects_too_long(tmp_path):
+    client = _client(tmp_path)
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+
+    resp = client.patch(f"/v1/sessions/{sid}", json={"title": "x" * 81})
+
+    assert resp.status_code == 422
+
+
+def test_patch_session_title_rejects_control_characters(tmp_path):
+    client = _client(tmp_path)
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+
+    assert client.patch(f"/v1/sessions/{sid}", json={"title": "bad\nname"}).status_code == 422
+    assert client.patch(f"/v1/sessions/{sid}", json={"title": "<b>bad</b>"}).status_code == 422

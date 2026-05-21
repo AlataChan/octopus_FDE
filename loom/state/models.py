@@ -18,6 +18,7 @@ class SessionRow(BaseModel):
     state: str
     latest_ir_json: str | None = None
     latest_ir_sha256: str | None = None
+    title: str | None = None
     llm_api_key_encrypted: bytes | None = None
     llm_base_url: str | None = None
     llm_model: str | None = None
