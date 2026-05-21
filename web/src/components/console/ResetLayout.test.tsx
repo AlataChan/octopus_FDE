@@ -46,11 +46,44 @@ vi.mock("../../hooks/useSession", () => ({
     ir: { data: { ir: null, validation_errors: [], validator_status: "draft" } },
     session: {
       data: {
-        artifacts: [],
+        artifacts: [
+          {
+            actor_id: "single-user",
+            artifact_id: "artifact-1",
+            artifact_kind: "yaml",
+            artifact_name: "Knowledge Retrieval RAG.yaml",
+            artifact_path: "/tmp/knowledge-retrieval-rag.yaml",
+            artifact_size: 2048,
+            binding_handle: "test",
+            compile_warnings: [],
+            created_at: "2026-05-21T00:00:00Z",
+            mode: "chatflow",
+            sha256: "abc1234567890def",
+            session_id: "session-1",
+            target: "hiagent",
+            workflow_id: "workflow-1"
+          },
+          {
+            actor_id: "single-user",
+            artifact_id: "artifact-2",
+            artifact_kind: "zip",
+            artifact_name: "Knowledge Retrieval RAG.zip",
+            artifact_path: "/tmp/knowledge-retrieval-rag.zip",
+            artifact_size: 4096,
+            binding_handle: "test",
+            compile_warnings: [],
+            created_at: "2026-05-21T00:01:00Z",
+            mode: "chatflow",
+            sha256: "def1234567890abc",
+            session_id: "session-1",
+            target: "hiagent",
+            workflow_id: "workflow-2"
+          }
+        ],
         display_title: "Test session",
         llm_model: "test-model",
         session_id: "session-1",
-        state: "draft"
+        state: "compiled"
       }
     },
     turns: { data: [] },
@@ -121,6 +154,16 @@ describe("SessionDetailPage reset layout", () => {
     renderPage();
 
     expect(screen.getByTestId("panel-group")).toBeInTheDocument();
+  });
+
+  it("gives the compile pane height so compiled artifacts stay reachable", () => {
+    renderPage();
+
+    const compilePane = screen.getByTestId("context-compile-pane");
+    expect(compilePane).toHaveClass("flex-1");
+    expect(compilePane).toHaveClass("min-h-[360px]");
+    expect(screen.getByText("Knowledge Retrieval RAG.yaml")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /下载|Download/i })).toHaveLength(2);
   });
 
   it("opens the mobile sidebar as a full-width sheet", () => {
