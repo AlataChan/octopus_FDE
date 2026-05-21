@@ -224,8 +224,8 @@ export default function SessionDetailPage() {
                   <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border/45 transition-colors group-hover:bg-accent/80 group-data-[resize-handle-state=drag]:bg-accent" />
                 </PanelResizeHandle>
                 <Panel className="flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto p-3" defaultSize={40} id="context" minSize={28} order={2}>
-                  <div className="min-h-[320px] flex-1 overflow-hidden">{irCol}</div>
-                  <div className="shrink-0 overflow-visible">{compileCol}</div>
+                  <div className="min-h-[320px] flex-1 overflow-hidden" data-testid="context-ir-pane">{irCol}</div>
+                  <div className="min-h-[360px] flex-1 overflow-hidden" data-testid="context-compile-pane">{compileCol}</div>
                 </Panel>
               </PanelGroup>
             </div>
