@@ -1,0 +1,42 @@
+ir_version: "0.4"
+metadata:
+  name: Vision Language
+  description: Analyze an image and return visual reasoning.
+  owner: template-gallery
+  rationale: User-facing template for image-grounded reasoning.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: []
+  credentials: []
+policy:
+  default_timeout_s: 120
+  default_retry: {max_attempts: 2, backoff: exponential, retry_on: [5xx, timeout, network]}
+  agent_budget: {max_iterations: 4, max_tokens: 18000, max_wall_clock_s: 220}
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+inputs:
+  - {name: image, type: file, required: true}
+  - {name: question, type: string, required: true}
+outputs:
+  - {name: answer, type: string}
+  - {name: observations, type: json}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept an image and visual question.}
+  - id: vision
+    type: llm
+    model: configured-vision-model
+    prompt: "Image: ${input.image}\nQuestion: ${input.question}\nDescribe observations and answer."
+    temperature: 0.1
+    output_schema:
+      type: object
+      properties:
+        answer: {type: string}
+        observations: {type: object}
+    rationale: Reason over image content and produce an answer.
+  - id: out
+    type: output
+    bindings: {answer: "${vision.answer}", observations: "${vision.observations}"}
+    rationale: Return visual answer and structured observations.
+edges:
+  - {from: start, to: vision}
+  - {from: vision, to: out}

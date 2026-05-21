@@ -165,6 +165,83 @@
       "compile_targets": ["hiagent", "dify"],
       "_internal_source": "Ahmad (2026) Ch.9 — Compliance-Driven Agent",
       "_internal_pattern": "trigger -> retrieval -> llm -> condition -> output"
+    },
+    {
+      "id": "self-improving",
+      "name": {"zh": "自我改进", "en": "Self Improving"},
+      "description": {"zh": "先生成初稿，再获取反馈并精炼结果。", "en": "Draft an answer, fetch feedback, and refine the result."},
+      "tags": ["feedback", "refinement", "quality"],
+      "ir_file": "self-improving.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.9 — Self-Improving Agent",
+      "_internal_pattern": "trigger -> llm -> http -> llm -> output"
+    },
+    {
+      "id": "conversational",
+      "name": {"zh": "对话智能体", "en": "Conversational"},
+      "description": {"zh": "检索上下文并生成有依据的回复。", "en": "Retrieve conversation context and produce a grounded reply."},
+      "tags": ["conversation", "context", "reply"],
+      "ir_file": "conversational.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.10 — Conversational Agent",
+      "_internal_pattern": "trigger -> retrieval -> llm -> output"
+    },
+    {
+      "id": "content-creation",
+      "name": {"zh": "内容创作", "en": "Content Creation"},
+      "description": {"zh": "生成内容初稿、复核并输出成稿。", "en": "Draft content, review it, and return a polished version."},
+      "tags": ["content", "drafting", "review"],
+      "ir_file": "content-creation.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.10 — Content Creation Agent",
+      "_internal_pattern": "trigger -> llm -> llm -> output"
+    },
+    {
+      "id": "recommendation",
+      "name": {"zh": "推荐智能体", "en": "Recommendation"},
+      "description": {"zh": "检索候选商品并对推荐进行评分。", "en": "Retrieve catalog candidates and score recommendations."},
+      "tags": ["recommendation", "catalog", "scoring"],
+      "ir_file": "recommendation.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.10 — Recommendation Agent",
+      "_internal_pattern": "trigger -> retrieval -> llm -> output"
+    },
+    {
+      "id": "vision-language",
+      "name": {"zh": "视觉语言", "en": "Vision Language"},
+      "description": {"zh": "分析图片并返回视觉推理结果。", "en": "Analyze an image and return visual reasoning."},
+      "tags": ["vision", "multimodal", "image"],
+      "ir_file": "vision-language.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent"],
+      "_internal_source": "Ahmad (2026) Ch.11 — Vision-Language Agent",
+      "_internal_pattern": "trigger(file) -> llm -> output"
+    },
+    {
+      "id": "audio-processing",
+      "name": {"zh": "音频处理", "en": "Audio Processing"},
+      "description": {"zh": "转写音频并分析转写文本。", "en": "Transcribe audio and analyze the transcript."},
+      "tags": ["audio", "transcription", "analysis"],
+      "ir_file": "audio-processing.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent"],
+      "_internal_source": "Ahmad (2026) Ch.11 — Audio Processing Agent",
+      "_internal_pattern": "trigger(file) -> http -> llm -> output"
+    },
+    {
+      "id": "physical-world-sensing",
+      "name": {"zh": "物理世界感知", "en": "Physical World Sensing"},
+      "description": {"zh": "按计划轮询传感器并解释读数。", "en": "Poll sensor data on a schedule and interpret the result."},
+      "tags": ["sensing", "schedule", "iot"],
+      "ir_file": "physical-world-sensing.yaml",
+      "scopes": ["ecommerce/kb", "ecommerce/ops"],
+      "compile_targets": ["hiagent", "dify"],
+      "_internal_source": "Ahmad (2026) Ch.11 — Physical World Sensing Agent",
+      "_internal_pattern": "trigger(schedule) -> http -> llm -> output"
     }
   ]
 }

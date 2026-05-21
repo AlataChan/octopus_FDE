@@ -1,0 +1,48 @@
+ir_version: "0.4"
+metadata:
+  name: Audio Processing
+  description: Transcribe audio and analyze the transcript.
+  owner: template-gallery
+  rationale: User-facing template for audio-to-insight workflows.
+registry_ref:
+  registry_version: sha:0000000
+  tools: []
+  datasets: []
+  credentials: []
+policy:
+  default_timeout_s: 180
+  default_retry: {max_attempts: 2, backoff: exponential, retry_on: [5xx, timeout, network]}
+  agent_budget: {max_iterations: 4, max_tokens: 20000, max_wall_clock_s: 260}
+  audit: {log_inputs: false, log_decisions: true, retention_days: 90}
+inputs:
+  - {name: audio, type: file, required: true}
+outputs:
+  - {name: transcript, type: string}
+  - {name: analysis, type: string}
+nodes:
+  - {id: start, type: trigger, mode: manual, rationale: Accept an audio file for processing.}
+  - id: transcribe
+    type: http
+    method: POST
+    url: https://example.invalid/fde/audio/transcribe
+    body: {audio: "${input.audio}"}
+    idempotency_key: ${input.audio}
+    rationale: Convert the audio file into a transcript.
+  - id: analyze
+    type: llm
+    model: configured-small-model
+    prompt: "Transcript: ${transcribe.body}\nSummarize intent, key facts, and follow-up actions."
+    temperature: 0.1
+    output_schema:
+      type: object
+      properties:
+        analysis: {type: string}
+    rationale: Analyze the transcript for useful signals.
+  - id: out
+    type: output
+    bindings: {transcript: "${transcribe.body}", analysis: "${analyze.analysis}"}
+    rationale: Return transcript and analysis.
+edges:
+  - {from: start, to: transcribe}
+  - {from: transcribe, to: analyze}
+  - {from: analyze, to: out}
