@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "../../lib/i18n";
 import SessionDetailPage from "../../pages/sessions/[id]";
@@ -33,6 +33,22 @@ vi.mock("react-resizable-panels", () => ({
   }) => (
     <div aria-label={ariaLabel} role="separator">
       {children}
+    </div>
+  )
+}));
+
+vi.mock("../../components/console/IRColumn", () => ({
+  IRColumn: ({
+    selectedNodeId,
+    onSelectedNodeIdChange
+  }: {
+    selectedNodeId: string | null;
+    onSelectedNodeIdChange: (nodeId: string | null) => void;
+  }) => (
+    <div data-selected-node={selectedNodeId || ""} data-testid="mock-ir-column">
+      <button type="button" onClick={() => onSelectedNodeIdChange("answer")}>
+        select answer node
+      </button>
     </div>
   )
 }));
@@ -135,6 +151,22 @@ describe("SessionDetailPage reset layout", () => {
     );
   }
 
+  function renderPageWithRouteSwitcher() {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/sessions/session-1"]}>
+          <Link to="/sessions/session-2">Switch session</Link>
+          <Routes>
+            <Route element={<SessionDetailPage />} path="/sessions/:id" />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
   it("clears saved panel layout and remounts the panel group", async () => {
     renderPage();
 
@@ -177,6 +209,17 @@ describe("SessionDetailPage reset layout", () => {
     const sidebar = screen.getByTestId("sessions-sidebar");
     expect(sidebar).toHaveAttribute("data-collapsed", "false");
     expect(sidebar).toHaveClass("w-[220px]");
+  });
+
+  it("resets the selected flow node when switching sessions", () => {
+    renderPageWithRouteSwitcher();
+
+    fireEvent.click(screen.getByRole("button", { name: "select answer node" }));
+    expect(screen.getByTestId("mock-ir-column")).toHaveAttribute("data-selected-node", "answer");
+
+    fireEvent.click(screen.getByRole("link", { name: "Switch session" }));
+
+    expect(screen.getByTestId("mock-ir-column")).toHaveAttribute("data-selected-node", "");
   });
 });
 

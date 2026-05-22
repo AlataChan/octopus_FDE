@@ -1,0 +1,22 @@
+---
+name: cycle
+ir:
+  nodes:
+    - {id: start, type: trigger, next: review}
+    - {id: review, type: llm, next: start}
+---
+name: missing-trigger
+ir:
+  nodes:
+    - {id: answer, type: llm}
+    - {id: out, type: output}
+  edges:
+    - {from: answer, to: out}
+---
+name: invalid-node-type
+ir:
+  nodes:
+    - {id: start, type: trigger}
+    - {id: mystery, type: teleport}
+  edges:
+    - {from: start, to: mystery}

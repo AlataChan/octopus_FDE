@@ -17,6 +17,7 @@ export function IRView({ errors, highlightedPath, ir, status }: Props) {
   const lines = text.split("\n");
   const pathParts = highlightedPath ? highlightedPath.split(".") : [];
   const highlightKey = pathParts.length ? pathParts[pathParts.length - 1].replace(/\[\d+\]/g, "") : null;
+  const highlightedNodeId = highlightedPath?.match(/^nodes\.([A-Za-z0-9_-]+)$/)?.[1] || null;
   return (
     <section className="flex h-full min-h-0 flex-col bg-bg-app/75 text-fg" data-ir-root>
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/30 px-4 py-3">
@@ -33,8 +34,10 @@ export function IRView({ errors, highlightedPath, ir, status }: Props) {
       <pre className="scroll-mask-y min-h-0 flex-1 overflow-auto p-0 font-mono text-xs leading-5 tabular-nums">
         {lines.map((line, index) => {
           const linePath = line.match(/^\s*([A-Za-z0-9_-]+):/)?.[1];
+          const lineNodeId = nodeIdFromYamlLine(line);
           const isHighlighted =
-            Boolean(highlightKey) && line.trimStart().startsWith(`${highlightKey}:`);
+            (Boolean(highlightKey) && line.trimStart().startsWith(`${highlightKey}:`)) ||
+            (Boolean(highlightedNodeId) && lineNodeId === highlightedNodeId);
           return (
             <span
               className={
@@ -43,6 +46,7 @@ export function IRView({ errors, highlightedPath, ir, status }: Props) {
                   : "grid grid-cols-[3rem_1fr]"
               }
               data-ir-line
+              data-ir-node-id={lineNodeId}
               data-ir-path={linePath}
               key={`${index}-${line}`}
             >
@@ -55,5 +59,12 @@ export function IRView({ errors, highlightedPath, ir, status }: Props) {
         })}
       </pre>
     </section>
+  );
+}
+
+function nodeIdFromYamlLine(line: string): string | undefined {
+  return (
+    line.match(/^\s*-\s+id:\s*["']?([A-Za-z0-9_-]+)["']?/)?.[1] ||
+    line.match(/^\s*id:\s*["']?([A-Za-z0-9_-]+)["']?/)?.[1]
   );
 }
