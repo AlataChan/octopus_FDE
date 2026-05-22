@@ -1,36 +1,60 @@
-import { type KeyboardEvent, useState } from "react";
+import { type KeyboardEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { IRDiffResponse, ValidationFailure } from "../../lib/types";
+import type { CompileWarning, IRDiffResponse, ValidationFailure } from "../../lib/types";
+import {
+  findNodeById,
+  nodeIdFromPath,
+  type FlowDiffSummary,
+  type LoomIR
+} from "../../lib/flow-layout";
 import { Card, CardHeader } from "../ui/Card";
 import { Chip } from "../ui/Chip";
+import { FlowCanvas } from "./FlowCanvas";
 import { IRDiffView } from "./IRDiffView";
 import { IRView } from "./IRView";
+import { NodeInspectDrawer } from "./NodeInspectDrawer";
 import { ValidatorPanel } from "./ValidatorPanel";
 
 type Props = {
   compileWarningCount?: number;
+  compileWarnings?: CompileWarning[];
+  diffSummary?: FlowDiffSummary | null;
   diff: IRDiffResponse | null;
   errors: ValidationFailure[];
   highlightedPath?: string | null;
   ir: unknown | null;
+  onSelectedNodeIdChange: (nodeId: string | null) => void;
   onSelectPath: (path: string) => void;
+  resetKey?: string;
+  selectedNodeId: string | null;
   status: string;
 };
 
-const tabs = ["yaml", "issues", "diff"] as const;
+const tabs = ["flow", "yaml", "issues", "diff"] as const;
 type TabId = (typeof tabs)[number];
 
 export function IRColumn({
   compileWarningCount = 0,
+  compileWarnings = [],
+  diffSummary = null,
   diff,
   errors,
   highlightedPath,
   ir,
+  onSelectedNodeIdChange,
   onSelectPath,
+  resetKey,
+  selectedNodeId,
   status
 }: Props) {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<TabId>("yaml");
+  const [activeTab, setActiveTab] = useState<TabId>("flow");
+  const flowIr = isLoomIR(ir) ? ir : null;
+  const selectedNode = findNodeById(flowIr, selectedNodeId);
+
+  useEffect(() => {
+    setActiveTab("flow");
+  }, [resetKey]);
 
   function tabId(tab: TabId) {
     return `ir-tab-${tab}`;
@@ -74,6 +98,28 @@ export function IRColumn({
         });
       }
     });
+  }
+
+  function handleIssueSelectPath(path: string) {
+    onSelectPath(path);
+    const nodeId = nodeIdFromPath(path, flowIr);
+    if (nodeId) {
+      onSelectedNodeIdChange(nodeId);
+      setActiveTab("flow");
+      return;
+    }
+    setActiveTab("yaml");
+  }
+
+  function handleShowYaml(nodeId: string) {
+    onSelectedNodeIdChange(nodeId);
+    onSelectPath(`nodes.${nodeId}`);
+    setActiveTab("yaml");
+  }
+
+  function handleShowIssues(nodeId: string) {
+    onSelectedNodeIdChange(nodeId);
+    setActiveTab("issues");
   }
 
   function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, tab: TabId) {
@@ -154,19 +200,43 @@ export function IRColumn({
       </div>
       <div
         aria-labelledby={tabId(activeTab)}
-        className="min-h-0 flex-1 overflow-hidden"
+        className="relative min-h-0 flex-1 overflow-hidden"
         id={panelId(activeTab)}
         role="tabpanel"
         tabIndex={0}
       >
-        {activeTab === "yaml" ? (
+        {activeTab === "flow" ? (
+          <>
+            <FlowCanvas
+              diffSummary={diffSummary}
+              errors={errors}
+              ir={flowIr}
+              selectedNodeId={selectedNodeId}
+              warnings={compileWarnings}
+              onNodeSelect={onSelectedNodeIdChange}
+              onShowIssues={handleShowIssues}
+              onSwitchToYaml={() => setActiveTab("yaml")}
+            />
+            <NodeInspectDrawer
+              ir={flowIr}
+              node={selectedNode}
+              onClose={() => onSelectedNodeIdChange(null)}
+              onShowIssues={handleShowIssues}
+              onShowYaml={handleShowYaml}
+            />
+          </>
+        ) : activeTab === "yaml" ? (
           <IRView errors={errors} highlightedPath={highlightedPath} ir={ir} status={status} />
         ) : activeTab === "issues" ? (
-          <ValidatorPanel errors={errors} variant="embedded" onSelectPath={handleSelectPath} />
+          <ValidatorPanel errors={errors} variant="embedded" onSelectPath={handleIssueSelectPath} />
         ) : (
           <IRDiffView diff={diff} mode="embedded" onSelectPath={handleSelectPath} />
         )}
       </div>
     </Card>
   );
+}
+
+function isLoomIR(ir: unknown): ir is LoomIR {
+  return Boolean(ir && typeof ir === "object" && Array.isArray((ir as { nodes?: unknown }).nodes));
 }

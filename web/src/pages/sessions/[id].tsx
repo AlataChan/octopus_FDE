@@ -18,12 +18,12 @@ import {
   downloadArtifact,
   renameSession
 } from "../../lib/api";
-import type { Artifact, CompileInput, LLMConfigInput, MarkImportedInput } from "../../lib/types";
+import type { Artifact, CompileInput, IRDiffChange, LLMConfigInput, MarkImportedInput } from "../../lib/types";
 import { useCompileSession, useIRDiff, useMarkImported, useSession, useSetLLMConfig } from "../../hooks/useSession";
 import { usePlannerTurn } from "../../hooks/usePlannerTurn";
 import { useIsXl } from "../../hooks/useIsXl";
 import { useIsLg } from "../../hooks/useIsLg";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const PANEL_GROUP_AUTOSAVE_ID = "fde-session-panels-v1";
 const PANEL_STORAGE_KEY = `react-resizable-panels:${PANEL_GROUP_AUTOSAVE_ID}`;
@@ -36,6 +36,7 @@ export default function SessionDetailPage() {
   const sessionId = params.id || "";
   const { bindings, ir, session, turns, workflows } = useSession(sessionId);
   const [highlightedPath, setHighlightedPath] = useState<string | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [layoutResetVersion, setLayoutResetVersion] = useState(0);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -70,6 +71,11 @@ export default function SessionDetailPage() {
       navigate(`/sessions/${row.session_id}`);
     }
   });
+
+  useEffect(() => {
+    setSelectedNodeId(null);
+  }, [sessionId]);
+
   const needsConfig = Boolean(session.data && !session.data.llm_model);
   const errors = ir.data?.validation_errors || [];
   const compileWarningCount = (session.data?.artifacts || []).reduce(
@@ -82,6 +88,23 @@ export default function SessionDetailPage() {
   const toTurn =
     successfulTurns.length >= 2 ? successfulTurns[successfulTurns.length - 1].turn_id : null;
   const diff = useIRDiff(sessionId, fromTurn, toTurn);
+  const compileWarnings = (session.data?.artifacts || []).flatMap((artifact) => artifact.compile_warnings);
+  const flowDiffSummary = diff.data
+    ? {
+        added_node_ids: diff.data.changes
+          .filter(isNodeDiffChange)
+          .filter((change) => change.kind === "added")
+          .map((change) => change.node_id),
+        modified_node_ids: diff.data.changes
+          .filter(isNodeDiffChange)
+          .filter((change) => change.kind === "config-changed")
+          .map((change) => change.node_id),
+        removed_node_ids: diff.data.changes
+          .filter(isNodeDiffChange)
+          .filter((change) => change.kind === "removed")
+          .map((change) => change.node_id)
+      }
+    : null;
 
   function saveConfig(input: LLMConfigInput) {
     setConfig.mutate(input);
@@ -128,11 +151,16 @@ export default function SessionDetailPage() {
   const irCol = (
     <IRColumn
       compileWarningCount={compileWarningCount}
+      compileWarnings={compileWarnings}
       diff={diff.data || null}
+      diffSummary={flowDiffSummary}
       errors={errors}
       highlightedPath={highlightedPath}
       ir={ir.data?.ir || null}
+      resetKey={sessionId}
+      selectedNodeId={selectedNodeId}
       status={ir.data?.validator_status || t("session.noIr")}
+      onSelectedNodeIdChange={setSelectedNodeId}
       onSelectPath={setHighlightedPath}
     />
   );
@@ -257,4 +285,8 @@ export default function SessionDetailPage() {
       />
     </section>
   );
+}
+
+function isNodeDiffChange(change: IRDiffChange): change is Extract<IRDiffChange, { scope: "node" }> {
+  return change.scope === "node";
 }

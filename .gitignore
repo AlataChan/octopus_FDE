@@ -32,3 +32,6 @@ config/customers/*.yaml
 用户维修方案_*/
 程远帆*.yml
 沈清禾*.yml
+
+# Playwright MCP browser snapshots (smoke/debug artifacts)
+.playwright-mcp/
