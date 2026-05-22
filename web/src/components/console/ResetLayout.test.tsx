@@ -1,16 +1,63 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useEffect, useState, type ReactNode } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useState, type ReactNode } from "react";
 import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "../../lib/i18n";
 import SessionDetailPage from "../../pages/sessions/[id]";
 
 const PANEL_STORAGE_KEY = "react-resizable-panels:fde-session-panels-v1";
+const CONTEXT_PANEL_STORAGE_KEY = "react-resizable-panels:fde-context-vertical-v1";
 
 vi.mock("react-resizable-panels", () => ({
-  Panel: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  PanelGroup: ({ children }: { children: ReactNode }) => {
+  Panel: forwardRef(({
+    children,
+    className,
+    defaultSize,
+    id,
+    minSize
+  }: {
+    children: ReactNode;
+    className?: string;
+    defaultSize?: number;
+    id?: string;
+    minSize?: number;
+  }, ref) => {
+    useImperativeHandle(ref, () => ({
+      collapse: vi.fn(),
+      expand: vi.fn(),
+      getId: () => id || "panel",
+      getSize: () => defaultSize || 0,
+      isCollapsed: () => false,
+      isExpanded: () => true,
+      resize: (size: number) => {
+        if (id) {
+          panelResizeCalls[id] = [...(panelResizeCalls[id] || []), size];
+        }
+      }
+    }));
+    return (
+      <div
+        className={className}
+        data-default-size={defaultSize}
+        data-min-size={minSize}
+        data-testid={id ? `panel-${id}` : "panel"}
+      >
+        {children}
+      </div>
+    );
+  }),
+  PanelGroup: forwardRef(({
+    autoSaveId,
+    children,
+    className,
+    direction
+  }: {
+    autoSaveId?: string;
+    children: ReactNode;
+    className?: string;
+    direction?: string;
+  }, ref) => {
     const [mountId] = useState(() => {
       panelGroupMounts += 1;
       return panelGroupMounts;
@@ -22,16 +69,41 @@ vi.mock("react-resizable-panels", () => ({
       };
     }, []);
 
-    return <div data-testid="panel-group">mount:{mountId}{children}</div>;
-  },
+    useImperativeHandle(ref, () => ({
+      getId: () => autoSaveId || "panel-group",
+      getLayout: () => [],
+      setLayout: (layout: number[]) => {
+        if (autoSaveId) {
+          panelGroupSetLayoutCalls[autoSaveId] = [
+            ...(panelGroupSetLayoutCalls[autoSaveId] || []),
+            layout
+          ];
+        }
+      }
+    }));
+
+    return (
+      <div
+        className={className}
+        data-autosave-id={autoSaveId}
+        data-direction={direction}
+        data-testid={autoSaveId ? `panel-group-${autoSaveId}` : "panel-group"}
+      >
+        mount:{mountId}
+        {children}
+      </div>
+    );
+  }),
   PanelResizeHandle: ({
     "aria-label": ariaLabel,
-    children
+    children,
+    className
   }: {
     "aria-label"?: string;
     children?: ReactNode;
+    className?: string;
   }) => (
-    <div aria-label={ariaLabel} role="separator">
+    <div aria-label={ariaLabel} className={className} role="separator">
       {children}
     </div>
   )
@@ -122,6 +194,8 @@ vi.mock("../../lib/api", () => ({
 
 let panelGroupMounts = 0;
 let panelGroupUnmounts = 0;
+let panelResizeCalls: Record<string, number[]> = {};
+let panelGroupSetLayoutCalls: Record<string, number[][]> = {};
 
 describe("SessionDetailPage reset layout", () => {
   afterEach(() => {
@@ -131,8 +205,11 @@ describe("SessionDetailPage reset layout", () => {
   beforeEach(() => {
     panelGroupMounts = 0;
     panelGroupUnmounts = 0;
+    panelResizeCalls = {};
+    panelGroupSetLayoutCalls = {};
     localStorage.clear();
     localStorage.setItem(PANEL_STORAGE_KEY, "[30,40,30]");
+    localStorage.setItem(CONTEXT_PANEL_STORAGE_KEY, "[55,45]");
     stubViewportWidth(1280);
   });
 
@@ -170,14 +247,15 @@ describe("SessionDetailPage reset layout", () => {
   it("clears saved panel layout and remounts the panel group", async () => {
     renderPage();
 
-    expect(screen.getByTestId("panel-group")).toHaveTextContent("mount:1");
+    expect(screen.getByTestId("panel-group-fde-session-panels-v1")).toHaveTextContent("mount:");
 
     fireEvent.click(screen.getByRole("button", { name: /工作台操作|Workbench actions/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: /重置布局|Reset layout/i }));
 
     expect(localStorage.getItem(PANEL_STORAGE_KEY)).toBeNull();
-    expect(screen.getByTestId("panel-group")).toHaveTextContent("mount:2");
-    expect(panelGroupUnmounts).toBe(1);
+    expect(localStorage.getItem(CONTEXT_PANEL_STORAGE_KEY)).toBeNull();
+    expect(screen.getByTestId("panel-group-fde-session-panels-v1")).toHaveTextContent("mount:");
+    expect(panelGroupUnmounts).toBeGreaterThan(0);
   });
 
   it("uses the resizable panel group at the lg breakpoint", () => {
@@ -185,17 +263,40 @@ describe("SessionDetailPage reset layout", () => {
 
     renderPage();
 
-    expect(screen.getByTestId("panel-group")).toBeInTheDocument();
+    expect(screen.getByTestId("panel-group-fde-session-panels-v1")).toBeInTheDocument();
   });
 
-  it("gives the compile pane height so compiled artifacts stay reachable", () => {
+  it("uses a vertical context panel group with a 55/45 IR-to-compile split", () => {
     renderPage();
 
-    const compilePane = screen.getByTestId("context-compile-pane");
-    expect(compilePane).toHaveClass("flex-1");
-    expect(compilePane).toHaveClass("min-h-[360px]");
+    expect(screen.getByTestId("panel-group-fde-context-vertical-v1")).toHaveAttribute(
+      "data-direction",
+      "vertical"
+    );
+    expect(screen.getByTestId("panel-context-ir")).toHaveAttribute("data-default-size", "55");
+    expect(screen.getByTestId("panel-context-ir")).toHaveAttribute("data-min-size", "30");
+    expect(screen.getByTestId("panel-context-compile")).toHaveAttribute("data-default-size", "45");
+    expect(screen.getByTestId("panel-context-compile")).toHaveAttribute("data-min-size", "28");
+    expect(screen.getByRole("separator", { name: /IR.*Compile|编译/i })).toHaveClass("cursor-row-resize");
+  });
+
+  it("keeps compiled artifacts reachable in the default compile panel", () => {
+    renderPage();
+
+    const compilePane = screen.getByTestId("panel-context-compile");
+    expect(compilePane).toHaveClass("flex");
+    expect(compilePane).toHaveClass("min-h-0");
+    expect(compilePane).toHaveClass("overflow-hidden");
     expect(screen.getByText("Knowledge Retrieval RAG.yaml")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /下载|Download/i })).toHaveLength(2);
+  });
+
+  it("expands the compile panel when artifacts are present and the saved split is still default", async () => {
+    renderPage();
+
+    await vi.waitFor(() => {
+      expect(panelGroupSetLayoutCalls["fde-context-vertical-v1"]).toContainEqual([30, 70]);
+    });
   });
 
   it("opens the mobile sidebar as a full-width sheet", () => {
