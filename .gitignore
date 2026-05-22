@@ -35,3 +35,7 @@ config/customers/*.yaml
 
 # Playwright MCP browser snapshots (smoke/debug artifacts)
 .playwright-mcp/
+
+# Local copyrighted reference source; do not publish full book/PDF artifacts.
+docs/30_Agents_Every_AI_Engineer_Must_Build_-_Imran_Ahmad.md
+docs/30_Agents_Every_AI_Engineer_Must_Build_-_Imran_Ahmad.pdf
