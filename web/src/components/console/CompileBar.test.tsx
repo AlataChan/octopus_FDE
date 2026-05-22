@@ -59,4 +59,45 @@ describe("CompileBar", () => {
     expect(screen.queryByPlaceholderText(/导入备注|Import note/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /标记已导入|Mark imported/i })).not.toBeInTheDocument();
   });
+
+  it("uses the card as the single vertical scroll container", () => {
+    const { container } = render(
+      <CompileBar
+        artifacts={[
+          {
+            actor_id: "actor-1",
+            artifact_id: "artifact-1",
+            artifact_kind: "zip",
+            artifact_name: "workflow.zip",
+            artifact_path: "/tmp/workflow.zip",
+            artifact_size: 123,
+            binding_handle: "test",
+            compile_warnings: [],
+            created_at: "2026-05-11T00:00:00Z",
+            mode: "chatflow",
+            sha256: "abc1234567890def",
+            session_id: "session-1",
+            target: "hiagent",
+            workflow_id: "workflow-1"
+          }
+        ]}
+        bindings={[{ display_name: "Test Hiagent", handle: "test", target: "hiagent" }]}
+        isCompiling={false}
+        onCompile={vi.fn()}
+        onDownload={vi.fn()}
+      />
+    );
+
+    const card = container.querySelector("section");
+    const formBody = container.querySelector("form")?.parentElement;
+    const artifactList = container.querySelector("h3")?.closest("article")?.parentElement;
+
+    expect(card).toHaveClass("overflow-y-auto");
+    expect(card).not.toHaveClass("overflow-hidden");
+    expect(formBody).not.toHaveClass("shrink-0");
+    expect(artifactList).toHaveClass("grid");
+    expect(artifactList).not.toHaveClass("overflow-y-auto");
+    expect(artifactList).not.toHaveClass("flex-1");
+    expect(artifactList).not.toHaveClass("scroll-mask-y");
+  });
 });
