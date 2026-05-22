@@ -1,16 +1,17 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { forwardRef, useEffect, useImperativeHandle, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "../../lib/i18n";
 import SessionDetailPage from "../../pages/sessions/[id]";
 
 const PANEL_STORAGE_KEY = "react-resizable-panels:fde-session-panels-v1";
-const CONTEXT_PANEL_STORAGE_KEY = "react-resizable-panels:fde-context-vertical-v1";
+const LEGACY_CONTEXT_PANEL_STORAGE_KEY = "react-resizable-panels:fde-context-vertical-v1";
+const CONTEXT_PANEL_STORAGE_KEY = "react-resizable-panels:fde-context-vertical-v2";
 
 vi.mock("react-resizable-panels", () => ({
-  Panel: forwardRef(({
+  Panel: ({
     children,
     className,
     defaultSize,
@@ -22,32 +23,17 @@ vi.mock("react-resizable-panels", () => ({
     defaultSize?: number;
     id?: string;
     minSize?: number;
-  }, ref) => {
-    useImperativeHandle(ref, () => ({
-      collapse: vi.fn(),
-      expand: vi.fn(),
-      getId: () => id || "panel",
-      getSize: () => defaultSize || 0,
-      isCollapsed: () => false,
-      isExpanded: () => true,
-      resize: (size: number) => {
-        if (id) {
-          panelResizeCalls[id] = [...(panelResizeCalls[id] || []), size];
-        }
-      }
-    }));
-    return (
-      <div
-        className={className}
-        data-default-size={defaultSize}
-        data-min-size={minSize}
-        data-testid={id ? `panel-${id}` : "panel"}
-      >
-        {children}
-      </div>
-    );
-  }),
-  PanelGroup: forwardRef(({
+  }) => (
+    <div
+      className={className}
+      data-default-size={defaultSize}
+      data-min-size={minSize}
+      data-testid={id ? `panel-${id}` : "panel"}
+    >
+      {children}
+    </div>
+  ),
+  PanelGroup: ({
     autoSaveId,
     children,
     className,
@@ -57,7 +43,7 @@ vi.mock("react-resizable-panels", () => ({
     children: ReactNode;
     className?: string;
     direction?: string;
-  }, ref) => {
+  }) => {
     const [mountId] = useState(() => {
       panelGroupMounts += 1;
       return panelGroupMounts;
@@ -68,19 +54,6 @@ vi.mock("react-resizable-panels", () => ({
         panelGroupUnmounts += 1;
       };
     }, []);
-
-    useImperativeHandle(ref, () => ({
-      getId: () => autoSaveId || "panel-group",
-      getLayout: () => [],
-      setLayout: (layout: number[]) => {
-        if (autoSaveId) {
-          panelGroupSetLayoutCalls[autoSaveId] = [
-            ...(panelGroupSetLayoutCalls[autoSaveId] || []),
-            layout
-          ];
-        }
-      }
-    }));
 
     return (
       <div
@@ -93,7 +66,7 @@ vi.mock("react-resizable-panels", () => ({
         {children}
       </div>
     );
-  }),
+  },
   PanelResizeHandle: ({
     "aria-label": ariaLabel,
     children,
@@ -194,8 +167,6 @@ vi.mock("../../lib/api", () => ({
 
 let panelGroupMounts = 0;
 let panelGroupUnmounts = 0;
-let panelResizeCalls: Record<string, number[]> = {};
-let panelGroupSetLayoutCalls: Record<string, number[][]> = {};
 
 describe("SessionDetailPage reset layout", () => {
   afterEach(() => {
@@ -205,10 +176,9 @@ describe("SessionDetailPage reset layout", () => {
   beforeEach(() => {
     panelGroupMounts = 0;
     panelGroupUnmounts = 0;
-    panelResizeCalls = {};
-    panelGroupSetLayoutCalls = {};
     localStorage.clear();
     localStorage.setItem(PANEL_STORAGE_KEY, "[30,40,30]");
+    localStorage.setItem(LEGACY_CONTEXT_PANEL_STORAGE_KEY, "[55,45]");
     localStorage.setItem(CONTEXT_PANEL_STORAGE_KEY, "[55,45]");
     stubViewportWidth(1280);
   });
@@ -254,6 +224,7 @@ describe("SessionDetailPage reset layout", () => {
 
     expect(localStorage.getItem(PANEL_STORAGE_KEY)).toBeNull();
     expect(localStorage.getItem(CONTEXT_PANEL_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(LEGACY_CONTEXT_PANEL_STORAGE_KEY)).toBeNull();
     expect(screen.getByTestId("panel-group-fde-session-panels-v1")).toHaveTextContent("mount:");
     expect(panelGroupUnmounts).toBeGreaterThan(0);
   });
@@ -266,16 +237,16 @@ describe("SessionDetailPage reset layout", () => {
     expect(screen.getByTestId("panel-group-fde-session-panels-v1")).toBeInTheDocument();
   });
 
-  it("uses a vertical context panel group with a 55/45 IR-to-compile split", () => {
+  it("uses a vertical context panel group with a 30/70 IR-to-compile split", () => {
     renderPage();
 
-    expect(screen.getByTestId("panel-group-fde-context-vertical-v1")).toHaveAttribute(
+    expect(screen.getByTestId("panel-group-fde-context-vertical-v2")).toHaveAttribute(
       "data-direction",
       "vertical"
     );
-    expect(screen.getByTestId("panel-context-ir")).toHaveAttribute("data-default-size", "55");
+    expect(screen.getByTestId("panel-context-ir")).toHaveAttribute("data-default-size", "30");
     expect(screen.getByTestId("panel-context-ir")).toHaveAttribute("data-min-size", "30");
-    expect(screen.getByTestId("panel-context-compile")).toHaveAttribute("data-default-size", "45");
+    expect(screen.getByTestId("panel-context-compile")).toHaveAttribute("data-default-size", "70");
     expect(screen.getByTestId("panel-context-compile")).toHaveAttribute("data-min-size", "28");
     expect(screen.getByRole("separator", { name: /IR.*Compile|编译/i })).toHaveClass("cursor-row-resize");
   });
@@ -291,12 +262,10 @@ describe("SessionDetailPage reset layout", () => {
     expect(screen.getAllByRole("button", { name: /下载|Download/i })).toHaveLength(2);
   });
 
-  it("expands the compile panel when artifacts are present and the saved split is still default", async () => {
+  it("removes the legacy vertical split cache on mount", () => {
     renderPage();
 
-    await vi.waitFor(() => {
-      expect(panelGroupSetLayoutCalls["fde-context-vertical-v1"]).toContainEqual([30, 70]);
-    });
+    expect(localStorage.getItem(LEGACY_CONTEXT_PANEL_STORAGE_KEY)).toBeNull();
   });
 
   it("opens the mobile sidebar as a full-width sheet", () => {
