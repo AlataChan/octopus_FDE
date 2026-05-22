@@ -12,8 +12,6 @@ describe("CompileBar", () => {
         isCompiling
         onCompile={vi.fn()}
         onDownload={vi.fn()}
-        onMarkImported={vi.fn()}
-        workflows={[]}
       />
     );
 
@@ -24,7 +22,7 @@ describe("CompileBar", () => {
     expect(button).toBeDisabled();
   });
 
-  it("shows visible text on artifact download buttons", () => {
+  it("renders artifact cards with a prominent download action and no import controls", () => {
     render(
       <CompileBar
         artifacts={[
@@ -49,12 +47,16 @@ describe("CompileBar", () => {
         isCompiling={false}
         onCompile={vi.fn()}
         onDownload={vi.fn()}
-        onMarkImported={vi.fn()}
-        workflows={[]}
       />
     );
 
     const button = screen.getByRole("button", { name: /下载|Download/i });
     expect(button).toHaveTextContent(/下载|Download/i);
+    expect(button).toHaveClass("bg-accent");
+    expect(button).toHaveClass("h-10");
+    expect(button).toHaveClass("text-sm");
+    expect(screen.queryByPlaceholderText(/平台 App ID|Platform App ID/i)).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/导入备注|Import note/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /标记已导入|Mark imported/i })).not.toBeInTheDocument();
   });
 });

@@ -18,8 +18,8 @@ import {
   downloadArtifact,
   renameSession
 } from "../../lib/api";
-import type { Artifact, CompileInput, IRDiffChange, LLMConfigInput, MarkImportedInput } from "../../lib/types";
-import { useCompileSession, useIRDiff, useMarkImported, useSession, useSetLLMConfig } from "../../hooks/useSession";
+import type { Artifact, CompileInput, IRDiffChange, LLMConfigInput } from "../../lib/types";
+import { useCompileSession, useIRDiff, useSession, useSetLLMConfig } from "../../hooks/useSession";
 import { usePlannerTurn } from "../../hooks/usePlannerTurn";
 import { useIsXl } from "../../hooks/useIsXl";
 import { useIsLg } from "../../hooks/useIsLg";
@@ -37,7 +37,7 @@ export default function SessionDetailPage() {
   const params = useParams();
   const queryClient = useQueryClient();
   const sessionId = params.id || "";
-  const { bindings, ir, session, turns, workflows } = useSession(sessionId);
+  const { bindings, ir, session, turns } = useSession(sessionId);
   const [highlightedPath, setHighlightedPath] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [layoutResetVersion, setLayoutResetVersion] = useState(0);
@@ -48,7 +48,6 @@ export default function SessionDetailPage() {
   const setConfig = useSetLLMConfig(sessionId);
   const plannerTurn = usePlannerTurn(sessionId);
   const compile = useCompileSession(sessionId);
-  const markImported = useMarkImported();
   const rename = useMutation({
     mutationFn: (title: string) => renameSession(sessionId, title),
     onSuccess: async (row) => {
@@ -135,10 +134,6 @@ export default function SessionDetailPage() {
     URL.revokeObjectURL(url);
   }
 
-  function mark(workflowId: string, input: MarkImportedInput) {
-    markImported.mutate({ input, workflowId });
-  }
-
   function resetLayout() {
     try {
       window.localStorage.removeItem(PANEL_STORAGE_KEY);
@@ -182,11 +177,8 @@ export default function SessionDetailPage() {
       artifacts={session.data?.artifacts || []}
       bindings={bindings.data || []}
       isCompiling={compile.isPending}
-      markingWorkflowId={markImported.variables?.workflowId || null}
-      workflows={workflows.data || []}
       onCompile={runCompile}
       onDownload={(artifact) => void download(artifact)}
-      onMarkImported={mark}
     />
   );
   const header = (
