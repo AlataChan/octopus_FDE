@@ -6,11 +6,9 @@ import {
   getSession,
   listBindings,
   listTurns,
-  listWorkflows,
-  markWorkflowDeployed,
   setLLMConfig
 } from "../lib/api";
-import type { CompileInput, LLMConfigInput, MarkImportedInput } from "../lib/types";
+import type { CompileInput, LLMConfigInput } from "../lib/types";
 
 export function useSession(sessionId: string | undefined) {
   const enabled = Boolean(sessionId);
@@ -33,10 +31,6 @@ export function useSession(sessionId: string | undefined) {
       enabled,
       queryKey: ["turns", sessionId],
       queryFn: () => listTurns(sessionId!)
-    }),
-    workflows: useQuery({
-      queryKey: ["workflows"],
-      queryFn: listWorkflows
     })
   };
 }
@@ -56,21 +50,7 @@ export function useCompileSession(sessionId: string) {
   return useMutation({
     mutationFn: (input: CompileInput) => compileSession(sessionId, input),
     onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["session", sessionId] }),
-        queryClient.invalidateQueries({ queryKey: ["workflows"] })
-      ]);
-    }
-  });
-}
-
-export function useMarkImported() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ workflowId, input }: { workflowId: string; input: MarkImportedInput }) =>
-      markWorkflowDeployed(workflowId, input),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["workflows"] });
+      await queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
     }
   });
 }

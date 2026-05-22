@@ -101,7 +101,6 @@ vi.mock("../../components/console/IRColumn", () => ({
 vi.mock("../../hooks/useSession", () => ({
   useCompileSession: () => ({ isPending: false, mutate: vi.fn() }),
   useIRDiff: () => ({ data: null }),
-  useMarkImported: () => ({ mutate: vi.fn(), variables: null }),
   useSession: () => ({
     bindings: { data: [] },
     ir: { data: { ir: null, validation_errors: [], validator_status: "draft" } },
@@ -147,8 +146,7 @@ vi.mock("../../hooks/useSession", () => ({
         state: "compiled"
       }
     },
-    turns: { data: [] },
-    workflows: { data: [] }
+    turns: { data: [] }
   }),
   useSetLLMConfig: () => ({ isPending: false, mutate: vi.fn() })
 }));
