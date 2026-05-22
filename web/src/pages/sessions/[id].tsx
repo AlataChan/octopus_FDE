@@ -1,7 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import {
+  Panel,
+  PanelGroup,
+  PanelResizeHandle,
+  type ImperativePanelGroupHandle
+} from "react-resizable-panels";
 import { Menu } from "lucide-react";
 import { ChatColumn } from "../../components/console/ChatColumn";
 import { CompileColumn } from "../../components/console/CompileColumn";
@@ -23,10 +28,14 @@ import { useCompileSession, useIRDiff, useMarkImported, useSession, useSetLLMCon
 import { usePlannerTurn } from "../../hooks/usePlannerTurn";
 import { useIsXl } from "../../hooks/useIsXl";
 import { useIsLg } from "../../hooks/useIsLg";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const PANEL_GROUP_AUTOSAVE_ID = "fde-session-panels-v1";
+const CONTEXT_PANEL_GROUP_AUTOSAVE_ID = "fde-context-vertical-v1";
 const PANEL_STORAGE_KEY = `react-resizable-panels:${PANEL_GROUP_AUTOSAVE_ID}`;
+const CONTEXT_PANEL_STORAGE_KEY = `react-resizable-panels:${CONTEXT_PANEL_GROUP_AUTOSAVE_ID}`;
+const DEFAULT_CONTEXT_LAYOUT = [55, 45] as const;
+const READABLE_CONTEXT_LAYOUT = [30, 70] as const;
 
 export default function SessionDetailPage() {
   const { t } = useTranslation();
@@ -40,6 +49,7 @@ export default function SessionDetailPage() {
   const [layoutResetVersion, setLayoutResetVersion] = useState(0);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const contextPanelGroupRef = useRef<ImperativePanelGroupHandle | null>(null);
   const isLg = useIsLg();
   const isXl = useIsXl();
   const setConfig = useSetLLMConfig(sessionId);
@@ -75,6 +85,20 @@ export default function SessionDetailPage() {
   useEffect(() => {
     setSelectedNodeId(null);
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!isLg || !session.data?.artifacts.length) {
+      return;
+    }
+    const savedLayout = readSavedContextLayout();
+    if (savedLayout && !isDefaultContextLayout(savedLayout)) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      contextPanelGroupRef.current?.setLayout([...READABLE_CONTEXT_LAYOUT]);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isLg, layoutResetVersion, session.data?.artifacts.length, sessionId]);
 
   const needsConfig = Boolean(session.data && !session.data.llm_model);
   const errors = ir.data?.validation_errors || [];
@@ -131,6 +155,7 @@ export default function SessionDetailPage() {
   function resetLayout() {
     try {
       window.localStorage.removeItem(PANEL_STORAGE_KEY);
+      window.localStorage.removeItem(CONTEXT_PANEL_STORAGE_KEY);
     } catch {
       // localStorage may be unavailable in restricted browser contexts.
     }
@@ -251,9 +276,32 @@ export default function SessionDetailPage() {
                 >
                   <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border/45 transition-colors group-hover:bg-accent/80 group-data-[resize-handle-state=drag]:bg-accent" />
                 </PanelResizeHandle>
-                <Panel className="flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto p-3" defaultSize={40} id="context" minSize={28} order={2}>
-                  <div className="min-h-[320px] flex-1 overflow-hidden" data-testid="context-ir-pane">{irCol}</div>
-                  <div className="min-h-[360px] flex-1 overflow-hidden" data-testid="context-compile-pane">{compileCol}</div>
+                <Panel className="flex min-h-0 min-w-0 flex-col overflow-hidden p-3" defaultSize={40} id="context" minSize={28} order={2}>
+                  <PanelGroup
+                    autoSaveId={CONTEXT_PANEL_GROUP_AUTOSAVE_ID}
+                    className="h-full min-h-0 w-full"
+                    direction="vertical"
+                    ref={contextPanelGroupRef}
+                  >
+                    <Panel className="flex min-h-0 min-w-0 overflow-hidden" defaultSize={55} id="context-ir" minSize={30} order={1}>
+                      <div className="h-full min-h-0 w-full overflow-hidden" data-testid="context-ir-pane">{irCol}</div>
+                    </Panel>
+                    <PanelResizeHandle
+                      aria-label={t("layout.resizeIrCompile")}
+                      className="group relative h-3 cursor-row-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <span className="absolute left-0 top-1/2 h-0.5 w-full -translate-y-1/2 rounded-full bg-border/45 transition-colors group-hover:bg-accent/80 group-data-[resize-handle-state=drag]:bg-accent" />
+                    </PanelResizeHandle>
+                    <Panel
+                      className="flex min-h-0 min-w-0 overflow-hidden"
+                      defaultSize={45}
+                      id="context-compile"
+                      minSize={28}
+                      order={2}
+                    >
+                      <div className="h-full min-h-0 w-full overflow-hidden" data-testid="context-compile-pane">{compileCol}</div>
+                    </Panel>
+                  </PanelGroup>
                 </Panel>
               </PanelGroup>
             </div>
@@ -289,4 +337,40 @@ export default function SessionDetailPage() {
 
 function isNodeDiffChange(change: IRDiffChange): change is Extract<IRDiffChange, { scope: "node" }> {
   return change.scope === "node";
+}
+
+function readSavedContextLayout(): number[] | null {
+  try {
+    const raw = window.localStorage.getItem(CONTEXT_PANEL_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((value): value is number => typeof value === "number");
+    }
+    if (parsed && typeof parsed === "object") {
+      for (const value of Object.values(parsed)) {
+        if (
+          value &&
+          typeof value === "object" &&
+          Array.isArray((value as { layout?: unknown }).layout)
+        ) {
+          return (value as { layout: unknown[] }).layout.filter(
+            (entry): entry is number => typeof entry === "number"
+          );
+        }
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function isDefaultContextLayout(layout: number[]) {
+  return (
+    layout.length === DEFAULT_CONTEXT_LAYOUT.length &&
+    layout.every((value, index) => Math.abs(value - DEFAULT_CONTEXT_LAYOUT[index]) < 0.5)
+  );
 }
