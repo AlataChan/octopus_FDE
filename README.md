@@ -43,6 +43,18 @@ The `loom` CLI remains useful for local compile/validate workflows and runtime
 investigation. The web console is the primary Phase 2 FDE operator surface.
 Both use the same IR validators and runtime compilers.
 
+Headless automation helpers:
+
+- `loom brief [INTENT_FILE] --scope <scope> [--target hiagent|dify] [--draft-json path]`
+  runs a dry-run Self-Design missing-field probe. Exit `0` means ready, exit
+  `1` means blocking fields remain and is a normal CI branch, and exit `2`
+  means invalid input or redaction trip.
+- `loom session show-turns <session-id> --actor <actor> [--json]` lists safe
+  turn metadata only; raw messages, IR snapshots, planner replies, and
+  validation internals are intentionally omitted.
+- `loom session brief <session-id> --actor <actor>` prints the stored redacted
+  brief draft plus clarify state for offline inspection.
+
 ## Pinned Runtimes
 
 ADR 0002 pins Hiagent 2.6 and Dify 1.14.0. Hiagent ZIP import format is
