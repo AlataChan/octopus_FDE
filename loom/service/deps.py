@@ -3,11 +3,17 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+import socket
+from base64 import urlsafe_b64decode
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from cryptography.fernet import Fernet
-from fastapi import Header
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from fastapi import HTTPException, Request
+
+from loom.service.auth.password import ScryptPasswordError, validate_scrypt_hash
 
 LOGGER = logging.getLogger(__name__)
 
@@ -25,6 +31,13 @@ class Settings:
     fernet_key: str | None = None
     binding_dir: Path = Path("config/customers")
     audit_max_retention_days: int = 365
+    auth_username: str | None = None
+    auth_password_hash: str | None = None
+    auth_session_ttl_hours: int = 24
+    auth_disabled: bool = True
+    trusted_proxy: bool = False
+    cors_allow_origins: tuple[str, ...] = ()
+    instance_id: str = field(default_factory=socket.gethostname)
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -35,12 +48,42 @@ class Settings:
         if app_env == "dev" and not key:
             key = Fernet.generate_key().decode("ascii")
             LOGGER.warning("LOOM_FERNET_KEY missing in dev; using an ephemeral per-process key")
+        auth_username = os.environ.get("LOOM_AUTH_USERNAME")
+        auth_password_hash = os.environ.get("LOOM_AUTH_PASSWORD_HASH")
+        auth_disabled_env = os.environ.get("LOOM_AUTH_DISABLED")
+        auth_disabled = (
+            _parse_bool(auth_disabled_env)
+            if auth_disabled_env is not None
+            else app_env == "dev" and (not auth_username or not auth_password_hash)
+        )
+        if app_env != "dev" and auth_disabled:
+            raise RuntimeError("LOOM_AUTH_DISABLED is only allowed when APP_ENV=dev")
+        if not auth_disabled:
+            if not auth_username:
+                raise RuntimeError("LOOM_AUTH_USERNAME is required when authentication is enabled")
+            if not auth_password_hash:
+                raise RuntimeError("LOOM_AUTH_PASSWORD_HASH is required when authentication is enabled")
+            try:
+                validate_scrypt_hash(auth_password_hash)
+            except ScryptPasswordError as e:
+                raise RuntimeError(str(e)) from e
+        web_concurrency = int(os.environ.get("WEB_CONCURRENCY", "1"))
+        if web_concurrency > 1:
+            raise RuntimeError("WEB_CONCURRENCY must be 1; in-memory auth sessions are single-worker only")
+        cors_allow_origins = _parse_origins(os.environ.get("LOOM_CORS_ALLOW_ORIGINS", ""))
         return cls(
             data_dir=Path(os.environ.get("LOOM_DATA_DIR", ".loom-data")),
             app_env=app_env,
             fernet_key=key,
             binding_dir=Path(os.environ.get("LOOM_BINDING_DIR", "config/customers")),
             audit_max_retention_days=int(os.environ.get("LOOM_AUDIT_MAX_RETENTION_DAYS", "365")),
+            auth_username=auth_username,
+            auth_password_hash=auth_password_hash,
+            auth_session_ttl_hours=int(os.environ.get("LOOM_AUTH_SESSION_TTL_HOURS", "24")),
+            auth_disabled=auth_disabled,
+            trusted_proxy=_parse_bool(os.environ.get("LOOM_TRUSTED_PROXY", "false")),
+            cors_allow_origins=cors_allow_origins,
+            instance_id=os.environ.get("LOOM_INSTANCE_ID") or socket.gethostname(),
         )
 
     def ensure_data_dir(self) -> None:
@@ -56,7 +99,38 @@ class Settings:
                 raise RuntimeError("LOOM_FERNET_KEY is required")
         return Fernet(key.encode("ascii"))
 
+    def archive_hmac_key(self) -> bytes:
+        key = self.fernet_key
+        if not key:
+            if self.app_env == "dev":
+                key = Fernet.generate_key().decode("ascii")
+            else:
+                raise RuntimeError("LOOM_FERNET_KEY is required")
+        raw = urlsafe_b64decode(key.encode("ascii"))
+        return HKDF(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=None,
+            info=b"loom-archive-hmac-v1",
+        ).derive(raw)
 
-def get_actor(x_actor_id: str | None = Header(default=None, alias="X-Actor-Id")) -> Actor:
-    """MVP attribution seam; this is not authentication."""
-    return Actor(id=x_actor_id or "single-user", role="fde")
+
+def _parse_bool(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_origins(raw: str) -> tuple[str, ...]:
+    origins = tuple(origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip())
+    if "*" in origins:
+        raise RuntimeError("LOOM_CORS_ALLOW_ORIGINS must not contain '*'")
+    return origins
+
+
+def get_actor(request: Request) -> Actor:
+    actor = getattr(request.state, "actor", None)
+    if isinstance(actor, Actor):
+        return actor
+    settings: Settings = request.app.state.settings
+    if settings.auth_disabled:
+        return Actor(id=request.headers.get("X-Actor-Id") or "single-user", role="fde")
+    raise HTTPException(status_code=401, detail="not_authenticated")
