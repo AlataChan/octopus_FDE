@@ -4,8 +4,11 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
+from loom.planner.types import PlannerResult
 from loom.service.app import create_app
 from loom.service.deps import Settings
+
+from tests.service.test_routes_sessions import _sample_ir
 
 
 def test_health_and_openapi(tmp_path):
@@ -99,3 +102,38 @@ def test_app_startup_fails_on_invalid_template_catalog(tmp_path, monkeypatch):
 
     with pytest.raises(TemplateLoadError, match="failed to load template bad"):
         create_app(settings=settings)
+
+
+def test_default_planner_passes_scope_and_target_to_intent_request(monkeypatch):
+    captured = {}
+
+    class FakePlannerClient:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+    def fake_plan_intent(intent_request, *, client):
+        captured["request"] = intent_request
+        captured["client"] = client
+        return PlannerResult(
+            ir=_sample_ir(),
+            attempts=1,
+            ok=True,
+            failures=[],
+            cost_usd=0,
+            latency_s=0,
+        )
+
+    monkeypatch.setattr("loom.service.app.PlannerClient", FakePlannerClient)
+    monkeypatch.setattr("loom.service.app.plan_intent", fake_plan_intent)
+
+    from loom.service.app import _default_planner
+
+    _default_planner(
+        user_message="build clinic FAQ",
+        llm_config={"api_key": "sk-test", "base_url": "https://example.test/v1", "model": "m"},
+        target="dify",
+        scope="clinic/kb",
+    )
+
+    assert captured["request"].target == "dify"
+    assert captured["request"].scope == "clinic/kb"

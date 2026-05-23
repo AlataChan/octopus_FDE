@@ -167,6 +167,8 @@ def create_turn(
         ir = request.app.state.planner(
             user_message=body.user_message,
             session=session,
+            target=_session_target_runtime(session),
+            scope=_session_scope(session),
             llm_config={
                 "api_key": request.app.state.fernet.decrypt(session.llm_api_key_encrypted).decode("utf-8")
                 if session.llm_api_key_encrypted
@@ -183,7 +185,7 @@ def create_turn(
         )
         failures = validate(
             json.loads(ir_json),
-            scope="ecommerce/kb",
+            scope=_session_scope(session),
             audit_max_retention_days=request.app.state.settings.audit_max_retention_days,
         )
         if failures:
@@ -246,7 +248,7 @@ def get_ir(
     failures = (
         validate(
             doc,
-            scope="ecommerce/kb",
+            scope=_session_scope(session),
             audit_max_retention_days=request.app.state.settings.audit_max_retention_days,
         )
         if doc
@@ -510,6 +512,13 @@ def _seed_session_from_template(
     selected_scope = scope or record.entry.scopes[0]
     if selected_scope not in record.entry.scopes:
         raise bad_request(f"template {template_id} is not available for scope {selected_scope}")
+    selected_target = cast(Literal["hiagent", "dify"], record.entry.compile_targets[0])
+    request.app.state.session_store.update_session_planning_context(
+        session_id,
+        actor_id=actor_id,
+        target_runtime=selected_target,
+        scope=selected_scope,
+    )
     failures = validate(
         record.ir,
         scope=selected_scope,
@@ -569,6 +578,14 @@ def _turn_response(row: Any) -> dict[str, object]:
         "errors": row.validation_errors,
         "ir_diff": None,
     }
+
+
+def _session_target_runtime(row: SessionRow) -> Literal["hiagent", "dify"]:
+    return cast(Literal["hiagent", "dify"], row.target_runtime or "hiagent")
+
+
+def _session_scope(row: SessionRow) -> str:
+    return row.scope or "ecommerce/kb"
 
 
 def _session_summary_response(row: SessionRow, request: Request, actor_id: str) -> SessionSummary:

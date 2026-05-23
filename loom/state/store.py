@@ -254,6 +254,28 @@ class SessionStore:
                 (ir_json, digest, _now(), str(session_id), actor_id),
             )
 
+    def update_session_planning_context(
+        self,
+        session_id: UUID | str,
+        *,
+        actor_id: str,
+        target_runtime: Literal["hiagent", "dify"] | None,
+        scope: str | None,
+    ) -> SessionRow:
+        self.require_session(session_id, actor_id=actor_id)
+        with self._connect() as con:
+            con.execute(
+                """
+                UPDATE sessions
+                SET target_runtime = ?, scope = ?, updated_at = ?
+                WHERE session_id = ? AND actor_id = ?
+                """,
+                (target_runtime, scope, _now(), str(session_id), actor_id),
+            )
+        row = self.get_session(session_id, actor_id=actor_id)
+        assert row is not None
+        return row
+
     def create_turn(
         self,
         session_id: UUID | str,
@@ -469,6 +491,8 @@ class SessionStore:
                     llm_base_url TEXT,
                     llm_model TEXT,
                     llm_key_version INTEGER,
+                    target_runtime TEXT,
+                    scope TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -518,6 +542,10 @@ class SessionStore:
             session_columns = {row["name"] for row in con.execute("PRAGMA table_info(sessions)").fetchall()}
             if "title" not in session_columns:
                 con.execute("ALTER TABLE sessions ADD COLUMN title TEXT")
+            if "target_runtime" not in session_columns:
+                con.execute("ALTER TABLE sessions ADD COLUMN target_runtime TEXT")
+            if "scope" not in session_columns:
+                con.execute("ALTER TABLE sessions ADD COLUMN scope TEXT")
 
     @staticmethod
     def _get_actor_llm_config_con(
@@ -548,6 +576,8 @@ def _session_row(row: sqlite3.Row) -> SessionRow:
         llm_base_url=row["llm_base_url"],
         llm_model=row["llm_model"],
         llm_key_version=row["llm_key_version"],
+        target_runtime=row["target_runtime"] if "target_runtime" in row.keys() else None,
+        scope=row["scope"] if "scope" in row.keys() else None,
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )

@@ -37,6 +37,8 @@ def test_session_turn_compile_download_archive_and_registry_round_trip(tmp_path)
 
     def planner(*, user_message: str, **kwargs):
         assert user_message == "build faq"
+        assert kwargs["target"] == "hiagent"
+        assert kwargs["scope"] == "ecommerce/kb"
         return ir
 
     client = _client(tmp_path, planner=planner)
@@ -192,6 +194,10 @@ def test_create_session_from_template_seeds_validated_ir_and_sentinel_turn(tmp_p
     turns = client.app.state.session_store.list_turns(sid, actor_id="single-user")
     assert turns[0].user_message == "template:knowledge-retrieval-rag"
     assert "Seeded from template" in (turns[0].planner_reply or "")
+    row = client.app.state.session_store.get_session(sid, actor_id="single-user")
+    assert row is not None
+    assert row.target_runtime == "hiagent"
+    assert row.scope == "ecommerce/kb"
     archive = client.get(f"/v1/archive/sessions/{sid}").text
     assert "template_seeded" in archive
 

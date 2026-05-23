@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,6 +31,11 @@ if TYPE_CHECKING:
 
 def _default_planner(**kwargs: object) -> IRDocument:
     user_message = str(kwargs["user_message"])
+    scope = str(kwargs.get("scope") or "ecommerce/kb")
+    target = kwargs.get("target") or "hiagent"
+    if target not in {"hiagent", "dify"}:
+        raise RuntimeError(f"unsupported target runtime: {target}")
+    target_runtime = cast(Literal["hiagent", "dify"], target)
     llm_config = kwargs["llm_config"]
     if not isinstance(llm_config, dict):
         raise RuntimeError("planner llm_config missing")
@@ -43,7 +48,7 @@ def _default_planner(**kwargs: object) -> IRDocument:
         model=str(llm_config.get("model") or ""),
     )
     result = plan_intent(
-        IntentRequest(intent=user_message, scope="ecommerce/kb", target="hiagent"),
+        IntentRequest(intent=user_message, scope=scope, target=target_runtime),
         client=client,
     )
     if not result.ok or result.ir is None:

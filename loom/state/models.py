@@ -23,6 +23,8 @@ class SessionRow(BaseModel):
     llm_base_url: str | None = None
     llm_model: str | None = None
     llm_key_version: int | None = None
+    target_runtime: Literal["hiagent", "dify"] | None = None
+    scope: str | None = None
     created_at: datetime
     updated_at: datetime
 
