@@ -158,6 +158,79 @@ def test_ready_engine_without_target_runtime_is_overridden_by_gate(tmp_path):
     assert turn["clarify_question"]["field_path"] == "target_runtime"
 
 
+def test_scripted_engine_asks_two_rounds_then_plans(tmp_path):
+    ir = _sample_ir()
+    calls = {"planner": 0}
+
+    def planner(**_kwargs):
+        calls["planner"] += 1
+        return ir
+
+    first_patch = WorkflowBriefDraft(
+        title="FAQ workflow",
+        intent="Answer ecommerce FAQ questions from product KB with citations.",
+        target_runtime="hiagent",
+        scope="ecommerce/kb",
+        compliance_boundary=ComplianceBoundary(
+            pii_class_default="low",
+            regulatory_tags=[],
+            geographies=["CN"],
+        ),
+    ).model_dump(mode="json")
+    second_patch = WorkflowBriefDraft(
+        title="FAQ workflow",
+        intent="Answer ecommerce FAQ questions from product KB with citations.",
+        trigger=TriggerSpec(mode="manual"),
+        target_runtime="hiagent",
+        scope="ecommerce/kb",
+        compliance_boundary=ComplianceBoundary(
+            pii_class_default="low",
+            regulatory_tags=[],
+            geographies=["CN"],
+        ),
+    ).model_dump(mode="json")
+    clarify_engine = FakeClarifyEngine([
+        ClarifyEngineResult(intent_update=first_patch, next_action="ask"),
+        ClarifyEngineResult(intent_update=second_patch, next_action="ask"),
+        ClarifyEngineResult(intent_update=_complete_draft().model_dump(mode="json"), next_action="ready"),
+    ])
+    client = _client(tmp_path, planner=planner, clarify_engine=clarify_engine)
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+
+    one = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "build faq"}).json()
+    two = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "manual"}).json()
+    three = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "ready"}).json()
+
+    assert one["kind"] == "clarify"
+    assert two["kind"] == "clarify"
+    assert three["kind"] == "plan"
+    assert calls["planner"] == 1
+
+
+def test_questionnaire_submission_can_complete_to_plan(tmp_path):
+    client = _client(tmp_path, planner=lambda **_kwargs: _sample_ir())
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+
+    client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "我要一个客服 FAQ"})
+    client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "hiagent"})
+    client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "skip"})
+    questionnaire = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "skip again"}).json()
+    assert questionnaire["kind"] == "questionnaire"
+
+    planned = client.post(
+        f"/v1/sessions/{sid}/turns",
+        json={
+            "user_message": (
+                "scope=ecommerce/kb; compliance_boundary=low; trigger=manual; "
+                "data_sources=product_kb; success_criteria=Answer with citations."
+            )
+        },
+    ).json()
+
+    assert planned["kind"] == "plan"
+    assert planned["status"] == "succeeded"
+
+
 def test_turn_failure_keeps_latest_ir_pointer(tmp_path):
     ir = _sample_ir()
     calls = {"n": 0}
