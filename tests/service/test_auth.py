@@ -73,6 +73,40 @@ def test_mutating_authenticated_requests_require_same_origin(tmp_path):
     assert allowed.status_code == 200
 
 
+def test_csrf_compares_full_origin_port_and_scheme(tmp_path):
+    client = TestClient(create_app(settings=_settings(tmp_path)), base_url="http://localhost:18080")
+
+    wrong_port = client.post("/v1/sessions", headers={"Origin": "http://localhost:5173"}, json={})
+    same_origin = client.post("/v1/sessions", headers={"Origin": "http://localhost:18080"}, json={})
+    wrong_scheme = client.post("/v1/sessions", headers={"Origin": "https://localhost:18080"}, json={})
+
+    assert wrong_port.status_code == 403
+    assert wrong_port.json() == {"error": "csrf_origin_mismatch"}
+    assert same_origin.status_code == 401
+    assert same_origin.json() == {"error": "not_authenticated"}
+    assert wrong_scheme.status_code == 403
+    assert wrong_scheme.json() == {"error": "csrf_origin_mismatch"}
+
+
+def test_csrf_allows_explicit_full_origin_whitelist(tmp_path):
+    settings = _settings(tmp_path)
+    settings = Settings(
+        **{
+            **settings.__dict__,
+            "cors_allow_origins": ("https://app.example.com",),
+        }
+    )
+    client = TestClient(create_app(settings=settings), base_url="http://localhost:18080")
+
+    allowed = client.post("/v1/sessions", headers={"Origin": "https://app.example.com"}, json={})
+    blocked = client.post("/v1/sessions", headers={"Origin": "http://app.example.com"}, json={})
+
+    assert allowed.status_code == 401
+    assert allowed.json() == {"error": "not_authenticated"}
+    assert blocked.status_code == 403
+    assert blocked.json() == {"error": "csrf_origin_mismatch"}
+
+
 def test_login_failures_are_generic_and_rate_limited(tmp_path):
     client = _client(tmp_path)
 

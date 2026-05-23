@@ -146,14 +146,36 @@ def _origin_ok(request: Any, settings: Settings) -> bool:
     raw_origin = request.headers.get("Origin") or request.headers.get("Referer")
     if not raw_origin:
         return False
-    parsed = urlparse(raw_origin)
-    origin_host = parsed.hostname
-    if not origin_host:
+    request_origin = _origin_from_parts(
+        scheme=str(request.url.scheme),
+        host=request.url.hostname,
+        port=request.url.port,
+    )
+    header_origin = _origin_from_header(raw_origin)
+    if request_origin is None or header_origin is None:
         return False
-    if origin_host == request.url.hostname:
-        return True
-    normalized = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
-    return normalized in settings.cors_allow_origins
+    allowed_origins = {
+        normalized
+        for origin in settings.cors_allow_origins
+        if (normalized := _origin_from_header(origin)) is not None
+    }
+    return header_origin in {request_origin, *allowed_origins}
+
+
+def _origin_from_header(raw_origin: str) -> str | None:
+    parsed = urlparse(raw_origin)
+    try:
+        return _origin_from_parts(scheme=parsed.scheme, host=parsed.hostname, port=parsed.port)
+    except ValueError:
+        return None
+
+
+def _origin_from_parts(*, scheme: str, host: str | None, port: int | None) -> str | None:
+    normalized_scheme = scheme.lower()
+    if normalized_scheme not in {"http", "https"} or not host:
+        return None
+    normalized_port = port or (443 if normalized_scheme == "https" else 80)
+    return f"{normalized_scheme}://{host.lower()}:{normalized_port}"
 
 
 def _install_auth_cleanup(app: FastAPI) -> None:

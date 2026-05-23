@@ -7,6 +7,7 @@ import socket
 from base64 import urlsafe_b64decode
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
@@ -120,10 +121,21 @@ def _parse_bool(value: str | None) -> bool:
 
 
 def _parse_origins(raw: str) -> tuple[str, ...]:
-    origins = tuple(origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip())
-    if "*" in origins:
+    return tuple(_validate_origin(origin.strip()) for origin in raw.split(",") if origin.strip())
+
+
+def _validate_origin(raw: str) -> str:
+    if raw == "*":
         raise RuntimeError("LOOM_CORS_ALLOW_ORIGINS must not contain '*'")
-    return origins
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise RuntimeError("LOOM_CORS_ALLOW_ORIGINS must contain full http(s) origins")
+    if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
+        raise RuntimeError("LOOM_CORS_ALLOW_ORIGINS must contain origins without paths")
+    origin = f"{parsed.scheme.lower()}://{parsed.hostname.lower()}"
+    if parsed.port is not None:
+        origin = f"{origin}:{parsed.port}"
+    return origin
 
 
 def get_actor(request: Request) -> Actor:
