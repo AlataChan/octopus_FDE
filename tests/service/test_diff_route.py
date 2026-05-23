@@ -4,6 +4,8 @@ from pathlib import Path
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
+from loom.fde_session.brief import ComplianceBoundary, DataSourceRef, TriggerSpec, WorkflowBriefDraft
+from loom.fde_session.clarify_engine import ClarifyEngineResult, FakeClarifyEngine
 from loom.ir.models import IRDocument
 from loom.service.app import create_app
 from loom.service.deps import Settings
@@ -15,7 +17,25 @@ def _sample_ir() -> dict:
     return json.loads((ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json").read_text())
 
 
-def _client(tmp_path, planner) -> TestClient:
+def _complete_draft() -> WorkflowBriefDraft:
+    return WorkflowBriefDraft(
+        title="FAQ workflow",
+        intent="Answer ecommerce FAQ questions from product KB with citations.",
+        trigger=TriggerSpec(mode="manual"),
+        data_sources=[DataSourceRef(handle="product_kb", kind="kb")],
+        success_criteria="Answer with citations.",
+        compliance_boundary=ComplianceBoundary(
+            pii_class_default="low",
+            regulatory_tags=[],
+            geographies=["CN"],
+        ),
+        target_runtime="hiagent",
+        scope="ecommerce/kb",
+        known_edits=["Initial build."],
+    )
+
+
+def _client(tmp_path, planner, clarify_engine=None) -> TestClient:
     bindings = tmp_path / "bindings"
     bindings.mkdir()
     (bindings / "test.hiagent.yaml").write_text((ROOT / "tests" / "fixtures" / "test.hiagent.yaml").read_text())
@@ -25,7 +45,7 @@ def _client(tmp_path, planner) -> TestClient:
         fernet_key=Fernet.generate_key().decode(),
         binding_dir=bindings,
     )
-    return TestClient(create_app(settings=settings, planner=planner))
+    return TestClient(create_app(settings=settings, planner=planner, clarify_engine=clarify_engine))
 
 
 def test_diff_route_uses_turn_snapshots(tmp_path):
@@ -47,7 +67,11 @@ def test_diff_route_uses_turn_snapshots(tmp_path):
     def planner(**kwargs):
         return next(calls)
 
-    client = _client(tmp_path, planner)
+    clarify_engine = FakeClarifyEngine([
+        ClarifyEngineResult(intent_update=_complete_draft().model_dump(mode="json"), next_action="ready"),
+        ClarifyEngineResult(intent_update=_complete_draft().model_dump(mode="json"), next_action="ready"),
+    ])
+    client = _client(tmp_path, planner, clarify_engine=clarify_engine)
     sid = client.post("/v1/sessions", json={}).json()["session_id"]
     client.patch(
         f"/v1/sessions/{sid}/llm-config",
