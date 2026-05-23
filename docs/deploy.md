@@ -11,6 +11,9 @@ Runtime state lives only in `LOOM_DATA_DIR`: `sessions.db`,
    ```bash
    python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
    export LOOM_FERNET_KEY='<generated-key>'
+   export LOOM_AUTH_USERNAME='admin'
+   export LOOM_AUTH_PASSWORD_HASH="$(python -c 'import os,hashlib,base64,getpass; pw=getpass.getpass("Password: ").encode(); salt=os.urandom(16); h=hashlib.scrypt(pw,salt=salt,n=2**14,r=8,p=1,dklen=32,maxmem=128*1024*1024); print(f"scrypt$16384$8$1${base64.b64encode(salt).decode()}${base64.b64encode(h).decode()}")')"
+   export LOOM_INSTANCE_ID='local-fde'
    ```
 
 2. Choose a persistent data directory:
@@ -25,10 +28,10 @@ Runtime state lives only in `LOOM_DATA_DIR`: `sessions.db`,
 
    ```bash
    docker compose up -d --build
-   curl http://localhost:8000/v1/health
+   curl http://localhost:18080/v1/health
    ```
 
-4. Open `http://localhost:8000`.
+4. Open `http://localhost:18080` and sign in with the configured local account.
 
 Customer binding files are read from `config/customers/`, mounted read-only into
 the container. Keep real customer bindings out of Git; commit only examples.
@@ -44,8 +47,9 @@ APP_ENV=dev make serve
 make web-dev
 ```
 
-The Vite dev server runs on `http://127.0.0.1:5173`; FastAPI CORS allows this
-origin in development. To build the frontend once:
+The Vite dev server runs on `http://127.0.0.1:5173`; set
+`LOOM_CORS_ALLOW_ORIGINS=http://127.0.0.1:5173,http://localhost:5173` when
+running an auth-enabled backend for frontend development. To build the frontend once:
 
 ```bash
 make web-build

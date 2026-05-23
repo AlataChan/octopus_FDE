@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext ts,tsx --max-warnings 0",
     "test": "vitest run",
-    "gen:types": "openapi-typescript http://localhost:8000/openapi.json -o src/lib/types.generated.ts"
+    "gen:types": "openapi-typescript http://localhost:18080/openapi.json -o src/lib/types.generated.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.51.23",

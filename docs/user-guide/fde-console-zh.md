@@ -7,10 +7,12 @@
 ```bash
 python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 export LOOM_FERNET_KEY='<生成的 key>'
+export LOOM_AUTH_USERNAME='admin'
+export LOOM_AUTH_PASSWORD_HASH='<scrypt hash>'
 docker compose up -d --build
 ```
 
-打开 `http://localhost:8000`。
+打开 `http://localhost:18080`，使用配置的本地账号登录。
 
 ## 2. 创建 Session
 

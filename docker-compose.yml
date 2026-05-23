@@ -7,8 +7,17 @@ services:
       LOOM_DATA_DIR: /data
       LOOM_BINDING_DIR: /app/config/customers
       LOOM_FERNET_KEY: ${LOOM_FERNET_KEY:?Set LOOM_FERNET_KEY before running docker compose}
+      LOOM_AUTH_USERNAME: ${LOOM_AUTH_USERNAME:?Set LOOM_AUTH_USERNAME before running docker compose}
+      LOOM_AUTH_PASSWORD_HASH: ${LOOM_AUTH_PASSWORD_HASH:?Set LOOM_AUTH_PASSWORD_HASH before running docker compose}
+      LOOM_INSTANCE_ID: ${LOOM_INSTANCE_ID:-fde-local}
     ports:
-      - "8000:8000"
+      - "18080:18080"
     volumes:
       - ${LOOM_DATA_DIR:-./.loom-data}:/data
       - ./config/customers:/app/config/customers:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:18080/v1/health', timeout=2).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

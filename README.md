@@ -13,12 +13,17 @@ See `docs/PRD.md` for the full spec.
 ```bash
 python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 export LOOM_FERNET_KEY='<generated-key>'
+export LOOM_AUTH_USERNAME='admin'
+export LOOM_AUTH_PASSWORD_HASH="$(python -c 'import os,hashlib,base64,getpass; pw=getpass.getpass("Password: ").encode(); salt=os.urandom(16); h=hashlib.scrypt(pw,salt=salt,n=2**14,r=8,p=1,dklen=32,maxmem=128*1024*1024); print(f"scrypt$16384$8$1${base64.b64encode(salt).decode()}${base64.b64encode(h).decode()}")')"
+export LOOM_INSTANCE_ID='local-fde'
 export LOOM_DATA_DIR=./.loom-data
 docker compose up -d --build
-curl http://localhost:8000/v1/health
+curl http://localhost:18080/v1/health
 ```
 
-Open `http://localhost:8000`.
+Open `http://localhost:18080` and sign in with `LOOM_AUTH_USERNAME` plus the
+password used to generate `LOOM_AUTH_PASSWORD_HASH`. Docker runs uvicorn with a
+single worker because auth sessions are stored in process memory.
 
 Docker is the primary deployment path. Runtime data lives in `LOOM_DATA_DIR`;
 the image does not contain sessions DBs, archive JSONL, generated artifacts, or
