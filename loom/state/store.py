@@ -22,10 +22,16 @@ AuditEventWriter = Callable[[UUID, list[tuple[str, dict[str, object]]]], None]
 class SessionStore:
     """Small sqlite3 store with WAL and UUID-addressed artifacts."""
 
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, *, readonly: bool = False):
         self.db_path = db_path
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init()
+        self._readonly = readonly
+        if not readonly:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._init()
+
+    @classmethod
+    def open_readonly(cls, db_path: Path) -> SessionStore:
+        return cls(db_path, readonly=True)
 
     def pragma(self, name: str) -> str:
         with self._connect() as con:
@@ -33,6 +39,7 @@ class SessionStore:
         return str(row[0])
 
     def create_session(self, *, actor_id: str, self_design: bool = False) -> SessionRow:
+        self._ensure_writable()
         now = _now()
         sid = uuid4()
         with self._connect() as con:
@@ -55,6 +62,7 @@ class SessionStore:
         audit_writer: AuditEventWriter | None = None,
         self_design: bool = False,
     ) -> SessionRow:
+        self._ensure_writable()
         del fernet  # actor defaults are already encrypted with the same service key.
         now = _now()
         sid = uuid4()
@@ -121,6 +129,7 @@ class SessionStore:
         api_key: str | None,
         fernet: Fernet,
     ) -> ActorLLMConfigRow:
+        self._ensure_writable()
         now = _now()
         with self._connect() as con:
             existing = self._get_actor_llm_config_con(con, actor_id=actor_id)
@@ -172,6 +181,7 @@ class SessionStore:
         return row
 
     def delete_actor_llm_config(self, *, actor_id: str) -> None:
+        self._ensure_writable()
         with self._connect() as con:
             con.execute("DELETE FROM actor_llm_config WHERE actor_id = ?", (actor_id,))
 
@@ -198,6 +208,7 @@ class SessionStore:
         actor_id: str,
         title: str | None,
     ) -> SessionRow:
+        self._ensure_writable()
         self.require_session(session_id, actor_id=actor_id)
         with self._connect() as con:
             con.execute(
@@ -222,6 +233,7 @@ class SessionStore:
         model: str,
         fernet: Fernet,
     ) -> None:
+        self._ensure_writable()
         session = self.require_session(session_id, actor_id=actor_id)
         encrypted = fernet.encrypt(api_key.encode("utf-8"))
         # 模板初始化的 session 直接落到 validated（无 LLM key），此时配置/更新
@@ -244,6 +256,7 @@ class SessionStore:
             )
 
     def update_latest_ir(self, session_id: UUID | str, *, actor_id: str, ir_json: str) -> None:
+        self._ensure_writable()
         digest = hashlib.sha256(ir_json.encode("utf-8")).hexdigest()
         with self._connect() as con:
             con.execute(
@@ -264,6 +277,7 @@ class SessionStore:
         scope: str | None,
         self_design: bool | None = None,
     ) -> SessionRow:
+        self._ensure_writable()
         self.require_session(session_id, actor_id=actor_id)
         with self._connect() as con:
             if self_design is None:
@@ -298,6 +312,7 @@ class SessionStore:
         target_runtime: Literal["hiagent", "dify"] | None,
         scope: str | None,
     ) -> SessionRow:
+        self._ensure_writable()
         self.require_session(session_id, actor_id=actor_id)
         with self._connect() as con:
             con.execute(
@@ -323,6 +338,7 @@ class SessionStore:
         kind: Literal["clarify", "plan", "questionnaire"] = "plan",
         brief_before: str | None = None,
     ) -> TurnRow:
+        self._ensure_writable()
         self.require_session(session_id, actor_id=actor_id)
         turn_id = uuid4()
         now = _now()
@@ -350,6 +366,7 @@ class SessionStore:
         ir_after: str,
         brief_after: str | None = None,
     ) -> TurnRow:
+        self._ensure_writable()
         turn = self.require_turn(turn_id, actor_id=actor_id)
         digest = hashlib.sha256(ir_after.encode("utf-8")).hexdigest()
         now = _now()
@@ -391,6 +408,7 @@ class SessionStore:
         target_runtime: Literal["hiagent", "dify"] | None,
         scope: str | None,
     ) -> TurnRow:
+        self._ensure_writable()
         turn = self.require_turn(turn_id, actor_id=actor_id)
         now = _now()
         with self._connect() as con:
@@ -426,6 +444,7 @@ class SessionStore:
         validation_errors: list[str],
         error_correlation_id: str | None = None,
     ) -> TurnRow:
+        self._ensure_writable()
         self.require_turn(turn_id, actor_id=actor_id)
         with self._connect() as con:
             con.execute(
@@ -473,6 +492,7 @@ class SessionStore:
         binding_handle: str,
         compile_warnings: list[CompileWarning] | None = None,
     ) -> ArtifactRow:
+        self._ensure_writable()
         artifact_id = uuid4()
         now = _now()
         with self._connect() as con:
@@ -536,6 +556,7 @@ class SessionStore:
         return _artifact_row(row) if row else None
 
     def mark_downloaded(self, session_id: UUID | str, *, actor_id: str) -> None:
+        self._ensure_writable()
         with self._connect() as con:
             con.execute(
                 "UPDATE sessions SET state = ?, updated_at = ? WHERE session_id = ? AND actor_id = ?",
@@ -555,11 +576,20 @@ class SessionStore:
         return row
 
     def _connect(self) -> sqlite3.Connection:
+        if self._readonly:
+            con = sqlite3.connect(f"{self.db_path.resolve().as_uri()}?mode=ro", uri=True)
+            con.row_factory = sqlite3.Row
+            con.execute("PRAGMA query_only = ON")
+            return con
         con = sqlite3.connect(self.db_path)
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA journal_mode=WAL")
         con.execute("PRAGMA busy_timeout=5000")
         return con
+
+    def _ensure_writable(self) -> None:
+        if self._readonly:
+            raise RuntimeError("SessionStore is read-only")
 
     def _init(self) -> None:
         with self._connect() as con:

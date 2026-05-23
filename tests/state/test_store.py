@@ -1,6 +1,7 @@
 from uuid import uuid4
 
 from cryptography.fernet import Fernet
+import pytest
 
 from loom.runtimes.warnings import CompileWarning
 from loom.state.store import SessionStore
@@ -31,6 +32,17 @@ def test_session_llm_key_is_encrypted(tmp_path):
     assert row.llm_api_key_encrypted != b"sk-secret"
     assert fernet.decrypt(row.llm_api_key_encrypted).decode() == "sk-secret"
     assert row.llm_key_version == 1
+
+
+def test_readonly_store_can_read_but_rejects_write_apis(tmp_path):
+    store = SessionStore(tmp_path / "sessions.db")
+    session = store.create_session(actor_id="fde")
+
+    readonly = SessionStore.open_readonly(tmp_path / "sessions.db")
+
+    assert readonly.get_session(session.session_id, actor_id="fde") is not None
+    with pytest.raises(RuntimeError, match="read-only"):
+        readonly.create_session(actor_id="fde")
 
 
 def test_set_llm_config_on_template_seeded_session_preserves_state(tmp_path):

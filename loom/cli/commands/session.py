@@ -25,9 +25,10 @@ def session() -> None:
 @session.command("show-turns", help="List safe turn metadata for a session.")
 @click.argument("session_id")
 @click.option("--data-dir", type=click.Path(path_type=Path), help="Data directory containing sessions.db.")
-@click.option("--actor", required=True, help="Actor id to filter by; no implicit fallback.")
+@click.option("--actor", required=False, help="Actor id to filter by; no implicit fallback.")
 @click.option("--json/--table", "json_output", default=False, show_default=True)
-def show_turns(session_id: str, data_dir: Path | None, actor: str, json_output: bool) -> None:
+def show_turns(session_id: str, data_dir: Path | None, actor: str | None, json_output: bool) -> None:
+    actor = _require_actor(actor)
     db_path, store = _open_store(data_dir)
     _validate_session_id(session_id)
     session_row = store.get_session(session_id, actor_id=actor)
@@ -47,8 +48,9 @@ def show_turns(session_id: str, data_dir: Path | None, actor: str, json_output: 
 @session.command("brief", help="Print the redacted brief draft for a session.")
 @click.argument("session_id")
 @click.option("--data-dir", type=click.Path(path_type=Path), help="Data directory containing sessions.db.")
-@click.option("--actor", required=True, help="Actor id to filter by; no implicit fallback.")
-def brief_cmd(session_id: str, data_dir: Path | None, actor: str) -> None:
+@click.option("--actor", required=False, help="Actor id to filter by; no implicit fallback.")
+def brief_cmd(session_id: str, data_dir: Path | None, actor: str | None) -> None:
+    actor = _require_actor(actor)
     db_path, store = _open_store(data_dir)
     _validate_session_id(session_id)
     row = store.get_session(session_id, actor_id=actor)
@@ -77,7 +79,13 @@ def _open_store(data_dir: Path | None) -> tuple[Path, SessionStore]:
     db_path = root / "sessions.db"
     if not db_path.exists():
         _exit_error("session_not_found", f"sessions DB not found at {db_path}", code=2)
-    return db_path, SessionStore(db_path)
+    return db_path, SessionStore.open_readonly(db_path)
+
+
+def _require_actor(actor: str | None) -> str:
+    if actor is None:
+        _exit_error("missing_option", "--actor is required", code=2)
+    return actor
 
 
 def _validate_session_id(session_id: str) -> None:

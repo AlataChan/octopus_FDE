@@ -105,6 +105,21 @@ def test_session_show_turns_table_renders_digest(tmp_path) -> None:
     assert "ir_ok" in result.output
 
 
+def test_session_show_turns_does_not_modify_db_file(tmp_path) -> None:
+    store = _store(tmp_path)
+    session = store.create_session(actor_id="test", self_design=True)
+    before = (tmp_path / "data" / "sessions.db").read_bytes()
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli,
+        ["session", "show-turns", str(session.session_id), "--actor", "test", "--json", *_data_dir_arg(tmp_path)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "data" / "sessions.db").read_bytes() == before
+
+
 def test_session_brief_outputs_redacted_snapshot(tmp_path) -> None:
     store = _store(tmp_path)
     session = store.create_session(actor_id="test", self_design=True)
@@ -196,3 +211,19 @@ def test_session_nonexistent_id_returns_invalid_input_exit(tmp_path) -> None:
     payload = _json_from_output(result.stderr)
     assert payload["cli_schema_version"] == "1"
     assert payload["error"] == "session_not_found"
+
+
+def test_session_show_turns_missing_actor_returns_json_error(tmp_path) -> None:
+    store = _store(tmp_path)
+    session = store.create_session(actor_id="test", self_design=True)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli,
+        ["session", "show-turns", str(session.session_id), "--json", *_data_dir_arg(tmp_path)],
+    )
+
+    assert result.exit_code == 2
+    payload = _json_from_output(result.stderr)
+    assert payload["cli_schema_version"] == "1"
+    assert payload["error"] == "missing_option"
