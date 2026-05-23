@@ -17,6 +17,7 @@ from loom.fde_session.brief import (
 )
 from loom.fde_session.clarify import ClarifyQuestion as PolicyQuestion
 from loom.fde_session.clarify import missing_fields
+from loom.fde_session.redaction import redact_text
 
 
 class ClarifyOption(BaseModel):
@@ -68,15 +69,16 @@ class DeterministicClarifyEngine:
         pending_field_paths: Sequence[str] | None = None,
     ) -> ClarifyEngineResult:
         del round_index
+        safe_message = redact_text(user_message)
         update: dict[str, Any] = {}
         if brief is None:
             update.update({
-                "title": _title_from_message(user_message),
-                "intent": user_message.strip(),
+                "title": _title_from_message(safe_message),
+                "intent": safe_message.strip(),
             })
         draft = brief or WorkflowBriefDraft(**update)
         for field_path in pending_field_paths or ():
-            update.update(parse_field_answer(field_path, user_message))
+            update.update(parse_field_answer(field_path, safe_message))
         merged = draft.model_copy(update=update)
         block = _first_blocking_question(merged)
         if block is None:
@@ -212,7 +214,7 @@ def parse_field_answer(field_path: str, answer: str) -> dict[str, Any]:
             }
         return {}
     if field_path == "success_criteria":
-        return {"success_criteria": text} if len(text) >= 4 else {}
+        return {"success_criteria": redact_text(text)} if len(text) >= 4 else {}
     return {}
 
 

@@ -58,6 +58,7 @@ export type Turn = {
   clarify_question?: ClarifyQuestion | { questions: ClarifyQuestion[] } | null;
   brief_after?: WorkflowBriefSnapshot | null;
   clarify_round?: number | null;
+  error_correlation_id?: string | null;
 };
 
 export type ClarifyQuestion = {

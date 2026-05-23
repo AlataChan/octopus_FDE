@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
@@ -19,7 +20,7 @@ from loom.fde_session.clarify_engine import (
     ClarifyQuestion,
     next_blocking_questions,
 )
-from loom.fde_session.redaction import has_potential_secret, redact_draft
+from loom.fde_session.redaction import has_potential_secret, redact_draft, redact_text
 from loom.ir.canonicalize import canonical_ir_hash
 from loom.ir.models import IRDocument
 from loom.registry.models import WorkflowRecord
@@ -35,6 +36,8 @@ from loom.validator.validate import validate
 
 router = APIRouter(prefix="/v1")
 ActorDep = Annotated[Actor, Depends(get_actor)]
+CLIENT_PLANNER_ERROR = "planner_error"
+REDACTED_SECRET_USER_MESSAGE = "[REDACTED:potential_secret]"
 
 
 class CreateSessionRequest(BaseModel):
@@ -77,6 +80,7 @@ def create_session(
         actor_id=actor_id,
         fernet=request.app.state.fernet,
         audit_writer=_session_audit_writer(request, actor_id),
+        self_design=body.template_id is None,
     )
     if body.template_id:
         session = _seed_session_from_template(
@@ -162,6 +166,24 @@ def create_turn(
     last_turn = previous_turns[-1] if previous_turns else None
     loaded_draft_before = _load_draft(session.brief_draft)
     brief_before = _draft_json(loaded_draft_before) if loaded_draft_before else None
+    if has_potential_secret(body.user_message):
+        turn = store.create_turn(
+            session_id,
+            actor_id=actor.id,
+            user_message=REDACTED_SECRET_USER_MESSAGE,
+            ir_before=session.latest_ir_json,
+            kind="clarify",
+            brief_before=brief_before,
+        )
+        _archive_turn_started(request, session_id, actor.id, turn, body.user_message)
+        return _handle_clarify_turn(
+            request=request,
+            actor=actor,
+            session=session,
+            turn=turn,
+            user_message=body.user_message,
+            last_turn=last_turn,
+        )
     turn = store.create_turn(
         session_id,
         actor_id=actor.id,
@@ -169,12 +191,7 @@ def create_turn(
         ir_before=session.latest_ir_json,
         brief_before=brief_before,
     )
-    request.app.state.archive_writer.append(
-        session_id,
-        actor_id=actor.id,
-        event_type="turn.started",
-        payload={"turn_id": str(turn.turn_id), "user_message_sha256": _sha256_text(body.user_message)},
-    )
+    _archive_turn_started(request, session_id, actor.id, turn, body.user_message)
     if _should_run_clarify(session):
         return _handle_clarify_turn(
             request=request,
@@ -232,15 +249,11 @@ def create_turn(
         row = store.finish_turn_failed(
             turn.turn_id,
             actor_id=actor.id,
-            error_kind="planner_error",
-            validation_errors=[str(e)],
+            error_kind=CLIENT_PLANNER_ERROR,
+            validation_errors=[CLIENT_PLANNER_ERROR],
+            error_correlation_id=_error_correlation_id(),
         )
-        request.app.state.archive_writer.append(
-            session_id,
-            actor_id=actor.id,
-            event_type="turn.failed",
-            payload={"turn_id": str(turn.turn_id), "error_kind": "planner_error"},
-        )
+        _archive_planner_failure(request, session_id, actor.id, turn.turn_id, e, row.error_correlation_id)
         return _turn_response(row)
 
 
@@ -462,6 +475,42 @@ def _session_audit_writer(request: Request, actor_id: str) -> Callable[[UUID, li
             )
 
     return write
+
+
+def _archive_turn_started(request: Request, session_id: UUID, actor_id: str, turn: TurnRow, user_message: str) -> None:
+    request.app.state.archive_writer.append(
+        session_id,
+        actor_id=actor_id,
+        event_type="turn.started",
+        payload={"turn_id": str(turn.turn_id), "user_message_sha256": _sha256_text(user_message)},
+    )
+
+
+def _error_correlation_id() -> str:
+    return uuid4().hex
+
+
+def _archive_planner_failure(
+    request: Request,
+    session_id: UUID,
+    actor_id: str,
+    turn_id: UUID,
+    error: Exception,
+    correlation_id: str | None,
+) -> None:
+    message = str(error)
+    print(f"planner_error correlation_id={correlation_id} message={message}", file=sys.stderr)
+    request.app.state.archive_writer.append(
+        session_id,
+        actor_id=actor_id,
+        event_type="turn.failed",
+        payload={
+            "turn_id": str(turn_id),
+            "error_kind": CLIENT_PLANNER_ERROR,
+            "error_correlation_id": correlation_id,
+            "error_message_sha256": _sha256_text(message),
+        },
+    )
 
 
 def _handle_clarify_turn(
@@ -692,20 +741,21 @@ def _finish_plan_from_draft(
         row = request.app.state.session_store.finish_turn_failed(
             turn.turn_id,
             actor_id=actor.id,
-            error_kind="planner_error",
-            validation_errors=[str(e)],
+            error_kind=CLIENT_PLANNER_ERROR,
+            validation_errors=[CLIENT_PLANNER_ERROR],
+            error_correlation_id=_error_correlation_id(),
         )
-        request.app.state.archive_writer.append(
-            session.session_id,
-            actor_id=actor.id,
-            event_type="turn.failed",
-            payload={"turn_id": str(turn.turn_id), "error_kind": "planner_error"},
-        )
+        _archive_planner_failure(request, session.session_id, actor.id, turn.turn_id, e, row.error_correlation_id)
         return _turn_response(row)
 
 
 def _should_run_clarify(session: SessionRow) -> bool:
-    return session.brief_draft is not None or session.latest_ir_json is None
+    """仅 self-design 会话进入澄清状态机。
+    模板会话已由模板种子写入 IR，不应被二次澄清拦截。
+    brief_draft 只作为审计/恢复快照，不再承担路由判定。
+    这样避免模板路径和 self-design 路径因 IR/brief 状态混淆。
+    """
+    return session.self_design
 
 
 def _load_draft(raw: str | None) -> WorkflowBriefDraft | None:
@@ -718,8 +768,18 @@ def _merge_draft(brief: WorkflowBriefDraft | None, patch: dict[str, object]) -> 
     data = brief.model_dump(mode="python") if brief else {}
     for key, value in patch.items():
         if value is not None:
-            data[key] = value
+            data[key] = _redact_patch_value(value)
     return WorkflowBriefDraft.model_validate(data)
+
+
+def _redact_patch_value(value: object) -> object:
+    if isinstance(value, str):
+        return redact_text(value)
+    if isinstance(value, list):
+        return [_redact_patch_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _redact_patch_value(item) for key, item in value.items()}
+    return value
 
 
 def _draft_json(draft: WorkflowBriefDraft) -> str:
@@ -729,7 +789,7 @@ def _draft_json(draft: WorkflowBriefDraft) -> str:
 
 def _draft_to_planner_message(draft: WorkflowBriefDraft) -> str:
     return "\n\n".join([
-        draft.intent or "",
+        redact_text(draft.intent or ""),
         "# Workflow brief draft",
         _draft_json(draft),
     ]).strip()
@@ -847,6 +907,7 @@ def _seed_session_from_template(
         actor_id=actor_id,
         target_runtime=selected_target,
         scope=selected_scope,
+        self_design=False,
     )
     failures = validate(
         record.ir,
@@ -912,6 +973,7 @@ def _turn_response(row: Any) -> dict[str, object]:
         "clarify_question": clarify_question,
         "brief_after": brief_after,
         "clarify_round": getattr(row, "clarify_round", None),
+        "error_correlation_id": getattr(row, "error_correlation_id", None),
     }
 
 

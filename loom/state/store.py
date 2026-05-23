@@ -32,16 +32,16 @@ class SessionStore:
             row = con.execute(f"PRAGMA {name}").fetchone()
         return str(row[0])
 
-    def create_session(self, *, actor_id: str) -> SessionRow:
+    def create_session(self, *, actor_id: str, self_design: bool = False) -> SessionRow:
         now = _now()
         sid = uuid4()
         with self._connect() as con:
             con.execute(
                 """
-                INSERT INTO sessions (session_id, actor_id, state, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO sessions (session_id, actor_id, state, self_design, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (str(sid), actor_id, SessionState.INIT.value, now, now),
+                (str(sid), actor_id, SessionState.INIT.value, int(self_design), now, now),
             )
         row = self.get_session(sid, actor_id=actor_id)
         assert row is not None
@@ -53,6 +53,7 @@ class SessionStore:
         actor_id: str,
         fernet: Fernet,
         audit_writer: AuditEventWriter | None = None,
+        self_design: bool = False,
     ) -> SessionRow:
         del fernet  # actor defaults are already encrypted with the same service key.
         now = _now()
@@ -60,10 +61,10 @@ class SessionStore:
         with self._connect() as con:
             con.execute(
                 """
-                INSERT INTO sessions (session_id, actor_id, state, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO sessions (session_id, actor_id, state, self_design, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (str(sid), actor_id, SessionState.INIT.value, now, now),
+                (str(sid), actor_id, SessionState.INIT.value, int(self_design), now, now),
             )
             events: list[tuple[str, dict[str, object]]] = [
                 ("session.created", {"actor_id": actor_id})
@@ -261,17 +262,28 @@ class SessionStore:
         actor_id: str,
         target_runtime: Literal["hiagent", "dify"] | None,
         scope: str | None,
+        self_design: bool | None = None,
     ) -> SessionRow:
         self.require_session(session_id, actor_id=actor_id)
         with self._connect() as con:
-            con.execute(
-                """
-                UPDATE sessions
-                SET target_runtime = ?, scope = ?, updated_at = ?
-                WHERE session_id = ? AND actor_id = ?
-                """,
-                (target_runtime, scope, _now(), str(session_id), actor_id),
-            )
+            if self_design is None:
+                con.execute(
+                    """
+                    UPDATE sessions
+                    SET target_runtime = ?, scope = ?, updated_at = ?
+                    WHERE session_id = ? AND actor_id = ?
+                    """,
+                    (target_runtime, scope, _now(), str(session_id), actor_id),
+                )
+            else:
+                con.execute(
+                    """
+                    UPDATE sessions
+                    SET target_runtime = ?, scope = ?, self_design = ?, updated_at = ?
+                    WHERE session_id = ? AND actor_id = ?
+                    """,
+                    (target_runtime, scope, int(self_design), _now(), str(session_id), actor_id),
+                )
         row = self.get_session(session_id, actor_id=actor_id)
         assert row is not None
         return row
@@ -412,16 +424,18 @@ class SessionStore:
         actor_id: str,
         error_kind: str,
         validation_errors: list[str],
+        error_correlation_id: str | None = None,
     ) -> TurnRow:
         self.require_turn(turn_id, actor_id=actor_id)
         with self._connect() as con:
             con.execute(
                 """
                 UPDATE turns
-                SET status = 'failed', planner_reply = ?, validation_errors = ?
+                SET status = 'failed', planner_reply = ?, validation_errors = ?,
+                    error_correlation_id = ?
                 WHERE turn_id = ? AND actor_id = ?
                 """,
-                (error_kind, json.dumps(validation_errors), str(turn_id), actor_id),
+                (error_kind, json.dumps(validation_errors), error_correlation_id, str(turn_id), actor_id),
             )
         row = self.get_turn(turn_id, actor_id=actor_id)
         assert row is not None
@@ -566,6 +580,7 @@ class SessionStore:
                     scope TEXT,
                     brief_draft TEXT,
                     clarify_round INTEGER NOT NULL DEFAULT 0,
+                    self_design INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -581,6 +596,7 @@ class SessionStore:
                     clarify_question TEXT,
                     brief_before TEXT,
                     brief_after TEXT,
+                    error_correlation_id TEXT,
                     validation_errors TEXT NOT NULL,
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL
@@ -627,6 +643,8 @@ class SessionStore:
                 con.execute("ALTER TABLE sessions ADD COLUMN brief_draft TEXT")
             if "clarify_round" not in session_columns:
                 con.execute("ALTER TABLE sessions ADD COLUMN clarify_round INTEGER NOT NULL DEFAULT 0")
+            if "self_design" not in session_columns:
+                con.execute("ALTER TABLE sessions ADD COLUMN self_design INTEGER NOT NULL DEFAULT 0")
             turn_columns = {row["name"] for row in con.execute("PRAGMA table_info(turns)").fetchall()}
             if "kind" not in turn_columns:
                 con.execute("ALTER TABLE turns ADD COLUMN kind TEXT NOT NULL DEFAULT 'plan'")
@@ -636,6 +654,8 @@ class SessionStore:
                 con.execute("ALTER TABLE turns ADD COLUMN brief_before TEXT")
             if "brief_after" not in turn_columns:
                 con.execute("ALTER TABLE turns ADD COLUMN brief_after TEXT")
+            if "error_correlation_id" not in turn_columns:
+                con.execute("ALTER TABLE turns ADD COLUMN error_correlation_id TEXT")
 
     @staticmethod
     def _get_actor_llm_config_con(
@@ -670,6 +690,7 @@ def _session_row(row: sqlite3.Row) -> SessionRow:
         scope=row["scope"] if "scope" in row.keys() else None,
         brief_draft=row["brief_draft"] if "brief_draft" in row.keys() else None,
         clarify_round=row["clarify_round"] if "clarify_round" in row.keys() else 0,
+        self_design=bool(row["self_design"]) if "self_design" in row.keys() else False,
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )
@@ -701,6 +722,7 @@ def _turn_row(row: sqlite3.Row) -> TurnRow:
         clarify_question=row["clarify_question"] if "clarify_question" in row.keys() else None,
         brief_before=row["brief_before"] if "brief_before" in row.keys() else None,
         brief_after=row["brief_after"] if "brief_after" in row.keys() else None,
+        error_correlation_id=row["error_correlation_id"] if "error_correlation_id" in row.keys() else None,
         validation_errors=json.loads(row["validation_errors"]),
         status=row["status"],
         created_at=datetime.fromisoformat(row["created_at"]),

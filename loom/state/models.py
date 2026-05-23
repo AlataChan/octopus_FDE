@@ -27,6 +27,7 @@ class SessionRow(BaseModel):
     scope: str | None = None
     brief_draft: str | None = None
     clarify_round: int = 0
+    self_design: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -58,6 +59,7 @@ class TurnRow(BaseModel):
     clarify_question: str | None = None
     brief_before: str | None = None
     brief_after: str | None = None
+    error_correlation_id: str | None = None
     validation_errors: list[str]
     status: Literal["running", "succeeded", "failed"]
     created_at: datetime

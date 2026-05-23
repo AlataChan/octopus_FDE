@@ -128,6 +128,26 @@ def test_self_design_first_turn_returns_clarify_without_planning(tmp_path):
     assert "我要一个客服 FAQ" not in archive
 
 
+def test_secret_like_turn_message_is_rejected_before_raw_text_is_persisted(tmp_path):
+    client = _client(tmp_path, planner=lambda **_kwargs: _sample_ir())
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+    raw_secret = "Authorization: Bearer abc1234567890abcdef"
+
+    turn = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": raw_secret}).json()
+
+    assert turn["status"] == "succeeded"
+    assert turn["kind"] == "clarify"
+    assert turn["clarify_question"]["field_path"] == "credentials"
+    rows = client.app.state.session_store.list_turns(sid, actor_id="single-user")
+    assert rows[-1].user_message == "[REDACTED:potential_secret]"
+    assert "Bearer" not in rows[-1].user_message
+    assert "abc1234567890abcdef" not in rows[-1].user_message
+    archive = client.get(f"/v1/archive/sessions/{sid}").text
+    assert "turn.clarify_started" in archive
+    assert "Bearer" not in archive
+    assert "abc1234567890abcdef" not in archive
+
+
 def test_self_design_fourth_turn_emits_questionnaire_when_still_blocked(tmp_path):
     client = _client(tmp_path, planner=lambda **_kwargs: _sample_ir())
     sid = client.post("/v1/sessions", json={}).json()["session_id"]
@@ -264,6 +284,36 @@ def test_turn_failure_keeps_latest_ir_pointer(tmp_path):
     assert after_session["state"] == before_session["state"]
 
 
+def test_planner_exception_is_not_reflected_to_client_or_db(tmp_path):
+    def planner(**_kwargs):
+        raise RuntimeError("boom https://example.com/secret?token=xyz")
+
+    clarify_engine = FakeClarifyEngine([
+        ClarifyEngineResult(intent_update=_complete_draft().model_dump(mode="json"), next_action="ready"),
+    ])
+    client = _client(tmp_path, planner=planner, clarify_engine=clarify_engine)
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+
+    turn = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "build"}).json()
+
+    assert turn["status"] == "failed"
+    assert turn["errors"] == ["planner_error"]
+    assert turn["error_correlation_id"]
+    assert "example.com" not in json.dumps(turn)
+    assert "token=xyz" not in json.dumps(turn)
+    rows = client.app.state.session_store.list_turns(sid, actor_id="single-user")
+    assert rows[-1].validation_errors == ["planner_error"]
+    assert rows[-1].error_correlation_id == turn["error_correlation_id"]
+    stored = json.dumps(rows[-1].model_dump(mode="json"))
+    assert "example.com" not in stored
+    assert "token=xyz" not in stored
+    archive = client.get(f"/v1/archive/sessions/{sid}").text
+    assert "error_message_sha256" in archive
+    assert rows[-1].error_correlation_id in archive
+    assert "example.com" not in archive
+    assert "token=xyz" not in archive
+
+
 def test_artifact_path_traversal_is_not_part_of_api(tmp_path):
     client = _client(tmp_path, planner=lambda **kwargs: _sample_ir())
     sid = client.post("/v1/sessions", json={}).json()["session_id"]
@@ -349,8 +399,40 @@ def test_create_session_from_template_seeds_validated_ir_and_sentinel_turn(tmp_p
     assert row is not None
     assert row.target_runtime == "hiagent"
     assert row.scope == "ecommerce/kb"
+    assert row.self_design is False
     archive = client.get(f"/v1/archive/sessions/{sid}").text
     assert "template_seeded" in archive
+
+
+def test_template_session_follow_up_turn_does_not_enter_clarify(tmp_path):
+    calls = {"planner": 0}
+
+    def planner(**_kwargs):
+        calls["planner"] += 1
+        return _sample_ir()
+
+    client = _client(tmp_path, planner=planner)
+    sid = client.post(
+        "/v1/sessions",
+        json={"template_id": "knowledge-retrieval-rag", "scope": "ecommerce/kb"},
+    ).json()["session_id"]
+
+    turn = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "adjust it"}).json()
+
+    assert turn["kind"] == "plan"
+    assert calls["planner"] == 1
+
+
+def test_blank_session_is_marked_self_design_and_enters_clarify(tmp_path):
+    client = _client(tmp_path, planner=lambda **_kwargs: _sample_ir())
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+    row = client.app.state.session_store.get_session(sid, actor_id="single-user")
+    assert row is not None
+    assert row.self_design is True
+
+    turn = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "build faq"}).json()
+
+    assert turn["kind"] == "clarify"
 
 
 def test_post_sessions_ignores_unknown_extra_actor_field(tmp_path):
