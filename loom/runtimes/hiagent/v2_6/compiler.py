@@ -244,7 +244,7 @@ def _build_agent_yaml(
     update_time = time.strftime("%Y-%m-%d %H:%M:%S")
     version_name = "v1.0.0"
 
-    agent_yaml = {
+    agent_yaml: dict[str, Any] = {
         "AppConfig": {
             "AgentMode": "Single",
             "AppID": agent_id,

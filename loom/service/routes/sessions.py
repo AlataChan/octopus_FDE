@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated, Any, Literal, cast
@@ -159,7 +160,8 @@ def create_turn(
         raise not_found("session not found")
     previous_turns = store.list_turns(session_id, actor_id=actor.id)
     last_turn = previous_turns[-1] if previous_turns else None
-    brief_before = _draft_json(_load_draft(session.brief_draft)) if session.brief_draft else None
+    loaded_draft_before = _load_draft(session.brief_draft)
+    brief_before = _draft_json(loaded_draft_before) if loaded_draft_before else None
     turn = store.create_turn(
         session_id,
         actor_id=actor.id,
@@ -449,7 +451,7 @@ def _content_disposition(filename: str) -> str:
     return f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded}'
 
 
-def _session_audit_writer(request: Request, actor_id: str):
+def _session_audit_writer(request: Request, actor_id: str) -> Callable[[UUID, list[tuple[str, dict[str, object]]]], None]:
     def write(session_id: UUID, events: list[tuple[str, dict[str, object]]]) -> None:
         for event_type, payload in events:
             request.app.state.archive_writer.append(
@@ -527,7 +529,7 @@ def _handle_clarify_turn(
         )
 
     if session.clarify_round >= 3 and block_questions:
-        payload = {"questions": [q.model_dump(mode="json") for q in block_questions]}
+        payload: dict[str, object] = {"questions": [q.model_dump(mode="json") for q in block_questions]}
         request.app.state.archive_writer.append(
             session.session_id,
             actor_id=actor.id,
@@ -757,8 +759,15 @@ def _question_field_path(payload: dict[str, object]) -> str | None:
 
 
 def _options_count(payload: dict[str, object]) -> int:
-    if "questions" in payload:
-        return sum(len(item.get("options") or []) for item in payload["questions"])  # type: ignore[union-attr]
+    questions = payload.get("questions")
+    if isinstance(questions, list):
+        total = 0
+        for item in questions:
+            if isinstance(item, dict):
+                options = item.get("options")
+                if isinstance(options, list):
+                    total += len(options)
+        return total
     options = payload.get("options")
     return len(options) if isinstance(options, list) else 0
 
@@ -824,7 +833,7 @@ def _seed_session_from_template(
     actor_id: str,
     template_id: str,
     scope: str | None,
-):
+) -> SessionRow:
     catalog = request.app.state.template_catalog
     record = catalog.get(template_id)
     if record is None:
@@ -871,7 +880,7 @@ def _seed_session_from_template(
     )
     seeded = request.app.state.session_store.get_session(session_id, actor_id=actor_id)
     assert seeded is not None
-    return seeded
+    return cast(SessionRow, seeded)
 
 
 def _ensure_template_target_supported(
@@ -907,7 +916,7 @@ def _turn_response(row: Any) -> dict[str, object]:
 
 
 def _session_target_runtime(row: SessionRow) -> Literal["hiagent", "dify"]:
-    return cast(Literal["hiagent", "dify"], row.target_runtime or "hiagent")
+    return row.target_runtime or "hiagent"
 
 
 def _session_scope(row: SessionRow) -> str:
@@ -961,7 +970,7 @@ def _to_session_display(row: SessionRow, turns: list[TurnRow], catalog: Any) -> 
             template_id = first_message.removeprefix("template:").strip()
             record = catalog.get(template_id) if catalog is not None else None
             if record is not None:
-                return record.entry.name.zh or record.entry.name.en
+                return str(record.entry.name.zh or record.entry.name.en)
             return f"Session {str(row.session_id)[:8]}"
         if first_message:
             return first_message[:24]

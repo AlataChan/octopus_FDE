@@ -103,10 +103,16 @@ class WorkflowBriefDraft(BaseModel):
         ]
         if missing:
             raise ValueError(f"WorkflowBriefDraft missing required field(s): {', '.join(missing)}")
+        title = self.title
+        intent = self.intent
+        compliance_boundary = self.compliance_boundary
+        assert title is not None
+        assert intent is not None
+        assert compliance_boundary is not None
         return WorkflowBrief(
             workflow_id=self.workflow_id,
-            title=str(self.title),
-            intent=str(self.intent),
+            title=title,
+            intent=intent,
             trigger=self.trigger,
             inputs=self.inputs,
             data_sources=self.data_sources,
@@ -114,6 +120,6 @@ class WorkflowBriefDraft(BaseModel):
             credentials=self.credentials,
             approval_points=self.approval_points,
             success_criteria=self.success_criteria,
-            compliance_boundary=self.compliance_boundary,  # type: ignore[arg-type]
+            compliance_boundary=compliance_boundary,
             known_edits=self.known_edits,
         )

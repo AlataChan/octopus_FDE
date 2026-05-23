@@ -1,12 +1,12 @@
 """Template gallery API routes."""
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from loom.registry.templates import LocalizedText, Target
+from loom.registry.templates import LocalizedText, Target, TemplateRecord
 from loom.service.errors import not_found
 
 router = APIRouter(prefix="/v1")
@@ -28,7 +28,7 @@ class TemplateIRResponse(BaseModel):
     tags: list[str]
     scopes: list[str]
     compile_targets: list[Target]
-    ir: dict
+    ir: dict[str, Any]
 
 
 @router.get("/templates", response_model=list[PublicTemplate])
@@ -59,7 +59,7 @@ def get_template(template_id: str, request: Request) -> TemplateIRResponse:
     )
 
 
-def _public_template(row) -> PublicTemplate:
+def _public_template(row: TemplateRecord) -> PublicTemplate:
     entry = row.entry
     return PublicTemplate(
         id=entry.id,

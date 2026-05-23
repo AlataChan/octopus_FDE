@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loom.ir.models import (
     AgentNode,
@@ -188,7 +188,7 @@ def _format_ref(ref: VarRef) -> str:
     return f"${{{ref.node_id}{path}}}"
 
 
-def _json_schema_field_type(output_schema: dict | None, field: str) -> str | None:
+def _json_schema_field_type(output_schema: dict[str, Any] | None, field: str) -> str | None:
     if not isinstance(output_schema, dict):
         return None
     props = output_schema.get("properties")

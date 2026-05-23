@@ -18,13 +18,14 @@ if TYPE_CHECKING:
         PushContext,
         UnrecognizedConstruct,
     )
+    from loom.runtimes.warnings import CompileWarning
 
 
 class DifyAdapter:
     target = "dify"
     version = DIFY_VERSION
 
-    def compile(self, ir: IRDocument):
+    def compile(self, ir: IRDocument) -> tuple[str, list[CompileWarning]]:
         # compile_to_yaml already returns YAML string; the adapter passes it through.
         return compile_to_yaml(ir)
 

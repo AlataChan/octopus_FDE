@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, cast
 
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field
@@ -49,7 +49,7 @@ class TemplateIndex(BaseModel):
 @dataclass(frozen=True)
 class TemplateRecord:
     entry: TemplateIndexEntry
-    ir: dict
+    ir: dict[str, Any]
 
     @property
     def ir_document(self) -> IRDocument:
@@ -95,17 +95,17 @@ class TemplateCatalog:
         return self._records.get(template_id)
 
 
-def _load_template_ir(path: Path, template_id: str) -> dict:
+def _load_template_ir(path: Path, template_id: str) -> dict[str, Any]:
     try:
         raw = yaml.safe_load(path.read_text())
     except Exception as e:  # noqa: BLE001
         raise TemplateLoadError(f"failed to load template {template_id}: {e}") from e
     if not isinstance(raw, dict):
         raise TemplateLoadError(f"template {template_id} must contain a YAML object")
-    return raw
+    return cast("dict[str, Any]", raw)
 
 
-def _validate_template(entry: TemplateIndexEntry, ir: dict, registry: Registry) -> None:
+def _validate_template(entry: TemplateIndexEntry, ir: dict[str, Any], registry: Registry) -> None:
     try:
         validate_schema(ir)
         doc = IRDocument.model_validate(ir)

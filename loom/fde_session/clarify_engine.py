@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -39,7 +39,7 @@ class ClarifyQuestion(BaseModel):
 class ClarifyEngineResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    intent_update: dict = Field(default_factory=dict)
+    intent_update: dict[str, Any] = Field(default_factory=dict)
     next_action: Literal["ask", "ready"]
     question: ClarifyQuestion | None = None
     confidence: float = Field(default=1.0, ge=0, le=1)
@@ -68,7 +68,7 @@ class DeterministicClarifyEngine:
         pending_field_paths: Sequence[str] | None = None,
     ) -> ClarifyEngineResult:
         del round_index
-        update: dict = {}
+        update: dict[str, Any] = {}
         if brief is None:
             update.update({
                 "title": _title_from_message(user_message),
@@ -134,7 +134,7 @@ def question_for_policy(question: PolicyQuestion) -> ClarifyQuestion:
     )
 
 
-def parse_field_answer(field_path: str, answer: str) -> dict:
+def parse_field_answer(field_path: str, answer: str) -> dict[str, Any]:
     text = answer.strip()
     lower = text.lower()
     if not text:
@@ -265,7 +265,7 @@ def _cron_from_answer(answer: str) -> str:
 def _data_sources_from_answer(answer: str) -> list[DataSourceRef]:
     lower = answer.lower()
     sources: list[DataSourceRef] = []
-    known = {
+    known: dict[str, tuple[str, Literal["dataset", "kb", "table", "api"]]] = {
         "product_kb": ("product_kb", "kb"),
         "policy_kb": ("policy_kb", "kb"),
         "clinic_kb": ("clinic_kb", "kb"),
@@ -275,7 +275,7 @@ def _data_sources_from_answer(answer: str) -> list[DataSourceRef]:
     }
     for token, (handle, kind) in known.items():
         if token in lower or token.replace("_", " ") in lower:
-            sources.append(DataSourceRef(handle=handle, kind=kind))  # type: ignore[arg-type]
+            sources.append(DataSourceRef(handle=handle, kind=kind))
     if "知识库" in answer and not sources:
         sources.append(DataSourceRef(handle="product_kb", kind="kb"))
     if "shopify" in lower and not any(source.handle == "shopify_api" for source in sources):

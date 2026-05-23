@@ -17,13 +17,14 @@ if TYPE_CHECKING:
         PushContext,
         UnrecognizedConstruct,
     )
+    from loom.runtimes.warnings import CompileWarning
 
 
 class HiagentAdapter:
     target = "hiagent"
     version = HIAGENT_VERSION
 
-    def compile(self, ir: IRDocument, *, binding: HiagentBinding | None = None):
+    def compile(self, ir: IRDocument, *, binding: HiagentBinding | None = None) -> tuple[HiagentBundle, list[CompileWarning]]:
         """Compile IR to a HiagentBundle.
 
         Per ADR 0024, a customer Binding [workspace_id required] is mandatory

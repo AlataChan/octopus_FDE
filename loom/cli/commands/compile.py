@@ -97,10 +97,10 @@ def compile_cmd(
             )
             sys.exit(2)
         zip_path.write_bytes(dsl.to_zip_bytes())
-        for warning in _hiagent_binding_warnings(ir, dsl):
-            click.echo(f"warning: {warning}", err=True)
-        for warning in compile_warnings:
-            click.echo(f"warning[{warning.code}]: {warning.message}", err=True)
+        for binding_warning in _hiagent_binding_warnings(ir, dsl):
+            click.echo(f"warning: {binding_warning}", err=True)
+        for compile_warning in compile_warnings:
+            click.echo(f"warning[{compile_warning.code}]: {compile_warning.message}", err=True)
         click.echo(f"wrote {zip_path} (hiagent {mode} zip)")
         click.echo("Next: drag this zip into Hiagent's 导入智能体 wizard.")
         return
@@ -115,8 +115,8 @@ def compile_cmd(
         out_path.write_bytes(serialized)
     else:
         out_path.write_text(serialized)
-    for warning in compile_warnings:
-        click.echo(f"warning[{warning.code}]: {warning.message}", err=True)
+    for compile_warning in compile_warnings:
+        click.echo(f"warning[{compile_warning.code}]: {compile_warning.message}", err=True)
     click.echo(f"wrote {out_path} ({target})")
 
 

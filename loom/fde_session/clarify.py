@@ -5,8 +5,10 @@ from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
+from loom.fde_session.brief import WorkflowBriefDraft
+
 if TYPE_CHECKING:
-    from loom.fde_session.brief import WorkflowBrief, WorkflowBriefDraft
+    from loom.fde_session.brief import WorkflowBrief
 
 
 class ClarifyQuestion(BaseModel):
@@ -21,7 +23,7 @@ def missing_fields(brief: WorkflowBrief | WorkflowBriefDraft) -> list[ClarifyQue
     questions: list[ClarifyQuestion] = []
     intent = (brief.intent or "").lower()
 
-    if _is_draft(brief):
+    if isinstance(brief, WorkflowBriefDraft):
         if not brief.target_runtime:
             questions.append(_block("target_runtime", "Which target runtime should this workflow compile to?"))
         if not brief.scope:
@@ -69,7 +71,7 @@ def missing_fields(brief: WorkflowBrief | WorkflowBriefDraft) -> list[ClarifyQue
             )
         )
 
-    if not brief.success_criteria.strip():
+    if not (brief.success_criteria or "").strip():
         questions.append(
             _block("success_criteria", "What concrete success criteria should the generated workflow satisfy?")
         )
@@ -83,7 +85,7 @@ def missing_fields(brief: WorkflowBrief | WorkflowBriefDraft) -> list[ClarifyQue
             )
         )
 
-    if len(brief.intent.strip()) < 30:
+    if len((brief.intent or "").strip()) < 30:
         questions.append(
             ClarifyQuestion(
                 field_path="intent",
@@ -97,10 +99,6 @@ def missing_fields(brief: WorkflowBrief | WorkflowBriefDraft) -> list[ClarifyQue
 
 def _block(field_path: str, question: str) -> ClarifyQuestion:
     return ClarifyQuestion(field_path=field_path, question=question, severity="block")
-
-
-def _is_draft(brief: WorkflowBrief | WorkflowBriefDraft) -> bool:
-    return hasattr(brief, "target_runtime") and hasattr(brief, "scope")
 
 
 def _needs_retrieval_source(intent: str) -> bool:
