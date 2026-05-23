@@ -1,9 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
-import { Activity, Languages, Moon, ShieldCheck, Sun } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Activity, Languages, LogOut, Moon, ShieldCheck, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTheme } from "../../hooks/useTheme";
-import { getHealth } from "../../lib/api";
+import { useAuth } from "../../hooks/useAuth";
+import { getHealth, logout } from "../../lib/api";
 import { useActor } from "../../lib/useActor";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
@@ -12,7 +13,17 @@ export function TopBar() {
   const { i18n, t } = useTranslation();
   const actor = useActor();
   const location = useLocation();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { isDark, toggleTheme } = useTheme();
+  const auth = useAuth({ enabled: location.pathname !== "/login" });
+  const logoutMutation = useMutation({
+    mutationFn: logout,
+    onSuccess: async () => {
+      queryClient.removeQueries({ queryKey: ["auth", "me"] });
+      navigate("/login", { replace: true });
+    }
+  });
   const health = useQuery({
     queryKey: ["health"],
     queryFn: getHealth
@@ -54,8 +65,20 @@ export function TopBar() {
       <div className="flex shrink-0 items-center gap-2">
         <span className="hidden items-center gap-1.5 rounded-full border border-border/50 bg-bg-app/50 px-3 py-1.5 text-xs font-medium text-fg-muted sm:inline-flex">
           <ShieldCheck aria-hidden className="h-3.5 w-3.5 text-accent" />
-          {actor.id} / {actor.role}
+          {auth.data?.username || actor.id} / {actor.role}
         </span>
+        {auth.data ? (
+          <Button
+            aria-label={t("auth.logout")}
+            icon={<LogOut aria-hidden className="h-4 w-4" />}
+            loading={logoutMutation.isPending}
+            size="sm"
+            variant="ghost"
+            onClick={() => logoutMutation.mutate()}
+          >
+            <span className="hidden sm:inline">{t("auth.logout")}</span>
+          </Button>
+        ) : null}
         <Button
           aria-label={t("language.switch")}
           icon={<Languages aria-hidden className="h-4 w-4" />}

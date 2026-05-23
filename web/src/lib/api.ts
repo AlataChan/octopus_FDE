@@ -1,5 +1,6 @@
 import type { paths } from "./types.generated";
 import type {
+  AuthMe,
   BindingSummary,
   CompileInput,
   CompileResponse,
@@ -30,8 +31,12 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
+    credentials: "include",
     headers
   });
+  if (response.status === 401) {
+    redirectToLogin();
+  }
   if (!response.ok) {
     throw new Error(`API request failed: ${response.status}`);
   }
@@ -43,8 +48,12 @@ export async function apiBlob(path: string, init: RequestInit = {}): Promise<Blo
   headers.set("X-Actor-Id", DEFAULT_ACTOR.id);
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
+    credentials: "include",
     headers
   });
+  if (response.status === 401) {
+    redirectToLogin();
+  }
   if (!response.ok) {
     throw new Error(`API request failed: ${response.status}`);
   }
@@ -53,6 +62,21 @@ export async function apiBlob(path: string, init: RequestInit = {}): Promise<Blo
 
 export function getHealth(): Promise<HealthResponse> {
   return apiFetch<HealthResponse>("/v1/health");
+}
+
+export function getAuthMe(): Promise<AuthMe> {
+  return apiFetch<AuthMe>("/v1/auth/me");
+}
+
+export function login(username: string, password: string): Promise<AuthMe> {
+  return apiFetch<AuthMe>("/v1/auth/login", {
+    body: JSON.stringify({ password, username }),
+    method: "POST"
+  });
+}
+
+export function logout(): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>("/v1/auth/logout", { method: "POST" });
 }
 
 export function listSessions(): Promise<SessionSummary[]> {
@@ -166,4 +190,10 @@ export function markWorkflowDeployed(
     }),
     method: "POST"
   });
+}
+
+function redirectToLogin() {
+  if (typeof window === "undefined") return;
+  if (window.location.pathname === "/login") return;
+  window.location.assign("/login");
 }

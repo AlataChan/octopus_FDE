@@ -6,7 +6,7 @@ describe("apiFetch", () => {
     vi.unstubAllGlobals();
   });
 
-  it("adds the actor header to backend requests", async () => {
+  it("adds the actor header and includes cookies on backend requests", async () => {
     const fetchMock = vi.fn(async () => {
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" },
@@ -21,5 +21,6 @@ describe("apiFetch", () => {
     const init = calls[0][1];
     const headers = init.headers as Headers;
     expect(headers.get("X-Actor-Id")).toBe("single-user");
+    expect(init.credentials).toBe("include");
   });
 });

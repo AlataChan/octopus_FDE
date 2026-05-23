@@ -61,6 +61,11 @@ export type Turn = {
   error_correlation_id?: string | null;
 };
 
+export type AuthMe = {
+  username: string;
+  expires_at: string | null;
+};
+
 export type ClarifyQuestion = {
   text: string;
   field_path: string;
