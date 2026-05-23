@@ -54,7 +54,21 @@ export type Turn = {
   planner_reply: string | null;
   errors: string[];
   ir_diff: unknown;
+  kind?: "clarify" | "plan" | "questionnaire";
+  clarify_question?: ClarifyQuestion | { questions: ClarifyQuestion[] } | null;
+  brief_after?: WorkflowBriefSnapshot | null;
+  clarify_round?: number | null;
 };
+
+export type ClarifyQuestion = {
+  text: string;
+  field_path: string;
+  options?: { label: string; value: string }[] | null;
+  allow_freeform: boolean;
+  severity: "block" | "warn";
+};
+
+export type WorkflowBriefSnapshot = Record<string, unknown>;
 
 export type BindingSummary = {
   handle: string;

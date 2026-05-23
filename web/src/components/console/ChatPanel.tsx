@@ -6,6 +6,8 @@ import { Button } from "../ui/Button";
 import { Card, CardBody, CardHeader } from "../ui/Card";
 import { Chip } from "../ui/Chip";
 import { Textarea } from "../ui/Textarea";
+import { ClarifyBubble } from "./ClarifyBubble";
+import { QuestionnaireBubble } from "./QuestionnaireBubble";
 
 type Props = {
   isSending: boolean;
@@ -45,7 +47,7 @@ export function ChatPanel({ isSending, onSend, turns }: Props) {
               {t("chat.empty")}
             </div>
           ) : (
-            turns.map((turn) => <TurnBubble key={turn.turn_id} turn={turn} />)
+            turns.map((turn) => <TurnBubble key={turn.turn_id} isSending={isSending} onSend={onSend} turn={turn} />)
           )}
         </div>
         <form className="shrink-0 border-t border-border/30 p-4" onSubmit={submit}>
@@ -71,9 +73,11 @@ export function ChatPanel({ isSending, onSend, turns }: Props) {
   );
 }
 
-function TurnBubble({ turn }: { turn: Turn }) {
+function TurnBubble({ isSending, onSend, turn }: { isSending: boolean; onSend: (message: string) => void; turn: Turn }) {
   const { t } = useTranslation();
   const isFailed = turn.status === "failed";
+  const kind = turn.kind || "plan";
+  const question = turn.clarify_question;
   return (
     <article className="space-y-2">
       <div className="flex items-center justify-between gap-2 text-xs">
@@ -88,18 +92,24 @@ function TurnBubble({ turn }: { turn: Turn }) {
           {t(`turn.status.${turn.status}`)}
         </Chip>
       </div>
-      <div
-        className={
-          isFailed
-            ? "rounded-lg bg-destructive/10 p-3 text-sm leading-6 text-fg ring-1 ring-destructive/30"
-            : "rounded-lg bg-bg-app/60 p-3 text-sm leading-6 text-fg ring-1 ring-accent/15"
-        }
-      >
-        <p className="flex items-start gap-2">
-          <Bot aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
-          <span>{turn.planner_reply || turn.errors.join("; ") || t("chat.turnPending")}</span>
-        </p>
-      </div>
+      {kind === "clarify" && question && !("questions" in question) ? (
+        <ClarifyBubble disabled={isSending} onSend={onSend} question={question} />
+      ) : kind === "questionnaire" && question && "questions" in question ? (
+        <QuestionnaireBubble disabled={isSending} onSend={onSend} questions={question.questions} />
+      ) : (
+        <div
+          className={
+            isFailed
+              ? "rounded-lg bg-destructive/10 p-3 text-sm leading-6 text-fg ring-1 ring-destructive/30"
+              : "rounded-lg bg-bg-app/60 p-3 text-sm leading-6 text-fg ring-1 ring-accent/15"
+          }
+        >
+          <p className="flex items-start gap-2">
+            <Bot aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
+            <span>{turn.planner_reply || turn.errors.join("; ") || t("chat.turnPending")}</span>
+          </p>
+        </div>
+      )}
     </article>
   );
 }
