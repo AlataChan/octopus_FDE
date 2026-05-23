@@ -6,6 +6,8 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from loom.ir.models import IRDocument
+from loom.fde_session.brief import ComplianceBoundary, DataSourceRef, TriggerSpec, WorkflowBriefDraft
+from loom.fde_session.clarify_engine import ClarifyEngineResult, FakeClarifyEngine
 from loom.service.app import create_app
 from loom.service.deps import Settings
 
@@ -18,7 +20,25 @@ def _sample_ir() -> IRDocument:
     )
 
 
-def _client(tmp_path, planner=None) -> TestClient:
+def _complete_draft(*, target_runtime: str = "hiagent") -> WorkflowBriefDraft:
+    return WorkflowBriefDraft(
+        title="FAQ workflow",
+        intent="Answer ecommerce FAQ questions from product KB with citations.",
+        trigger=TriggerSpec(mode="manual"),
+        data_sources=[DataSourceRef(handle="product_kb", kind="kb")],
+        success_criteria="Answer with citations.",
+        compliance_boundary=ComplianceBoundary(
+            pii_class_default="low",
+            regulatory_tags=[],
+            geographies=["CN"],
+        ),
+        target_runtime=target_runtime,  # type: ignore[arg-type]
+        scope="ecommerce/kb",
+        known_edits=["Initial build."],
+    )
+
+
+def _client(tmp_path, planner=None, clarify_engine=None) -> TestClient:
     bindings = tmp_path / "bindings"
     bindings.mkdir()
     (bindings / "test.hiagent.yaml").write_text((ROOT / "tests" / "fixtures" / "test.hiagent.yaml").read_text())
@@ -29,19 +49,22 @@ def _client(tmp_path, planner=None) -> TestClient:
         fernet_key=Fernet.generate_key().decode(),
         binding_dir=bindings,
     )
-    return TestClient(create_app(settings=settings, planner=planner))
+    return TestClient(create_app(settings=settings, planner=planner, clarify_engine=clarify_engine))
 
 
 def test_session_turn_compile_download_archive_and_registry_round_trip(tmp_path):
     ir = _sample_ir()
 
     def planner(*, user_message: str, **kwargs):
-        assert user_message == "build faq"
+        assert "Answer ecommerce FAQ questions" in user_message
         assert kwargs["target"] == "hiagent"
         assert kwargs["scope"] == "ecommerce/kb"
         return ir
 
-    client = _client(tmp_path, planner=planner)
+    clarify_engine = FakeClarifyEngine([
+        ClarifyEngineResult(intent_update=_complete_draft().model_dump(mode="json"), next_action="ready"),
+    ])
+    client = _client(tmp_path, planner=planner, clarify_engine=clarify_engine)
     session = client.post("/v1/sessions", json={}).json()
     sid = session["session_id"]
 
@@ -53,6 +76,7 @@ def test_session_turn_compile_download_archive_and_registry_round_trip(tmp_path)
 
     turn = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "build faq"}).json()
     assert turn["status"] == "succeeded"
+    assert turn["kind"] == "plan"
 
     compiled = client.post(
         f"/v1/sessions/{sid}/compile",
@@ -87,6 +111,53 @@ def test_session_turn_compile_download_archive_and_registry_round_trip(tmp_path)
     assert artifact_downloaded.occurred_at > produced.occurred_at
 
 
+def test_self_design_first_turn_returns_clarify_without_planning(tmp_path):
+    def planner(**_kwargs):
+        raise AssertionError("planner should not be called before clarification completes")
+
+    client = _client(tmp_path, planner=planner)
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+    turn = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "我要一个客服 FAQ"}).json()
+
+    assert turn["status"] == "succeeded"
+    assert turn["kind"] == "clarify"
+    assert turn["clarify_question"]["field_path"] in {"target_runtime", "trigger", "compliance_boundary"}
+    archive = client.get(f"/v1/archive/sessions/{sid}").text
+    assert "turn.clarify_started" in archive
+    assert "turn.clarify_replied" in archive
+    assert "我要一个客服 FAQ" not in archive
+
+
+def test_self_design_fourth_turn_emits_questionnaire_when_still_blocked(tmp_path):
+    client = _client(tmp_path, planner=lambda **_kwargs: _sample_ir())
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+
+    first = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "我要一个客服 FAQ"}).json()
+    assert first["kind"] == "clarify"
+    second = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "hiagent"}).json()
+    assert second["kind"] == "clarify"
+    third = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "skip"}).json()
+    assert third["kind"] == "clarify"
+    fourth = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "skip again"}).json()
+
+    assert fourth["kind"] == "questionnaire"
+    assert len(fourth["clarify_question"]["questions"]) >= 1
+
+
+def test_ready_engine_without_target_runtime_is_overridden_by_gate(tmp_path):
+    draft = _complete_draft().model_copy(update={"target_runtime": None})
+    clarify_engine = FakeClarifyEngine([
+        ClarifyEngineResult(intent_update=draft.model_dump(mode="json"), next_action="ready"),
+    ])
+    client = _client(tmp_path, planner=lambda **_kwargs: _sample_ir(), clarify_engine=clarify_engine)
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+
+    turn = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "ready"}).json()
+
+    assert turn["kind"] == "clarify"
+    assert turn["clarify_question"]["field_path"] == "target_runtime"
+
+
 def test_turn_failure_keeps_latest_ir_pointer(tmp_path):
     ir = _sample_ir()
     calls = {"n": 0}
@@ -97,7 +168,11 @@ def test_turn_failure_keeps_latest_ir_pointer(tmp_path):
             return ir
         raise RuntimeError("planner exploded")
 
-    client = _client(tmp_path, planner=planner)
+    clarify_engine = FakeClarifyEngine([
+        ClarifyEngineResult(intent_update=_complete_draft().model_dump(mode="json"), next_action="ready"),
+        ClarifyEngineResult(intent_update=_complete_draft().model_dump(mode="json"), next_action="ready"),
+    ])
+    client = _client(tmp_path, planner=planner, clarify_engine=clarify_engine)
     sid = client.post("/v1/sessions", json={}).json()["session_id"]
     client.patch(
         f"/v1/sessions/{sid}/llm-config",
@@ -155,7 +230,10 @@ def test_download_artifact_with_non_ascii_filename(tmp_path):
     def planner(**_kwargs):
         return cn_ir
 
-    client = _client(tmp_path, planner=planner)
+    clarify_engine = FakeClarifyEngine([
+        ClarifyEngineResult(intent_update=_complete_draft().model_dump(mode="json"), next_action="ready"),
+    ])
+    client = _client(tmp_path, planner=planner, clarify_engine=clarify_engine)
     sid = client.post("/v1/sessions", json={}).json()["session_id"]
     client.patch(
         f"/v1/sessions/{sid}/llm-config",

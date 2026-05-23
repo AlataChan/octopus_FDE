@@ -13,6 +13,12 @@ from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 
 from loom.diff.ir_diff import diff_ir
+from loom.fde_session.brief import WorkflowBriefDraft
+from loom.fde_session.clarify_engine import (
+    ClarifyQuestion,
+    next_blocking_questions,
+)
+from loom.fde_session.redaction import has_potential_secret, redact_draft
 from loom.ir.canonicalize import canonical_ir_hash
 from loom.ir.models import IRDocument
 from loom.registry.models import WorkflowRecord
@@ -151,11 +157,15 @@ def create_turn(
     session = store.get_session(session_id, actor_id=actor.id)
     if session is None:
         raise not_found("session not found")
+    previous_turns = store.list_turns(session_id, actor_id=actor.id)
+    last_turn = previous_turns[-1] if previous_turns else None
+    brief_before = _draft_json(_load_draft(session.brief_draft)) if session.brief_draft else None
     turn = store.create_turn(
         session_id,
         actor_id=actor.id,
         user_message=body.user_message,
         ir_before=session.latest_ir_json,
+        brief_before=brief_before,
     )
     request.app.state.archive_writer.append(
         session_id,
@@ -163,6 +173,15 @@ def create_turn(
         event_type="turn.started",
         payload={"turn_id": str(turn.turn_id), "user_message_sha256": _sha256_text(body.user_message)},
     )
+    if _should_run_clarify(session):
+        return _handle_clarify_turn(
+            request=request,
+            actor=actor,
+            session=session,
+            turn=turn,
+            user_message=body.user_message,
+            last_turn=last_turn,
+        )
     try:
         ir = request.app.state.planner(
             user_message=body.user_message,
@@ -443,6 +462,307 @@ def _session_audit_writer(request: Request, actor_id: str):
     return write
 
 
+def _handle_clarify_turn(
+    *,
+    request: Request,
+    actor: Actor,
+    session: SessionRow,
+    turn: TurnRow,
+    user_message: str,
+    last_turn: TurnRow | None,
+) -> dict[str, object]:
+    store = request.app.state.session_store
+    draft_before = _load_draft(session.brief_draft)
+    brief_before_json = _draft_json(draft_before) if draft_before else None
+    round_index = session.clarify_round + 1
+    request.app.state.archive_writer.append(
+        session.session_id,
+        actor_id=actor.id,
+        event_type="turn.clarify_started",
+        payload={
+            "turn_id": str(turn.turn_id),
+            "round_index": round_index,
+            "user_message_sha256": _sha256_text(user_message),
+            "draft_before_sha256": _sha256_text(brief_before_json) if brief_before_json else None,
+        },
+    )
+    if has_potential_secret(user_message):
+        draft_after = redact_draft(draft_before or WorkflowBriefDraft(title="Self-Design workflow", intent=""))
+        question = ClarifyQuestion(
+            text="Please refer to the credential by handle name instead of pasting raw secrets.",
+            field_path="credentials",
+            options=None,
+            allow_freeform=True,
+            severity="block",
+        )
+        return _finish_clarify_response(
+            request=request,
+            actor=actor,
+            session=session,
+            turn=turn,
+            kind="clarify",
+            question_payload=question.model_dump(mode="json"),
+            draft_before_json=brief_before_json,
+            draft_after=draft_after,
+            clarify_round=round_index,
+        )
+
+    pending_fields = _pending_field_paths(last_turn)
+    result = request.app.state.clarify_engine.step(
+        brief=draft_before,
+        user_message=user_message,
+        round_index=session.clarify_round,
+        pending_field_paths=pending_fields,
+    )
+    draft_after = redact_draft(_merge_draft(draft_before, result.intent_update))
+    block_questions = next_blocking_questions(draft_after)
+    if result.next_action == "ready" and not block_questions:
+        return _finish_plan_from_draft(
+            request=request,
+            actor=actor,
+            session=session,
+            turn=turn,
+            draft=draft_after,
+            brief_before_json=brief_before_json,
+        )
+
+    if session.clarify_round >= 3 and block_questions:
+        payload = {"questions": [q.model_dump(mode="json") for q in block_questions]}
+        request.app.state.archive_writer.append(
+            session.session_id,
+            actor_id=actor.id,
+            event_type="turn.questionnaire_emitted",
+            payload={
+                "turn_id": str(turn.turn_id),
+                "missing_fields": [q.field_path for q in block_questions],
+                "draft_snapshot_sha256": _sha256_text(_draft_json(draft_after)),
+            },
+        )
+        return _finish_clarify_response(
+            request=request,
+            actor=actor,
+            session=session,
+            turn=turn,
+            kind="questionnaire",
+            question_payload=payload,
+            draft_before_json=brief_before_json,
+            draft_after=draft_after,
+            clarify_round=session.clarify_round,
+        )
+
+    question = block_questions[0] if block_questions else result.question
+    assert question is not None
+    return _finish_clarify_response(
+        request=request,
+        actor=actor,
+        session=session,
+        turn=turn,
+        kind="clarify",
+        question_payload=question.model_dump(mode="json"),
+        draft_before_json=brief_before_json,
+        draft_after=draft_after,
+        clarify_round=round_index,
+    )
+
+
+def _finish_clarify_response(
+    *,
+    request: Request,
+    actor: Actor,
+    session: SessionRow,
+    turn: TurnRow,
+    kind: Literal["clarify", "questionnaire"],
+    question_payload: dict[str, object],
+    draft_before_json: str | None,
+    draft_after: WorkflowBriefDraft,
+    clarify_round: int,
+) -> dict[str, object]:
+    draft_after_json = _draft_json(draft_after)
+    row = request.app.state.session_store.finish_turn_clarify(
+        turn.turn_id,
+        actor_id=actor.id,
+        kind=kind,
+        planner_reply=_question_text(question_payload),
+        clarify_question=json.dumps(question_payload, ensure_ascii=False, sort_keys=True),
+        brief_before=draft_before_json,
+        brief_after=draft_after_json,
+        clarify_round=clarify_round,
+        target_runtime=draft_after.target_runtime,
+        scope=draft_after.scope,
+    )
+    options_count = _options_count(question_payload)
+    request.app.state.archive_writer.append(
+        session.session_id,
+        actor_id=actor.id,
+        event_type="turn.clarify_replied",
+        payload={
+            "turn_id": str(turn.turn_id),
+            "round_index": clarify_round,
+            "ask_field_path": _question_field_path(question_payload),
+            "options_count": options_count,
+            "draft_after_sha256": _sha256_text(draft_after_json),
+            "gate_pass": False,
+        },
+    )
+    response = _turn_response(row)
+    response["clarify_round"] = clarify_round
+    return response
+
+
+def _finish_plan_from_draft(
+    *,
+    request: Request,
+    actor: Actor,
+    session: SessionRow,
+    turn: TurnRow,
+    draft: WorkflowBriefDraft,
+    brief_before_json: str | None,
+) -> dict[str, object]:
+    del brief_before_json
+    draft_json = _draft_json(draft)
+    request.app.state.session_store.update_session_brief_state(
+        session.session_id,
+        actor_id=actor.id,
+        brief_draft=draft_json,
+        clarify_round=0,
+        target_runtime=draft.target_runtime,
+        scope=draft.scope,
+    )
+    try:
+        ir = request.app.state.planner(
+            user_message=_draft_to_planner_message(draft),
+            session=session,
+            target=cast(Literal["hiagent", "dify"], draft.target_runtime),
+            scope=draft.scope or _session_scope(session),
+            llm_config={
+                "api_key": request.app.state.fernet.decrypt(session.llm_api_key_encrypted).decode("utf-8")
+                if session.llm_api_key_encrypted
+                else "",
+                "base_url": session.llm_base_url,
+                "model": session.llm_model,
+            },
+        )
+        ir_doc = IRDocument.model_validate(ir) if isinstance(ir, dict) else ir
+        ir_json = json.dumps(
+            ir_doc.model_dump(by_alias=True, exclude_none=True),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        failures = validate(
+            json.loads(ir_json),
+            scope=draft.scope or _session_scope(session),
+            audit_max_retention_days=request.app.state.settings.audit_max_retention_days,
+        )
+        if failures:
+            raise ValueError("; ".join(f.detail for f in failures))
+        row = request.app.state.session_store.finish_turn_succeeded(
+            turn.turn_id,
+            actor_id=actor.id,
+            planner_reply="IR generated",
+            ir_after=ir_json,
+            brief_after=draft_json,
+        )
+        request.app.state.archive_writer.append(
+            session.session_id,
+            actor_id=actor.id,
+            event_type="turn.clarify_replied",
+            payload={
+                "turn_id": str(turn.turn_id),
+                "round_index": session.clarify_round,
+                "ask_field_path": None,
+                "options_count": 0,
+                "draft_after_sha256": _sha256_text(draft_json),
+                "gate_pass": True,
+            },
+        )
+        request.app.state.archive_writer.append(
+            session.session_id,
+            actor_id=actor.id,
+            event_type="turn.succeeded",
+            payload={
+                "turn_id": str(turn.turn_id),
+                "ir_after_sha256": _sha256_text(ir_json),
+                "validation_status": "ok",
+            },
+        )
+        return _turn_response(row)
+    except Exception as e:  # noqa: BLE001 - service records planner/validation failures
+        row = request.app.state.session_store.finish_turn_failed(
+            turn.turn_id,
+            actor_id=actor.id,
+            error_kind="planner_error",
+            validation_errors=[str(e)],
+        )
+        request.app.state.archive_writer.append(
+            session.session_id,
+            actor_id=actor.id,
+            event_type="turn.failed",
+            payload={"turn_id": str(turn.turn_id), "error_kind": "planner_error"},
+        )
+        return _turn_response(row)
+
+
+def _should_run_clarify(session: SessionRow) -> bool:
+    return session.brief_draft is not None or session.latest_ir_json is None
+
+
+def _load_draft(raw: str | None) -> WorkflowBriefDraft | None:
+    if not raw:
+        return None
+    return WorkflowBriefDraft.model_validate_json(raw)
+
+
+def _merge_draft(brief: WorkflowBriefDraft | None, patch: dict[str, object]) -> WorkflowBriefDraft:
+    data = brief.model_dump(mode="python") if brief else {}
+    for key, value in patch.items():
+        if value is not None:
+            data[key] = value
+    return WorkflowBriefDraft.model_validate(data)
+
+
+def _draft_json(draft: WorkflowBriefDraft) -> str:
+    redacted = redact_draft(draft)
+    return json.dumps(redacted.model_dump(mode="json", exclude_none=True), ensure_ascii=False, sort_keys=True)
+
+
+def _draft_to_planner_message(draft: WorkflowBriefDraft) -> str:
+    return "\n\n".join([
+        draft.intent or "",
+        "# Workflow brief draft",
+        _draft_json(draft),
+    ]).strip()
+
+
+def _pending_field_paths(last_turn: TurnRow | None) -> list[str]:
+    if last_turn is None or not last_turn.clarify_question:
+        return []
+    payload = json.loads(last_turn.clarify_question)
+    if "questions" in payload:
+        return [str(item["field_path"]) for item in payload["questions"] if "field_path" in item]
+    field_path = payload.get("field_path")
+    return [str(field_path)] if field_path else []
+
+
+def _question_text(payload: dict[str, object]) -> str:
+    if "questions" in payload:
+        return "Please answer the remaining clarification questions."
+    return str(payload.get("text") or "Please clarify the workflow requirements.")
+
+
+def _question_field_path(payload: dict[str, object]) -> str | None:
+    if "questions" in payload:
+        return "questionnaire"
+    value = payload.get("field_path")
+    return str(value) if value is not None else None
+
+
+def _options_count(payload: dict[str, object]) -> int:
+    if "questions" in payload:
+        return sum(len(item.get("options") or []) for item in payload["questions"])  # type: ignore[union-attr]
+    options = payload.get("options")
+    return len(options) if isinstance(options, list) else 0
+
+
 @router.get("/bindings")
 def list_bindings(request: Request, actor: ActorDep) -> list[dict[str, str]]:
     del actor
@@ -571,12 +891,18 @@ def _ensure_template_target_supported(
 
 
 def _turn_response(row: Any) -> dict[str, object]:
+    clarify_question = json.loads(row.clarify_question) if getattr(row, "clarify_question", None) else None
+    brief_after = json.loads(row.brief_after) if getattr(row, "brief_after", None) else None
     return {
         "turn_id": str(row.turn_id),
         "status": row.status,
         "planner_reply": row.planner_reply,
         "errors": row.validation_errors,
         "ir_diff": None,
+        "kind": getattr(row, "kind", "plan"),
+        "clarify_question": clarify_question,
+        "brief_after": brief_after,
+        "clarify_round": getattr(row, "clarify_round", None),
     }
 
 

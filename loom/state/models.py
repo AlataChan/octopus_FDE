@@ -25,6 +25,8 @@ class SessionRow(BaseModel):
     llm_key_version: int | None = None
     target_runtime: Literal["hiagent", "dify"] | None = None
     scope: str | None = None
+    brief_draft: str | None = None
+    clarify_round: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -52,6 +54,10 @@ class TurnRow(BaseModel):
     planner_reply: str | None = None
     ir_before: str | None = None
     ir_after: str | None = None
+    kind: Literal["clarify", "plan", "questionnaire"] = "plan"
+    clarify_question: str | None = None
+    brief_before: str | None = None
+    brief_after: str | None = None
     validation_errors: list[str]
     status: Literal["running", "succeeded", "failed"]
     created_at: datetime

@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from loom.archive.jsonl import ArchiveWriter
+from loom.fde_session.clarify_engine import DeterministicClarifyEngine
 from loom.planner.client import PlannerClient
 from loom.planner.retry import plan as plan_intent
 from loom.planner.types import IntentRequest
@@ -61,6 +62,7 @@ def create_app(
     *,
     settings: Settings | None = None,
     planner: PlannerCallable | None = None,
+    clarify_engine: Any | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     settings.ensure_data_dir()
@@ -79,6 +81,7 @@ def create_app(
     app.state.archive_writer = ArchiveWriter(settings.data_dir)
     app.state.template_catalog = TemplateCatalog.load()
     app.state.planner = planner or _default_planner
+    app.state.clarify_engine = clarify_engine or DeterministicClarifyEngine()
     app.include_router(health_router)
     app.include_router(actor_router)
     app.include_router(sessions_router)

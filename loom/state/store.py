@@ -276,6 +276,31 @@ class SessionStore:
         assert row is not None
         return row
 
+    def update_session_brief_state(
+        self,
+        session_id: UUID | str,
+        *,
+        actor_id: str,
+        brief_draft: str | None,
+        clarify_round: int,
+        target_runtime: Literal["hiagent", "dify"] | None,
+        scope: str | None,
+    ) -> SessionRow:
+        self.require_session(session_id, actor_id=actor_id)
+        with self._connect() as con:
+            con.execute(
+                """
+                UPDATE sessions
+                SET brief_draft = ?, clarify_round = ?, target_runtime = ?,
+                    scope = ?, updated_at = ?
+                WHERE session_id = ? AND actor_id = ?
+                """,
+                (brief_draft, clarify_round, target_runtime, scope, _now(), str(session_id), actor_id),
+            )
+        row = self.get_session(session_id, actor_id=actor_id)
+        assert row is not None
+        return row
+
     def create_turn(
         self,
         session_id: UUID | str,
@@ -283,6 +308,8 @@ class SessionStore:
         actor_id: str,
         user_message: str,
         ir_before: str | None,
+        kind: Literal["clarify", "plan", "questionnaire"] = "plan",
+        brief_before: str | None = None,
     ) -> TurnRow:
         self.require_session(session_id, actor_id=actor_id)
         turn_id = uuid4()
@@ -292,11 +319,11 @@ class SessionStore:
                 """
                 INSERT INTO turns (
                     turn_id, session_id, actor_id, user_message, ir_before,
-                    validation_errors, status, created_at
+                    kind, brief_before, validation_errors, status, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 'running', ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)
                 """,
-                (str(turn_id), str(session_id), actor_id, user_message, ir_before, "[]", now),
+                (str(turn_id), str(session_id), actor_id, user_message, ir_before, kind, brief_before, "[]", now),
             )
         row = self.get_turn(turn_id, actor_id=actor_id)
         assert row is not None
@@ -309,6 +336,7 @@ class SessionStore:
         actor_id: str,
         planner_reply: str,
         ir_after: str,
+        brief_after: str | None = None,
     ) -> TurnRow:
         turn = self.require_turn(turn_id, actor_id=actor_id)
         digest = hashlib.sha256(ir_after.encode("utf-8")).hexdigest()
@@ -317,18 +345,61 @@ class SessionStore:
             con.execute(
                 """
                 UPDATE turns
-                SET status = 'succeeded', planner_reply = ?, ir_after = ?, validation_errors = '[]'
+                SET status = 'succeeded', kind = 'plan', planner_reply = ?,
+                    ir_after = ?, brief_after = ?, validation_errors = '[]'
                 WHERE turn_id = ? AND actor_id = ?
                 """,
-                (planner_reply, ir_after, str(turn_id), actor_id),
+                (planner_reply, ir_after, brief_after, str(turn_id), actor_id),
             )
             con.execute(
                 """
                 UPDATE sessions
-                SET state = ?, latest_ir_json = ?, latest_ir_sha256 = ?, updated_at = ?
+                SET state = ?, latest_ir_json = ?, latest_ir_sha256 = ?,
+                    brief_draft = COALESCE(?, brief_draft), clarify_round = 0,
+                    updated_at = ?
                 WHERE session_id = ? AND actor_id = ?
                 """,
-                (SessionState.VALIDATED.value, ir_after, digest, now, str(turn.session_id), actor_id),
+                (SessionState.VALIDATED.value, ir_after, digest, brief_after, now, str(turn.session_id), actor_id),
+            )
+        row = self.get_turn(turn_id, actor_id=actor_id)
+        assert row is not None
+        return row
+
+    def finish_turn_clarify(
+        self,
+        turn_id: UUID | str,
+        *,
+        actor_id: str,
+        kind: Literal["clarify", "questionnaire"],
+        planner_reply: str,
+        clarify_question: str,
+        brief_before: str | None,
+        brief_after: str,
+        clarify_round: int,
+        target_runtime: Literal["hiagent", "dify"] | None,
+        scope: str | None,
+    ) -> TurnRow:
+        turn = self.require_turn(turn_id, actor_id=actor_id)
+        now = _now()
+        with self._connect() as con:
+            con.execute(
+                """
+                UPDATE turns
+                SET status = 'succeeded', kind = ?, planner_reply = ?,
+                    clarify_question = ?, brief_before = ?, brief_after = ?,
+                    validation_errors = '[]'
+                WHERE turn_id = ? AND actor_id = ?
+                """,
+                (kind, planner_reply, clarify_question, brief_before, brief_after, str(turn_id), actor_id),
+            )
+            con.execute(
+                """
+                UPDATE sessions
+                SET brief_draft = ?, clarify_round = ?, target_runtime = ?,
+                    scope = ?, updated_at = ?
+                WHERE session_id = ? AND actor_id = ?
+                """,
+                (brief_after, clarify_round, target_runtime, scope, now, str(turn.session_id), actor_id),
             )
         row = self.get_turn(turn_id, actor_id=actor_id)
         assert row is not None
@@ -493,6 +564,8 @@ class SessionStore:
                     llm_key_version INTEGER,
                     target_runtime TEXT,
                     scope TEXT,
+                    brief_draft TEXT,
+                    clarify_round INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -504,6 +577,10 @@ class SessionStore:
                     planner_reply TEXT,
                     ir_before TEXT,
                     ir_after TEXT,
+                    kind TEXT NOT NULL DEFAULT 'plan',
+                    clarify_question TEXT,
+                    brief_before TEXT,
+                    brief_after TEXT,
                     validation_errors TEXT NOT NULL,
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL
@@ -546,6 +623,19 @@ class SessionStore:
                 con.execute("ALTER TABLE sessions ADD COLUMN target_runtime TEXT")
             if "scope" not in session_columns:
                 con.execute("ALTER TABLE sessions ADD COLUMN scope TEXT")
+            if "brief_draft" not in session_columns:
+                con.execute("ALTER TABLE sessions ADD COLUMN brief_draft TEXT")
+            if "clarify_round" not in session_columns:
+                con.execute("ALTER TABLE sessions ADD COLUMN clarify_round INTEGER NOT NULL DEFAULT 0")
+            turn_columns = {row["name"] for row in con.execute("PRAGMA table_info(turns)").fetchall()}
+            if "kind" not in turn_columns:
+                con.execute("ALTER TABLE turns ADD COLUMN kind TEXT NOT NULL DEFAULT 'plan'")
+            if "clarify_question" not in turn_columns:
+                con.execute("ALTER TABLE turns ADD COLUMN clarify_question TEXT")
+            if "brief_before" not in turn_columns:
+                con.execute("ALTER TABLE turns ADD COLUMN brief_before TEXT")
+            if "brief_after" not in turn_columns:
+                con.execute("ALTER TABLE turns ADD COLUMN brief_after TEXT")
 
     @staticmethod
     def _get_actor_llm_config_con(
@@ -578,6 +668,8 @@ def _session_row(row: sqlite3.Row) -> SessionRow:
         llm_key_version=row["llm_key_version"],
         target_runtime=row["target_runtime"] if "target_runtime" in row.keys() else None,
         scope=row["scope"] if "scope" in row.keys() else None,
+        brief_draft=row["brief_draft"] if "brief_draft" in row.keys() else None,
+        clarify_round=row["clarify_round"] if "clarify_round" in row.keys() else 0,
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )
@@ -605,6 +697,10 @@ def _turn_row(row: sqlite3.Row) -> TurnRow:
         planner_reply=row["planner_reply"],
         ir_before=row["ir_before"],
         ir_after=row["ir_after"],
+        kind=row["kind"] if "kind" in row.keys() else "plan",
+        clarify_question=row["clarify_question"] if "clarify_question" in row.keys() else None,
+        brief_before=row["brief_before"] if "brief_before" in row.keys() else None,
+        brief_after=row["brief_after"] if "brief_after" in row.keys() else None,
         validation_errors=json.loads(row["validation_errors"]),
         status=row["status"],
         created_at=datetime.fromisoformat(row["created_at"]),
