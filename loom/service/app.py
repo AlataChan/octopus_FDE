@@ -1,23 +1,31 @@
 """FastAPI application factory for the FDE web console backend."""
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
+from urllib.parse import urlparse
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from loom.archive.jsonl import ArchiveWriter
+from loom.archive.writer import InstanceArchiveWriter
 from loom.fde_session.clarify_engine import DeterministicClarifyEngine
 from loom.planner.client import PlannerClient
 from loom.planner.retry import plan as plan_intent
 from loom.planner.types import IntentRequest
 from loom.registry.store import WorkflowRegistryStore
 from loom.registry.templates import TemplateCatalog
+from loom.service.auth import AuthSessionStore, LoginRateLimiter
 from loom.service.deps import Settings
 from loom.service.routes.actor import router as actor_router
+from loom.service.routes.auth import AUTH_ARCHIVE_SESSION_ID
+from loom.service.routes.auth import router as auth_router
 from loom.service.routes.health import router as health_router
 from loom.service.routes.registry import router as registry_router
 from loom.service.routes.sessions import router as sessions_router
@@ -67,22 +75,32 @@ def create_app(
     settings = settings or Settings.from_env()
     settings.ensure_data_dir()
     app = FastAPI(title="FDE Web Console API", version="0.1.0")
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-        allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    if settings.cors_allow_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(settings.cors_allow_origins),
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
     app.state.settings = settings
     app.state.fernet = settings.fernet()
     app.state.session_store = SessionStore(settings.data_dir / "sessions.db")
     app.state.registry_store = WorkflowRegistryStore(settings.data_dir / "workflow_registry.db")
-    app.state.archive_writer = ArchiveWriter(settings.data_dir)
+    app.state.archive_writer = InstanceArchiveWriter(
+        ArchiveWriter(settings.data_dir),
+        instance_id=settings.instance_id,
+        hmac_key=settings.archive_hmac_key(),
+    )
+    app.state.auth_store = AuthSessionStore(ttl_hours=settings.auth_session_ttl_hours)
+    app.state.auth_rate_limiter = LoginRateLimiter()
     app.state.template_catalog = TemplateCatalog.load()
     app.state.planner = planner or _default_planner
     app.state.clarify_engine = clarify_engine or DeterministicClarifyEngine()
+    _install_auth_middleware(app, settings)
+    _install_auth_cleanup(app)
     app.include_router(health_router)
+    app.include_router(auth_router)
     app.include_router(actor_router)
     app.include_router(sessions_router)
     app.include_router(registry_router)
@@ -91,6 +109,89 @@ def create_app(
     if web_dist.exists():
         app.mount("/", StaticFiles(directory=web_dist, html=True), name="web")
     return app
+
+
+def _install_auth_middleware(app: FastAPI, settings: Settings) -> None:
+    @app.middleware("http")
+    async def auth_middleware(request, call_next):  # type: ignore[no-untyped-def]
+        path = request.url.path
+        if _is_exempt_path(path):
+            return await call_next(request)
+        if not path.startswith("/v1"):
+            return await call_next(request)
+        if settings.auth_disabled:
+            from loom.service.deps import Actor
+
+            request.state.actor = Actor(id=request.headers.get("X-Actor-Id") or "single-user", role="fde")
+            return await call_next(request)
+        if request.method in {"POST", "PATCH", "PUT", "DELETE"} and not _origin_ok(request, settings):
+            return JSONResponse({"error": "csrf_origin_mismatch"}, status_code=403)
+        token = request.cookies.get("fde_session")
+        info = request.app.state.auth_store.validate(token)
+        _archive_expired_sessions(request)
+        if info is None:
+            return JSONResponse({"error": "not_authenticated"}, status_code=401)
+        from loom.service.deps import Actor
+
+        request.state.actor = Actor(id=info.username, role="fde")
+        request.state.auth_session_info = info
+        return await call_next(request)
+
+
+def _is_exempt_path(path: str) -> bool:
+    return path in {"/v1/health", "/v1/auth/login", "/v1/auth/logout", "/health"}
+
+
+def _origin_ok(request: Any, settings: Settings) -> bool:
+    raw_origin = request.headers.get("Origin") or request.headers.get("Referer")
+    if not raw_origin:
+        return False
+    parsed = urlparse(raw_origin)
+    origin_host = parsed.hostname
+    if not origin_host:
+        return False
+    if origin_host == request.url.hostname:
+        return True
+    normalized = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+    return normalized in settings.cors_allow_origins
+
+
+def _install_auth_cleanup(app: FastAPI) -> None:
+    async def cleanup_loop() -> None:
+        while True:
+            await asyncio.sleep(300)
+            for info in app.state.auth_store.cleanup_expired():
+                _archive_session_expired(app, info.username)
+
+    async def startup() -> None:
+        app.state.auth_cleanup_task = asyncio.create_task(cleanup_loop())
+
+    async def shutdown() -> None:
+        task = getattr(app.state, "auth_cleanup_task", None)
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    app.router.on_startup.append(startup)
+    app.router.on_shutdown.append(shutdown)
+
+
+def _archive_expired_sessions(request: Any) -> None:
+    for info in request.app.state.auth_store.drain_expired():
+        _archive_session_expired(request.app, info.username)
+
+
+def _archive_session_expired(app: FastAPI, username: str) -> None:
+    app.state.archive_writer.append(
+        AUTH_ARCHIVE_SESSION_ID,
+        actor_id="auth",
+        event_type="auth.session_expired",
+        payload={
+            "username_hmac": app.state.archive_writer.hmac_text(username),
+            "ttl_hours": app.state.settings.auth_session_ttl_hours,
+        },
+    )
 
 
 app = create_app()

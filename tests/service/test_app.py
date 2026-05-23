@@ -21,7 +21,12 @@ def test_health_and_openapi(tmp_path):
 
 
 def test_vite_dev_origin_gets_cors_header(tmp_path):
-    settings = Settings(data_dir=tmp_path, app_env="dev", fernet_key=Fernet.generate_key().decode())
+    settings = Settings(
+        data_dir=tmp_path,
+        app_env="dev",
+        fernet_key=Fernet.generate_key().decode(),
+        cors_allow_origins=("http://localhost:5173",),
+    )
     client = TestClient(create_app(settings=settings))
 
     resp = client.options(
