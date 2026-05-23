@@ -22,7 +22,7 @@ class InstanceArchiveWriter:
         event_type: ArchiveEventType,
         payload: dict[str, object],
     ) -> ArchiveEvent:
-        merged = {"instance_id": self.instance_id, **payload}
+        merged = {**payload, "instance_id": self.instance_id}
         return self._writer.append(session_id, actor_id=actor_id, event_type=event_type, payload=merged)
 
     def hmac_text(self, value: str) -> str:

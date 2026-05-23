@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 
 from loom.archive.jsonl import ArchiveChainError, ArchiveWriter
+from loom.archive.writer import InstanceArchiveWriter
 
 
 def test_archive_appends_contiguous_hash_chained_events(tmp_path):
@@ -61,3 +62,19 @@ def test_archive_stream_text_concatenates_chunks(tmp_path):
 
     text = writer.read_session_text(session_id)
     assert "session.created" in text
+
+
+def test_instance_archive_writer_instance_id_is_authoritative(tmp_path):
+    writer = InstanceArchiveWriter(ArchiveWriter(tmp_path, max_bytes=10_000), instance_id="real", hmac_key=b"key")
+    session_id = uuid4()
+
+    event = writer.append(
+        session_id,
+        actor_id="fde",
+        event_type="session.created",
+        payload={"instance_id": "fake", "k": "v"},
+    )
+
+    assert event.payload["instance_id"] == "real"
+    assert event.payload["k"] == "v"
+    assert writer.validate_chain(session_id)[0].payload["instance_id"] == "real"
