@@ -111,3 +111,56 @@ def test_brief_rejects_unknown_scope() -> None:
     payload = _json_from_output(result.stderr)
     assert payload["cli_schema_version"] == "1"
     assert payload["error"] == "invalid_scope"
+
+
+def test_brief_rejects_empty_stdin_with_json_error() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli,
+        ["brief", "--stdin", "--scope", "ecommerce/kb"],
+        input="",
+    )
+
+    assert result.exit_code == 2
+    payload = _json_from_output(result.stderr)
+    assert payload["cli_schema_version"] == "1"
+    assert payload["error"] == "missing_intent"
+
+
+def test_brief_missing_scope_returns_json_error() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(cli, ["brief", "--stdin"], input="test")
+
+    assert result.exit_code == 2
+    payload = _json_from_output(result.stderr)
+    assert payload["cli_schema_version"] == "1"
+    assert payload["error"] == "missing_option"
+
+
+def test_brief_invalid_target_returns_json_error() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli,
+        ["brief", "--stdin", "--scope", "ecommerce/kb", "--target", "sky"],
+        input="test",
+    )
+
+    assert result.exit_code == 2
+    payload = _json_from_output(result.stderr)
+    assert payload["cli_schema_version"] == "1"
+    assert payload["error"] == "invalid_target"
+
+
+def test_brief_nonexistent_intent_file_returns_json_error(tmp_path) -> None:
+    runner = CliRunner()
+    missing = tmp_path / "missing.txt"
+
+    result = runner.invoke(cli, ["brief", str(missing), "--scope", "ecommerce/kb"])
+
+    assert result.exit_code == 2
+    payload = _json_from_output(result.stderr)
+    assert payload["cli_schema_version"] == "1"
+    assert payload["error"] == "input_not_found"

@@ -24,10 +24,10 @@ REDACTED_SECRET_INTENT = "[REDACTED:potential_secret]"
         "exit 2 means invalid input."
     )
 )
-@click.argument("intent_file", required=False, type=click.Path(exists=True, dir_okay=False, path_type=Path))
-@click.option("--scope", required=True, help="Registry scope, for example ecommerce/kb or clinic/kb.")
-@click.option("--target", type=click.Choice(["hiagent", "dify"]), help="Target runtime. Missing target is reported.")
-@click.option("--draft-json", "draft_json_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.argument("intent_file", required=False, type=click.Path(dir_okay=False, path_type=Path))
+@click.option("--scope", required=False, help="Registry scope, for example ecommerce/kb or clinic/kb.")
+@click.option("--target", help="Target runtime. Missing target is reported.")
+@click.option("--draft-json", "draft_json_path", type=click.Path(dir_okay=False, path_type=Path))
 @click.option("--json/--text", "json_output", default=True, show_default=True)
 @click.option("--stdin", "read_stdin", is_flag=True, help="Read intent text from stdin; mutually exclusive with INTENT_FILE.")
 def brief(
@@ -42,6 +42,10 @@ def brief(
         _exit_error("invalid_input", "INTENT_FILE and --stdin are mutually exclusive")
     if intent_file is None and not read_stdin:
         _exit_error("invalid_input", "provide INTENT_FILE or --stdin")
+    if scope is None:
+        _exit_error("missing_option", "--scope is required")
+    if target is not None and target not in {"hiagent", "dify"}:
+        _exit_error("invalid_target", "--target must be one of: hiagent, dify")
     if not _scope_exists(scope):
         _exit_error("invalid_scope", f"scope {scope!r} is not present in registry v1")
 
@@ -49,8 +53,12 @@ def brief(
         intent = click.get_text_stream("stdin").read()
     else:
         assert intent_file is not None
+        if not intent_file.is_file():
+            _exit_error("input_not_found", str(intent_file))
         intent = intent_file.read_text()
     intent = intent.strip()
+    if not intent:
+        _exit_error("missing_intent", "intent text is required")
     if has_potential_secret(intent):
         _emit_json(
             {
@@ -108,6 +116,8 @@ def _build_draft(
 ) -> WorkflowBriefDraft:
     data: dict[str, object] = {}
     if draft_json_path is not None:
+        if not draft_json_path.is_file():
+            _exit_error("draft_json_not_found", str(draft_json_path))
         try:
             raw = json.loads(draft_json_path.read_text())
         except json.JSONDecodeError as e:
