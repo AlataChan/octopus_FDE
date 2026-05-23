@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
 if TYPE_CHECKING:
-    from loom.fde_session.brief import WorkflowBrief
+    from loom.fde_session.brief import WorkflowBrief, WorkflowBriefDraft
 
 
 class ClarifyQuestion(BaseModel):
@@ -17,9 +17,22 @@ class ClarifyQuestion(BaseModel):
     severity: Literal["block", "warn"]
 
 
-def missing_fields(brief: WorkflowBrief) -> list[ClarifyQuestion]:
+def missing_fields(brief: WorkflowBrief | WorkflowBriefDraft) -> list[ClarifyQuestion]:
     questions: list[ClarifyQuestion] = []
-    intent = brief.intent.lower()
+    intent = (brief.intent or "").lower()
+
+    if _is_draft(brief):
+        if not brief.target_runtime:
+            questions.append(_block("target_runtime", "Which target runtime should this workflow compile to?"))
+        if not brief.scope:
+            questions.append(_block("scope", "Which registry scope should constrain datasets, tools, and credentials?"))
+        if brief.compliance_boundary is None:
+            questions.append(
+                _block(
+                    "compliance_boundary",
+                    "What PII/compliance boundary applies to this workflow?",
+                )
+            )
 
     if brief.trigger is None:
         questions.append(_block("trigger", "What trigger should start this workflow?"))
@@ -86,6 +99,10 @@ def _block(field_path: str, question: str) -> ClarifyQuestion:
     return ClarifyQuestion(field_path=field_path, question=question, severity="block")
 
 
+def _is_draft(brief: WorkflowBrief | WorkflowBriefDraft) -> bool:
+    return hasattr(brief, "target_runtime") and hasattr(brief, "scope")
+
+
 def _needs_retrieval_source(intent: str) -> bool:
     keywords = (
         "rag", "retrieval", "retrieve", "faq", "q&a", "qa", "question", "answer",
@@ -103,7 +120,7 @@ def _needs_channel(intent: str) -> bool:
     return any(k in intent for k in keywords)
 
 
-def _needs_credential(brief: WorkflowBrief, intent: str) -> bool:
+def _needs_credential(brief: WorkflowBrief | WorkflowBriefDraft, intent: str) -> bool:
     if any(source.kind == "api" for source in brief.data_sources):
         return True
     keywords = (
@@ -113,6 +130,8 @@ def _needs_credential(brief: WorkflowBrief, intent: str) -> bool:
     return any(k in intent for k in keywords)
 
 
-def _needs_human_review(brief: WorkflowBrief) -> bool:
+def _needs_human_review(brief: WorkflowBrief | WorkflowBriefDraft) -> bool:
     boundary = brief.compliance_boundary
+    if boundary is None:
+        return False
     return boundary.pii_class_default == "high" or bool(boundary.regulatory_tags)

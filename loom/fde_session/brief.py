@@ -75,3 +75,45 @@ class WorkflowBrief(_Strict):
     success_criteria: str = ""
     compliance_boundary: ComplianceBoundary
     known_edits: list[str] = Field(default_factory=list)
+
+
+class WorkflowBriefDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_id: str | None = None
+    title: str | None = None
+    intent: str | None = None
+    trigger: TriggerSpec | None = None
+    inputs: list[InputSpec] = Field(default_factory=list)
+    data_sources: list[DataSourceRef] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    credentials: list[CredentialBindingRef] = Field(default_factory=list)
+    approval_points: list[ApprovalPoint] = Field(default_factory=list)
+    success_criteria: str = ""
+    compliance_boundary: ComplianceBoundary | None = None
+    known_edits: list[str] = Field(default_factory=list)
+    target_runtime: Literal["hiagent", "dify"] | None = None
+    scope: str | None = None
+
+    def to_strict(self) -> WorkflowBrief:
+        missing = [
+            field
+            for field in ("title", "intent", "compliance_boundary")
+            if getattr(self, field) in (None, "")
+        ]
+        if missing:
+            raise ValueError(f"WorkflowBriefDraft missing required field(s): {', '.join(missing)}")
+        return WorkflowBrief(
+            workflow_id=self.workflow_id,
+            title=str(self.title),
+            intent=str(self.intent),
+            trigger=self.trigger,
+            inputs=self.inputs,
+            data_sources=self.data_sources,
+            tools=self.tools,
+            credentials=self.credentials,
+            approval_points=self.approval_points,
+            success_criteria=self.success_criteria,
+            compliance_boundary=self.compliance_boundary,  # type: ignore[arg-type]
+            known_edits=self.known_edits,
+        )

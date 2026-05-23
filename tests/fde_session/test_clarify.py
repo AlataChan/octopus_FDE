@@ -1,4 +1,4 @@
-from loom.fde_session.brief import ComplianceBoundary, DataSourceRef, TriggerSpec, WorkflowBrief
+from loom.fde_session.brief import ComplianceBoundary, DataSourceRef, TriggerSpec, WorkflowBrief, WorkflowBriefDraft
 from loom.fde_session.clarify import missing_fields
 
 
@@ -105,3 +105,37 @@ def test_complete_ecommerce_brief_has_no_blocking_questions() -> None:
     )
 
     assert [q for q in missing_fields(brief) if q.severity == "block"] == []
+
+
+def test_draft_missing_runtime_scope_and_compliance_are_blocking_questions() -> None:
+    draft = WorkflowBriefDraft(
+        title="FAQ workflow",
+        intent="Answer ecommerce FAQ questions from product KB with source citations.",
+        trigger=TriggerSpec(mode="manual"),
+        data_sources=[DataSourceRef(handle="product_kb", kind="kb")],
+        success_criteria="Answer with citations.",
+    )
+
+    field_paths = {q.field_path for q in missing_fields(draft) if q.severity == "block"}
+
+    assert {"target_runtime", "scope", "compliance_boundary"} <= field_paths
+
+
+def test_complete_draft_has_no_blocking_questions() -> None:
+    draft = WorkflowBriefDraft(
+        title="FAQ workflow",
+        intent="Answer ecommerce FAQ questions from product KB with source citations.",
+        trigger=TriggerSpec(mode="manual"),
+        data_sources=[DataSourceRef(handle="product_kb", kind="kb")],
+        success_criteria="Answer with citations.",
+        compliance_boundary=ComplianceBoundary(
+            pii_class_default="low",
+            regulatory_tags=[],
+            geographies=["CN"],
+        ),
+        target_runtime="hiagent",
+        scope="ecommerce/kb",
+        known_edits=["Initial build."],
+    )
+
+    assert [q for q in missing_fields(draft) if q.severity == "block"] == []

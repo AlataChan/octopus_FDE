@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from loom.fde_session.brief import (
     ApprovalPoint,
     ComplianceBoundary,
@@ -9,6 +11,7 @@ from loom.fde_session.brief import (
     InputSpec,
     TriggerSpec,
     WorkflowBrief,
+    WorkflowBriefDraft,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -106,3 +109,32 @@ def test_tcm_followup_shadow_brief_is_high_pii_with_review_gate() -> None:
 
     assert brief.compliance_boundary.pii_class_default == "high"
     assert {tool for tool in brief.tools} == set(ir["registry_ref"]["tools"])
+
+
+def test_workflow_brief_draft_materializes_strict_brief() -> None:
+    draft = WorkflowBriefDraft(
+        title="FAQ workflow",
+        intent="Answer ecommerce FAQ questions from product KB with source citations.",
+        trigger=TriggerSpec(mode="manual"),
+        data_sources=[DataSourceRef(handle="product_kb", kind="kb")],
+        success_criteria="Answer with citations and no unsupported claims.",
+        compliance_boundary=ComplianceBoundary(
+            pii_class_default="low",
+            regulatory_tags=[],
+            geographies=["CN"],
+        ),
+        target_runtime="dify",
+        scope="ecommerce/kb",
+    )
+
+    strict = draft.to_strict()
+
+    assert strict.intent == draft.intent
+    assert strict.data_sources[0].handle == "product_kb"
+
+
+def test_workflow_brief_draft_rejects_missing_required_materialization_fields() -> None:
+    draft = WorkflowBriefDraft(intent="Answer ecommerce FAQ questions.")
+
+    with pytest.raises(ValueError, match="title"):
+        draft.to_strict()

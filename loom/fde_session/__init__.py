@@ -8,6 +8,7 @@ from loom.fde_session.brief import (
     InputSpec,
     TriggerSpec,
     WorkflowBrief,
+    WorkflowBriefDraft,
 )
 from loom.fde_session.clarify import ClarifyQuestion, missing_fields
 from loom.fde_session.edit_intent import EditIntent, parse_edit_intent
@@ -24,6 +25,7 @@ __all__ = [
     "ReviewSummary",
     "TriggerSpec",
     "WorkflowBrief",
+    "WorkflowBriefDraft",
     "missing_fields",
     "parse_edit_intent",
 ]
