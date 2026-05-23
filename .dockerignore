@@ -4,6 +4,7 @@
 .env
 .git/
 .github/
+.antigravitycli/
 .loom-data/
 .mypy_cache/
 .pytest_cache/
