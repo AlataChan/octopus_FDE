@@ -99,7 +99,7 @@ def _set_cookie(response: Response, token: str, settings: Settings) -> None:
         COOKIE_NAME,
         token,
         httponly=True,
-        secure=settings.app_env != "dev",
+        secure=_cookie_secure(settings),
         samesite="lax",
         path="/v1",
         max_age=settings.auth_session_ttl_hours * 3600,
@@ -110,10 +110,14 @@ def _clear_cookie(response: Response, settings: Settings) -> None:
     response.delete_cookie(
         COOKIE_NAME,
         httponly=True,
-        secure=settings.app_env != "dev",
+        secure=_cookie_secure(settings),
         samesite="lax",
         path="/v1",
     )
+
+
+def _cookie_secure(settings: Settings) -> bool:
+    return settings.app_env != "dev" and not settings.auth_cookie_insecure_ok
 
 
 def _archive_auth(request: Request, event_type: str, payload: dict[str, object]) -> None:

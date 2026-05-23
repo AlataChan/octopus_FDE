@@ -36,6 +36,7 @@ class Settings:
     auth_password_hash: str | None = None
     auth_session_ttl_hours: int = 24
     auth_disabled: bool = True
+    auth_cookie_insecure_ok: bool = False
     trusted_proxy: bool = False
     cors_allow_origins: tuple[str, ...] = ()
     instance_id: str = field(default_factory=socket.gethostname)
@@ -59,6 +60,12 @@ class Settings:
         )
         if app_env != "dev" and auth_disabled:
             raise RuntimeError("LOOM_AUTH_DISABLED is only allowed when APP_ENV=dev")
+        auth_cookie_insecure_ok = _parse_bool(os.environ.get("LOOM_AUTH_COOKIE_INSECURE_OK", "false"))
+        if app_env != "dev" and auth_cookie_insecure_ok:
+            LOGGER.warning(
+                "SECURITY WARNING: LOOM_AUTH_COOKIE_INSECURE_OK=true disables Secure cookies; "
+                "use only for local HTTP debugging and never on public deployments"
+            )
         if not auth_disabled:
             if not auth_username:
                 raise RuntimeError("LOOM_AUTH_USERNAME is required when authentication is enabled")
@@ -82,6 +89,7 @@ class Settings:
             auth_password_hash=auth_password_hash,
             auth_session_ttl_hours=int(os.environ.get("LOOM_AUTH_SESSION_TTL_HOURS", "24")),
             auth_disabled=auth_disabled,
+            auth_cookie_insecure_ok=auth_cookie_insecure_ok,
             trusted_proxy=_parse_bool(os.environ.get("LOOM_TRUSTED_PROXY", "false")),
             cors_allow_origins=cors_allow_origins,
             instance_id=os.environ.get("LOOM_INSTANCE_ID") or socket.gethostname(),

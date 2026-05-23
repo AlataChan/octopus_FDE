@@ -24,6 +24,19 @@ def _settings(tmp_path, *, ttl_hours: int = 24) -> Settings:
     )
 
 
+def _prod_settings(tmp_path, *, auth_cookie_insecure_ok: bool = False) -> Settings:
+    return Settings(
+        data_dir=tmp_path / "data",
+        app_env="prod",
+        fernet_key=Fernet.generate_key().decode(),
+        auth_username="admin",
+        auth_password_hash=PASSWORD_HASH,
+        auth_disabled=False,
+        auth_cookie_insecure_ok=auth_cookie_insecure_ok,
+        instance_id="test-instance",
+    )
+
+
 def _client(tmp_path, *, ttl_hours: int = 24) -> TestClient:
     return TestClient(create_app(settings=_settings(tmp_path, ttl_hours=ttl_hours)))
 
@@ -59,6 +72,33 @@ def test_login_cookie_allows_authenticated_session_access_and_logout(tmp_path):
     logout = client.post("/v1/auth/logout")
     assert logout.status_code == 200
     assert client.get("/v1/sessions").status_code == 401
+
+
+def test_prod_login_cookie_is_secure_by_default(tmp_path):
+    client = TestClient(create_app(settings=_prod_settings(tmp_path)))
+
+    response = _login(client)
+
+    assert response.status_code == 200
+    assert "secure" in response.headers["set-cookie"].lower()
+
+
+def test_prod_login_cookie_can_disable_secure_for_local_http_debug(tmp_path):
+    client = TestClient(create_app(settings=_prod_settings(tmp_path, auth_cookie_insecure_ok=True)))
+
+    response = _login(client)
+
+    assert response.status_code == 200
+    assert "secure" not in response.headers["set-cookie"].lower()
+
+
+def test_dev_login_cookie_is_not_secure(tmp_path):
+    client = _client(tmp_path)
+
+    response = _login(client)
+
+    assert response.status_code == 200
+    assert "secure" not in response.headers["set-cookie"].lower()
 
 
 def test_mutating_authenticated_requests_require_same_origin(tmp_path):
@@ -187,3 +227,18 @@ def test_cors_wildcard_is_rejected(tmp_path, monkeypatch):
 
     with pytest.raises(RuntimeError, match="must not contain"):
         Settings.from_env()
+
+
+def test_prod_cookie_insecure_ok_logs_security_warning(tmp_path, monkeypatch, caplog):
+    caplog.set_level("WARNING")
+    monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("LOOM_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LOOM_FERNET_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("LOOM_AUTH_USERNAME", "admin")
+    monkeypatch.setenv("LOOM_AUTH_PASSWORD_HASH", PASSWORD_HASH)
+    monkeypatch.setenv("LOOM_AUTH_COOKIE_INSECURE_OK", "true")
+
+    settings = Settings.from_env()
+
+    assert settings.auth_cookie_insecure_ok is True
+    assert "SECURITY WARNING" in caplog.text

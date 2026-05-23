@@ -25,6 +25,12 @@ Open `http://localhost:18080` and sign in with `LOOM_AUTH_USERNAME` plus the
 password used to generate `LOOM_AUTH_PASSWORD_HASH`. Docker runs uvicorn with a
 single worker because auth sessions are stored in process memory.
 
+Production deployments must put FDE behind a reverse proxy that terminates TLS
+(for example nginx or Traefik); do not expose port 18080 directly on the public
+internet. For local HTTP testing at `http://localhost:18080`, temporarily set
+`LOOM_AUTH_COOKIE_INSECURE_OK=true` so browsers accept the session cookie without
+the `Secure` attribute. Do not use that setting for public deployments.
+
 Docker is the primary deployment path. Runtime data lives in `LOOM_DATA_DIR`;
 the image does not contain sessions DBs, archive JSONL, generated artifacts, or
 real customer bindings.
