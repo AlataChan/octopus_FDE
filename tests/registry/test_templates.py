@@ -40,6 +40,7 @@ def test_templates_validate_and_compile_to_declared_targets_without_placeholders
                 text, warnings = compile_dify(ir)
                 assert "TODO" not in text
                 assert "placeholder" not in text.lower()
+                assert "${" not in text
             assert all(warning.code for warning in warnings)
 
 

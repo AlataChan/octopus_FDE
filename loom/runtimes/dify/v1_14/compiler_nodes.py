@@ -232,10 +232,23 @@ def _http_data(node: HTTPNode, ctx: EmitContext) -> dict[str, Any]:
             key: to_dify_template_ref(value, ctx.node_id_map)
             for key, value in (node.headers or {}).items()
         },
-        "body": node.body,
+        "body": _template_refs_in_value(node.body, ctx.node_id_map),
         "timeout": node.timeout_s or 120,
     })
     return data
+
+
+def _template_refs_in_value(value: Any, node_id_map: dict[str, str]) -> Any:
+    if isinstance(value, str):
+        return to_dify_template_ref(value, node_id_map)
+    if isinstance(value, list):
+        return [_template_refs_in_value(item, node_id_map) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _template_refs_in_value(item, node_id_map)
+            for key, item in value.items()
+        }
+    return value
 
 
 def _placeholder_code_data(node: LoopNode | ParallelNode | AgentNode) -> dict[str, Any]:
