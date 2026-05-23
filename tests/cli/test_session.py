@@ -59,6 +59,7 @@ def test_session_show_turns_json_uses_safe_field_subset(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     payload = _json_from_output(result.stdout)
     assert payload["cli_schema_version"] == "1"
+    assert payload["instance_id"]
     assert payload["session_id"] == str(session.session_id)
     assert payload["turns"] == [{
         "turn_id": str(turn.turn_id),
@@ -120,7 +121,8 @@ def test_session_show_turns_does_not_modify_db_file(tmp_path) -> None:
     assert (tmp_path / "data" / "sessions.db").read_bytes() == before
 
 
-def test_session_brief_outputs_redacted_snapshot(tmp_path) -> None:
+def test_session_brief_outputs_redacted_snapshot(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("LOOM_INSTANCE_ID", "cli-session-test")
     store = _store(tmp_path)
     session = store.create_session(actor_id="test", self_design=True)
     draft = WorkflowBriefDraft(
@@ -154,6 +156,8 @@ def test_session_brief_outputs_redacted_snapshot(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     payload = _json_from_output(result.stdout)
     assert payload["cli_schema_version"] == "1"
+    assert payload["instance_id"] == "cli-session-test"
+    assert payload["instance_id"]
     assert payload["session_id"] == str(session.session_id)
     assert payload["self_design"] is True
     assert payload["clarify_round"] == 2

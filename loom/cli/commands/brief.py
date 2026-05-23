@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import socket
 import sys
 from pathlib import Path
 from typing import Literal, NoReturn, cast
@@ -63,6 +65,7 @@ def brief(
         _emit_json(
             {
                 "cli_schema_version": CLI_SCHEMA_VERSION,
+                "instance_id": _instance_id(),
                 "error": "intent_redacted",
                 "detail": "potential secret in intent",
                 "brief_draft": {
@@ -86,6 +89,7 @@ def brief(
     missing_warn = [_question_json(question) for question in questions if question.severity == "warn"]
     payload = {
         "cli_schema_version": CLI_SCHEMA_VERSION,
+        "instance_id": _instance_id(),
         "brief_draft": draft.model_dump(mode="json", exclude_none=False),
         "missing_block": missing_block,
         "missing_warn": missing_warn,
@@ -99,6 +103,7 @@ def brief(
         _emit_json(
             {
                 "cli_schema_version": CLI_SCHEMA_VERSION,
+                "instance_id": _instance_id(),
                 "missing_block": missing_block,
                 "ready": False,
             },
@@ -173,9 +178,14 @@ def _exit_error(error: str, detail: str) -> NoReturn:
     _emit_json(
         {
             "cli_schema_version": CLI_SCHEMA_VERSION,
+            "instance_id": _instance_id(),
             "error": error,
             "detail": detail,
         },
         err=True,
     )
     sys.exit(2)
+
+
+def _instance_id() -> str:
+    return os.environ.get("LOOM_INSTANCE_ID") or socket.gethostname()

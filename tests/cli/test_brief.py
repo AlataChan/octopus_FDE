@@ -21,6 +21,7 @@ def test_brief_missing_block_outputs_schema_and_returns_normal_branch() -> None:
     assert result.exit_code == 1
     payload = _json_from_output(result.stdout)
     assert payload["cli_schema_version"] == "1"
+    assert payload["instance_id"]
     assert payload["ready"] is False
     missing = {item["field_path"] for item in payload["missing_block"]}
     assert {"target_runtime", "trigger", "compliance_boundary"} <= missing
@@ -46,7 +47,8 @@ def test_brief_target_option_parses_but_still_reports_other_missing_fields() -> 
     assert {"trigger", "compliance_boundary"} <= missing
 
 
-def test_brief_draft_json_can_reach_ready_path(tmp_path) -> None:
+def test_brief_draft_json_can_reach_ready_path(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("LOOM_INSTANCE_ID", "cli-test")
     draft = tmp_path / "draft.json"
     draft.write_text(json.dumps({
         "trigger": {"mode": "manual"},
@@ -77,6 +79,8 @@ def test_brief_draft_json_can_reach_ready_path(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     payload = _json_from_output(result.stdout)
     assert payload["cli_schema_version"] == "1"
+    assert payload["instance_id"] == "cli-test"
+    assert payload["instance_id"]
     assert payload["ready"] is True
     assert payload["missing_block"] == []
 

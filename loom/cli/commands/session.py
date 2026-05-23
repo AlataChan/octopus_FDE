@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import socket
 import sys
 from pathlib import Path
 from typing import NoReturn
@@ -38,6 +39,7 @@ def show_turns(session_id: str, data_dir: Path | None, actor: str | None, json_o
     if json_output:
         _emit_json({
             "cli_schema_version": CLI_SCHEMA_VERSION,
+            "instance_id": _instance_id(),
             "session_id": session_id,
             "turns": turns,
         })
@@ -65,6 +67,7 @@ def brief_cmd(session_id: str, data_dir: Path | None, actor: str | None) -> None
         _exit_error("invalid_brief", f"session {session_id} has invalid brief_draft JSON", code=2)
     _emit_json({
         "cli_schema_version": CLI_SCHEMA_VERSION,
+        "instance_id": _instance_id(),
         "session_id": session_id,
         "self_design": row.self_design,
         "clarify_round": row.clarify_round,
@@ -175,9 +178,14 @@ def _exit_error(error: str, detail: str, *, code: int) -> NoReturn:
     _emit_json(
         {
             "cli_schema_version": CLI_SCHEMA_VERSION,
+            "instance_id": _instance_id(),
             "error": error,
             "detail": detail,
         },
         err=True,
     )
     sys.exit(code)
+
+
+def _instance_id() -> str:
+    return os.environ.get("LOOM_INSTANCE_ID") or socket.gethostname()
