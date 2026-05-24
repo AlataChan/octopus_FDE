@@ -10,6 +10,8 @@
 # - 默认完整模式会写本地测试账号：admin / Admin123456!。
 # - --fernet-only 推荐用于 Docker 部署：只写 Fernet / instance / data-dir，
 #   管理员账号后续用 `docker compose run --rm fde loom admin init` 初始化到 /data/auth.json。
+#   默认写入 Secure cookie 配置；仅本地 HTTP 调试时用：
+#   COOKIE_INSECURE_OK=true bash scripts/setup-env.sh --fernet-only
 # - LOOM_FERNET_KEY 与 LOOM_AUTH_PASSWORD_HASH 现场用 Python stdlib 生成，
 #   不依赖 bcrypt / passlib 等第三方库。
 # - 写入后把 .env 权限收到 600。
@@ -28,8 +30,9 @@ USERNAME="${USERNAME:-admin}"
 PASSWORD="${PASSWORD:-Admin123456!}"
 INSTANCE_ID="${INSTANCE_ID:-local-fde}"
 DATA_DIR="${DATA_DIR:-./.loom-data}"
-# 本地 http://localhost:18080 调试需要 true；上生产必须改 false 并配 TLS。
-COOKIE_INSECURE_OK="${COOKIE_INSECURE_OK:-true}"
+# 默认安全；完整本地测试模式会在未显式设置时改为 true。
+COOKIE_INSECURE_OK_EXPLICIT="${COOKIE_INSECURE_OK+x}"
+COOKIE_INSECURE_OK="${COOKIE_INSECURE_OK:-false}"
 FERNET_ONLY=false
 
 while [[ $# -gt 0 ]]; do
@@ -48,6 +51,10 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$FERNET_ONLY" != "true" && -z "$COOKIE_INSECURE_OK_EXPLICIT" ]]; then
+  COOKIE_INSECURE_OK="true"
+fi
 
 if ! command -v python3 >/dev/null 2>&1; then
   echo "error: python3 未安装" >&2
