@@ -68,6 +68,7 @@ FERNET_KEY=$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.ge
 }
 
 PASS_HASH=""
+PASS_HASH_ENV_ESCAPED=""
 if [[ "$FERNET_ONLY" != "true" ]]; then
   echo "▶ 生成 scrypt 密码哈希（账号 ${USERNAME}）..."
   PASS_HASH=$(PASSWORD="$PASSWORD" python3 - <<'PY'
@@ -78,6 +79,9 @@ h = hashlib.scrypt(pw, salt=salt, n=2**14, r=8, p=1, dklen=32, maxmem=128 * 1024
 print(f"scrypt$16384$8$1${base64.b64encode(salt).decode()}${base64.b64encode(h).decode()}")
 PY
 )
+  # docker compose 读 .env 时会把 ${VAR} / $VAR 当变量展开，scrypt 哈希里的 $
+  # 必须写成 $$ 才能保留字面值；compose 加载时会还原成单个 $。
+  PASS_HASH_ENV_ESCAPED=${PASS_HASH//\$/\$\$}
 fi
 
 if [[ -f "$ENV_FILE" ]]; then
@@ -114,7 +118,7 @@ EOF
 if [[ "$FERNET_ONLY" != "true" ]]; then
   cat >> "$ENV_FILE" <<EOF
 LOOM_AUTH_USERNAME=${USERNAME}
-LOOM_AUTH_PASSWORD_HASH=${PASS_HASH}
+LOOM_AUTH_PASSWORD_HASH=${PASS_HASH_ENV_ESCAPED}
 EOF
 fi
 
