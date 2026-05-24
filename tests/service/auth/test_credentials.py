@@ -149,3 +149,21 @@ def test_load_auth_credentials_rejects_invalid_schema(tmp_path):
 
     with pytest.raises(AuthCredentialsError, match=str(data_dir / AUTH_FILENAME)):
         load_auth_credentials(data_dir=data_dir, env={}, app_env="prod")
+
+
+def test_load_auth_credentials_rejects_empty_username(tmp_path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(mode=0o700)
+    now = "2026-05-24T13:00:00+00:00"
+    payload = {
+        "schema_version": "1",
+        "username": "",
+        "password_hash": PASSWORD_HASH,
+        "created_at": now,
+        "last_password_changed_at": now,
+    }
+    (data_dir / AUTH_FILENAME).write_text(json.dumps(payload))
+    (data_dir / AUTH_FILENAME).chmod(0o600)
+
+    with pytest.raises(AuthCredentialsError, match=str(data_dir / AUTH_FILENAME)):
+        load_auth_credentials(data_dir=data_dir, env={}, app_env="prod")

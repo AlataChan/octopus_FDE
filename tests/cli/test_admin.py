@@ -61,6 +61,21 @@ def test_admin_init_rejects_weak_password(tmp_path, monkeypatch):
     assert not (tmp_path / "data" / AUTH_FILENAME).exists()
 
 
+def test_admin_init_rejects_empty_username(tmp_path, monkeypatch):
+    _set_audit_key(monkeypatch)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli,
+        ["admin", "init", "--username", "", "--password-stdin", *_data_dir_arg(tmp_path)],
+        input="Admin123456!\n",
+    )
+
+    assert result.exit_code == 1
+    assert "Username is required" in result.stderr
+    assert not (tmp_path / "data" / AUTH_FILENAME).exists()
+
+
 def test_admin_init_existing_file_requires_force(tmp_path, monkeypatch):
     _set_audit_key(monkeypatch)
     runner = CliRunner()

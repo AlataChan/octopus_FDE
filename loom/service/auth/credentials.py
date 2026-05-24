@@ -8,9 +8,9 @@ import stat
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Mapping
+from typing import Annotated, Literal, Mapping
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
 
 from loom.service.auth.password import ScryptPasswordError, validate_scrypt_hash
 
@@ -26,7 +26,7 @@ class AuthFileSchema(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     schema_version: Literal["1"] = "1"
-    username: str
+    username: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     password_hash: str
     created_at: datetime
     last_password_changed_at: datetime

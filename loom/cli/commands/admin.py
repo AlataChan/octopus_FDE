@@ -42,7 +42,9 @@ def admin() -> None:
 @click.option("--force", is_flag=True, help="Overwrite an existing auth.json file.")
 def init_cmd(data_dir: Path | None, username: str | None, password_stdin: bool, force: bool) -> None:
     root = _data_dir(data_dir, create=True)
-    username = username or click.prompt("Username", type=str)
+    if username is None:
+        username = click.prompt("Username", type=str)
+    username = _normalize_username(username)
     password = _read_password(password_stdin)
     _validate_password_strength(password)
     doc = _new_auth_doc(username=username, password=password)
@@ -161,6 +163,15 @@ def _new_auth_doc(*, username: str, password: str) -> AuthFileSchema:
         created_at=now,
         last_password_changed_at=now,
     )
+
+
+def _normalize_username(username: str) -> str:
+    normalized = username.strip()
+    if not normalized:
+        _exit("Username is required", code=1)
+    if len(normalized) > 200:
+        _exit("Username must be 200 characters or fewer", code=1)
+    return normalized
 
 
 def _read_password(password_stdin: bool) -> str:
