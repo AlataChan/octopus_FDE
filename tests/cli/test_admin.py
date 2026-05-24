@@ -3,9 +3,11 @@ import os
 import stat
 
 from click.testing import CliRunner
+from cryptography.fernet import Fernet
 
 from loom.cli.commands import admin as admin_cmd
 from loom.cli.main import cli
+from loom.service.routes.auth import AUTH_ARCHIVE_SESSION_ID
 from loom.service.auth.credentials import AUTH_FILENAME, read_auth_file
 from loom.service.auth.password import verify_password
 
@@ -180,3 +182,50 @@ def test_admin_password_stdin_rejects_tty(tmp_path, monkeypatch):
 
     assert result.exit_code == 2
     assert "interactive prompt" in result.stderr
+
+
+def test_admin_init_writes_hmac_archive_event_without_plain_username(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOOM_FERNET_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("LOOM_INSTANCE_ID", "admin-test")
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli,
+        ["admin", "init", "--username", "admin", "--password-stdin", *_data_dir_arg(tmp_path)],
+        input="Admin123456!\n",
+    )
+
+    archive_text = (tmp_path / "data" / "archive" / str(AUTH_ARCHIVE_SESSION_ID) / "0001.jsonl").read_text()
+    events = [json.loads(line) for line in archive_text.splitlines()]
+    payload = events[-1]["payload"]
+    assert result.exit_code == 0, result.output
+    assert events[-1]["event_type"] == "auth.admin_init"
+    assert payload["instance_id"] == "admin-test"
+    assert payload["source"] == "file"
+    assert payload["username_hmac"]
+    assert '"username":"admin"' not in archive_text
+    assert "Admin123456!" not in archive_text
+
+
+def test_admin_remove_archive_uses_backup_basename_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOOM_FERNET_KEY", Fernet.generate_key().decode())
+    runner = CliRunner()
+    init = runner.invoke(
+        cli,
+        ["admin", "init", "--username", "admin", "--password-stdin", *_data_dir_arg(tmp_path)],
+        input="Admin123456!\n",
+    )
+
+    removed = runner.invoke(cli, ["admin", "remove", "--confirm", *_data_dir_arg(tmp_path)])
+
+    archive_text = "\n".join(
+        path.read_text() for path in sorted((tmp_path / "data" / "archive" / str(AUTH_ARCHIVE_SESSION_ID)).glob("*.jsonl"))
+    )
+    events = [json.loads(line) for line in archive_text.splitlines()]
+    payload = events[-1]["payload"]
+    assert init.exit_code == 0
+    assert removed.exit_code == 0, removed.output
+    assert events[-1]["event_type"] == "auth.admin_removed"
+    assert payload["backup_basename"].startswith("auth.json.disabled.")
+    assert "/" not in payload["backup_basename"]
+    assert str(tmp_path) not in archive_text

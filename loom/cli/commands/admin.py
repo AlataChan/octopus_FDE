@@ -8,10 +8,13 @@ import socket
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NoReturn
+from typing import NoReturn, cast
 
 import click
 
+from loom.archive.jsonl import ArchiveWriter
+from loom.archive.schema import ArchiveEventType
+from loom.archive.writer import InstanceArchiveWriter
 from loom.service.auth.credentials import (
     AUTH_FILENAME,
     AuthCredentialsError,
@@ -21,6 +24,8 @@ from loom.service.auth.credentials import (
     read_auth_file,
 )
 from loom.service.auth.password import hash_password
+from loom.service.deps import Settings
+from loom.service.routes.auth import AUTH_ARCHIVE_SESSION_ID
 
 CLI_SCHEMA_VERSION = "1"
 
@@ -45,6 +50,7 @@ def init_cmd(data_dir: Path | None, username: str | None, password_stdin: bool, 
         path = atomic_write_auth_file(root, doc, force=force)
     except AuthCredentialsError as e:
         _exit(str(e), code=1 if "already exists" in str(e) else 2)
+    _append_admin_event(root, "auth.admin_init", username=username, payload={"source": "file"})
     click.echo(f"✓ admin user '{username}' created at {path}")
 
 
@@ -72,6 +78,7 @@ def reset_password_cmd(data_dir: Path | None, password_stdin: bool) -> None:
         atomic_write_auth_file(root, updated, force=True)
     except AuthCredentialsError as e:
         _exit(str(e), code=2)
+    _append_admin_event(root, "auth.admin_password_reset", username=current.username, payload={})
     click.echo(f"✓ admin user '{current.username}' password reset")
 
 
@@ -95,6 +102,7 @@ def remove_cmd(data_dir: Path | None, confirm: bool) -> None:
         _fsync_dir(root)
     except OSError as e:
         _exit(f"failed to rename {auth_path}: {e}", code=2)
+    _append_admin_event(root, "auth.admin_removed", username=current.username, payload={"backup_basename": backup.name})
     click.echo(f"✓ admin user '{current.username}' disabled; backup={backup.name}")
 
 
@@ -193,6 +201,35 @@ def _fsync_dir(data_dir: Path) -> None:
 
 def _emit_json(payload: dict[str, object], *, err: bool = False) -> None:
     click.echo(json.dumps(payload, ensure_ascii=False, indent=2), err=err)
+
+
+def _append_admin_event(root: Path, event_type: str, *, username: str, payload: dict[str, object]) -> None:
+    writer = _archive_writer(root)
+    if writer is None:
+        return
+    writer.append(
+        AUTH_ARCHIVE_SESSION_ID,
+        actor_id="auth",
+        event_type=cast(ArchiveEventType, event_type),
+        payload={"username_hmac": writer.hmac_text(username), **payload},
+    )
+
+
+def _archive_writer(root: Path) -> InstanceArchiveWriter | None:
+    fernet_key = os.environ.get("LOOM_FERNET_KEY")
+    if not fernet_key:
+        return None
+    settings = Settings(
+        data_dir=root,
+        app_env=os.environ.get("APP_ENV", "prod"),
+        fernet_key=fernet_key,
+        instance_id=_instance_id(),
+    )
+    return InstanceArchiveWriter(
+        ArchiveWriter(root),
+        instance_id=settings.instance_id,
+        hmac_key=settings.archive_hmac_key(),
+    )
 
 
 def _exit(message: str, *, code: int) -> NoReturn:
