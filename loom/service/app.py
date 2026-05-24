@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 from urllib.parse import urlparse
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from loom.archive.jsonl import ArchiveWriter
@@ -107,8 +107,43 @@ def create_app(
     app.include_router(templates_router)
     web_dist = Path(__file__).resolve().parents[2] / "web" / "dist"
     if web_dist.exists():
-        app.mount("/", StaticFiles(directory=web_dist, html=True), name="web")
+        _install_spa_routes(app, web_dist)
     return app
+
+
+def _install_spa_routes(app: FastAPI, web_dist: Path) -> None:
+    """Serve the React SPA with client-side routing fallback.
+
+    `StaticFiles(html=True)` only auto-serves index.html for directory paths
+    (`/`), so client-side routes like `/login` would 404. We mount /assets for
+    bundled assets, then register a catch-all that serves a literal file if it
+    exists under web/dist, else falls back to index.html for the SPA router.
+    Routes registered earlier (`/v1/*`, `/health`) match first because Starlette
+    evaluates in registration order.
+    """
+    assets_dir = web_dist / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="web-assets")
+
+    index_html = web_dist / "index.html"
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):  # type: ignore[no-untyped-def]
+        # Defensive: never serve SPA for API namespaces (router should have matched).
+        if full_path.startswith(("v1/", "v1")) or full_path == "health":
+            raise HTTPException(status_code=404, detail="Not Found")
+        if full_path:
+            candidate = (web_dist / full_path).resolve()
+            try:
+                candidate.relative_to(web_dist.resolve())
+            except ValueError:
+                # Path traversal attempt.
+                raise HTTPException(status_code=404, detail="Not Found")
+            if candidate.is_file():
+                return FileResponse(candidate)
+        if not index_html.is_file():
+            raise HTTPException(status_code=404, detail="Not Found")
+        return FileResponse(index_html)
 
 
 def _install_auth_middleware(app: FastAPI, settings: Settings) -> None:
