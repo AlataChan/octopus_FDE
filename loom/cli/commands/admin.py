@@ -118,7 +118,7 @@ def show_cmd(data_dir: Path | None, json_output: bool) -> None:
     if credentials is None:
         _emit_json({"cli_schema_version": CLI_SCHEMA_VERSION, "error": "not_configured"}, err=True)
         sys.exit(1)
-    payload = {
+    payload: dict[str, object] = {
         "cli_schema_version": CLI_SCHEMA_VERSION,
         "instance_id": _instance_id(),
         "username": credentials.username,
