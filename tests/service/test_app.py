@@ -59,6 +59,17 @@ def test_unset_app_env_requires_fernet_key(tmp_path, monkeypatch):
         Settings.from_env()
 
 
+def test_prod_missing_credentials_error_points_to_admin_init(tmp_path, monkeypatch):
+    monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("LOOM_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LOOM_FERNET_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("LOOM_AUTH_USERNAME", raising=False)
+    monkeypatch.delenv("LOOM_AUTH_PASSWORD_HASH", raising=False)
+
+    with pytest.raises(RuntimeError, match="loom admin init"):
+        Settings.from_env()
+
+
 def test_data_dir_created_private(tmp_path):
     settings = Settings(data_dir=tmp_path / "data", app_env="dev", fernet_key=Fernet.generate_key().decode())
     settings.ensure_data_dir()

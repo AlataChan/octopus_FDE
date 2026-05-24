@@ -5,6 +5,7 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from loom.service.app import create_app
+from loom.service.auth.credentials import AuthFileSchema, atomic_write_auth_file
 from loom.service.deps import Settings
 from loom.service.routes.auth import AUTH_ARCHIVE_SESSION_ID
 
@@ -193,7 +194,66 @@ def test_prod_requires_auth_password_hash(tmp_path, monkeypatch):
     monkeypatch.setenv("LOOM_AUTH_USERNAME", "admin")
     monkeypatch.delenv("LOOM_AUTH_PASSWORD_HASH", raising=False)
 
-    with pytest.raises(RuntimeError, match="LOOM_AUTH_PASSWORD_HASH"):
+    with pytest.raises(RuntimeError, match="LOOM_AUTH_USERNAME and LOOM_AUTH_PASSWORD_HASH"):
+        Settings.from_env()
+
+
+def test_prod_uses_file_credentials_when_env_credentials_missing(tmp_path, monkeypatch):
+    auth_doc = AuthFileSchema(
+        username="file-admin",
+        password_hash=PASSWORD_HASH,
+        created_at="2026-05-24T13:00:00+00:00",
+        last_password_changed_at="2026-05-24T13:00:00+00:00",
+    )
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(mode=0o700)
+    atomic_write_auth_file(data_dir, auth_doc)
+    monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("LOOM_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("LOOM_FERNET_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("LOOM_AUTH_USERNAME", raising=False)
+    monkeypatch.delenv("LOOM_AUTH_PASSWORD_HASH", raising=False)
+
+    settings = Settings.from_env()
+
+    assert settings.auth_username == "file-admin"
+    assert settings.auth_password_hash == PASSWORD_HASH
+    assert settings.auth_disabled is False
+
+
+def test_env_credentials_win_over_file_credentials(tmp_path, monkeypatch, caplog):
+    auth_doc = AuthFileSchema(
+        username="file-admin",
+        password_hash=PASSWORD_HASH,
+        created_at="2026-05-24T13:00:00+00:00",
+        last_password_changed_at="2026-05-24T13:00:00+00:00",
+    )
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(mode=0o700)
+    atomic_write_auth_file(data_dir, auth_doc)
+    caplog.set_level("INFO")
+    monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("LOOM_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("LOOM_FERNET_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("LOOM_AUTH_USERNAME", "env-admin")
+    monkeypatch.setenv("LOOM_AUTH_PASSWORD_HASH", PASSWORD_HASH)
+
+    settings = Settings.from_env()
+
+    assert settings.auth_username == "env-admin"
+    assert settings.auth_password_hash == PASSWORD_HASH
+    assert "env-admin" not in caplog.text
+    assert "file-admin" not in caplog.text
+
+
+def test_prod_requires_admin_credentials_or_auth_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("LOOM_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LOOM_FERNET_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("LOOM_AUTH_USERNAME", raising=False)
+    monkeypatch.delenv("LOOM_AUTH_PASSWORD_HASH", raising=False)
+
+    with pytest.raises(RuntimeError, match="loom admin init"):
         Settings.from_env()
 
 

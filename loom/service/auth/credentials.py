@@ -58,7 +58,10 @@ def load_auth_credentials(
     if env_username and env_hash:
         if auth_path.exists():
             LOGGER.info("Admin credentials configured in env and auth.json; env credentials take precedence")
-        _validate_hash(env_hash, auth_path=None)
+        try:
+            _validate_hash(env_hash, auth_path=None)
+        except ScryptPasswordError as e:
+            raise AuthCredentialsError(str(e)) from e
         return AuthCredentials(username=env_username, password_hash=env_hash, source="env")
 
     if not auth_path.exists():

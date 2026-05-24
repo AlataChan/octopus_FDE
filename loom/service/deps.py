@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from fastapi import HTTPException, Request
 
-from loom.service.auth.password import ScryptPasswordError, validate_scrypt_hash
+from loom.service.auth.credentials import AuthCredentialsError, load_auth_credentials
 
 LOGGER = logging.getLogger(__name__)
 
@@ -44,49 +44,47 @@ class Settings:
     @classmethod
     def from_env(cls) -> Settings:
         app_env = os.environ.get("APP_ENV", "prod")
+        data_dir = Path(os.environ.get("LOOM_DATA_DIR", ".loom-data"))
         key = os.environ.get("LOOM_FERNET_KEY")
         if app_env != "dev" and not key:
             raise RuntimeError("LOOM_FERNET_KEY is required when APP_ENV is prod or unset")
         if app_env == "dev" and not key:
             key = Fernet.generate_key().decode("ascii")
             LOGGER.warning("LOOM_FERNET_KEY missing in dev; using an ephemeral per-process key")
-        auth_username = os.environ.get("LOOM_AUTH_USERNAME")
-        auth_password_hash = os.environ.get("LOOM_AUTH_PASSWORD_HASH")
         auth_disabled_env = os.environ.get("LOOM_AUTH_DISABLED")
-        auth_disabled = (
-            _parse_bool(auth_disabled_env)
-            if auth_disabled_env is not None
-            else app_env == "dev" and (not auth_username or not auth_password_hash)
-        )
-        if app_env != "dev" and auth_disabled:
-            raise RuntimeError("LOOM_AUTH_DISABLED is only allowed when APP_ENV=dev")
+        try:
+            auth_credentials = load_auth_credentials(data_dir=data_dir, env=os.environ, app_env=app_env)
+        except AuthCredentialsError as e:
+            raise RuntimeError(str(e)) from e
+        if auth_disabled_env is not None:
+            auth_disabled = _parse_bool(auth_disabled_env)
+            if app_env != "dev" and auth_disabled:
+                raise RuntimeError("LOOM_AUTH_DISABLED is only allowed when APP_ENV=dev")
+        else:
+            auth_disabled = app_env == "dev" and auth_credentials is None
         auth_cookie_insecure_ok = _parse_bool(os.environ.get("LOOM_AUTH_COOKIE_INSECURE_OK", "false"))
         if app_env != "dev" and auth_cookie_insecure_ok:
             LOGGER.warning(
                 "SECURITY WARNING: LOOM_AUTH_COOKIE_INSECURE_OK=true disables Secure cookies; "
                 "use only for local HTTP debugging and never on public deployments"
             )
-        if not auth_disabled:
-            if not auth_username:
-                raise RuntimeError("LOOM_AUTH_USERNAME is required when authentication is enabled")
-            if not auth_password_hash:
-                raise RuntimeError("LOOM_AUTH_PASSWORD_HASH is required when authentication is enabled")
-            try:
-                validate_scrypt_hash(auth_password_hash)
-            except ScryptPasswordError as e:
-                raise RuntimeError(str(e)) from e
+        if not auth_disabled and auth_credentials is None:
+            raise RuntimeError(
+                "No admin credentials configured. Run `loom admin init` inside the container, "
+                "or set LOOM_AUTH_USERNAME and LOOM_AUTH_PASSWORD_HASH env vars."
+            )
         web_concurrency = int(os.environ.get("WEB_CONCURRENCY", "1"))
         if web_concurrency > 1:
             raise RuntimeError("WEB_CONCURRENCY must be 1; in-memory auth sessions are single-worker only")
         cors_allow_origins = _parse_origins(os.environ.get("LOOM_CORS_ALLOW_ORIGINS", ""))
         return cls(
-            data_dir=Path(os.environ.get("LOOM_DATA_DIR", ".loom-data")),
+            data_dir=data_dir,
             app_env=app_env,
             fernet_key=key,
             binding_dir=Path(os.environ.get("LOOM_BINDING_DIR", "config/customers")),
             audit_max_retention_days=int(os.environ.get("LOOM_AUDIT_MAX_RETENTION_DAYS", "365")),
-            auth_username=auth_username,
-            auth_password_hash=auth_password_hash,
+            auth_username=auth_credentials.username if auth_credentials else None,
+            auth_password_hash=auth_credentials.password_hash if auth_credentials else None,
             auth_session_ttl_hours=int(os.environ.get("LOOM_AUTH_SESSION_TTL_HOURS", "24")),
             auth_disabled=auth_disabled,
             auth_cookie_insecure_ok=auth_cookie_insecure_ok,
