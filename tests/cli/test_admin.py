@@ -20,7 +20,12 @@ def _data_dir_arg(tmp_path) -> list[str]:
     return ["--data-dir", str(tmp_path / "data")]
 
 
+def _set_audit_key(monkeypatch) -> None:
+    monkeypatch.setenv("LOOM_FERNET_KEY", Fernet.generate_key().decode())
+
+
 def test_admin_init_password_stdin_creates_private_auth_file(tmp_path, monkeypatch):
+    _set_audit_key(monkeypatch)
     monkeypatch.delenv("LOOM_AUTH_USERNAME", raising=False)
     monkeypatch.delenv("LOOM_AUTH_PASSWORD_HASH", raising=False)
     runner = CliRunner()
@@ -41,7 +46,8 @@ def test_admin_init_password_stdin_creates_private_auth_file(tmp_path, monkeypat
     assert verify_password("Admin123456!", doc.password_hash)
 
 
-def test_admin_init_rejects_weak_password(tmp_path):
+def test_admin_init_rejects_weak_password(tmp_path, monkeypatch):
+    _set_audit_key(monkeypatch)
     runner = CliRunner()
 
     result = runner.invoke(
@@ -55,7 +61,8 @@ def test_admin_init_rejects_weak_password(tmp_path):
     assert not (tmp_path / "data" / AUTH_FILENAME).exists()
 
 
-def test_admin_init_existing_file_requires_force(tmp_path):
+def test_admin_init_existing_file_requires_force(tmp_path, monkeypatch):
+    _set_audit_key(monkeypatch)
     runner = CliRunner()
     first = runner.invoke(
         cli,
@@ -80,7 +87,8 @@ def test_admin_init_existing_file_requires_force(tmp_path):
     assert read_auth_file(data_dir=tmp_path / "data").username == "admin2"
 
 
-def test_admin_reset_password_requires_existing_auth_file(tmp_path):
+def test_admin_reset_password_requires_existing_auth_file(tmp_path, monkeypatch):
+    _set_audit_key(monkeypatch)
     runner = CliRunner()
 
     result = runner.invoke(
@@ -93,7 +101,8 @@ def test_admin_reset_password_requires_existing_auth_file(tmp_path):
     assert "loom admin init" in result.stderr
 
 
-def test_admin_reset_password_preserves_username_and_changes_hash(tmp_path):
+def test_admin_reset_password_preserves_username_and_changes_hash(tmp_path, monkeypatch):
+    _set_audit_key(monkeypatch)
     runner = CliRunner()
     init = runner.invoke(
         cli,
@@ -117,7 +126,8 @@ def test_admin_reset_password_preserves_username_and_changes_hash(tmp_path):
     assert after.created_at == before.created_at
 
 
-def test_admin_remove_renames_auth_file_to_timestamped_backup(tmp_path):
+def test_admin_remove_renames_auth_file_to_timestamped_backup(tmp_path, monkeypatch):
+    _set_audit_key(monkeypatch)
     runner = CliRunner()
     init = runner.invoke(
         cli,
@@ -136,6 +146,7 @@ def test_admin_remove_renames_auth_file_to_timestamped_backup(tmp_path):
 
 
 def test_admin_show_json_uses_safe_field_subset(tmp_path, monkeypatch):
+    _set_audit_key(monkeypatch)
     monkeypatch.delenv("LOOM_AUTH_USERNAME", raising=False)
     monkeypatch.delenv("LOOM_AUTH_PASSWORD_HASH", raising=False)
     runner = CliRunner()
@@ -171,6 +182,7 @@ def test_admin_show_missing_credentials_exits_one(tmp_path, monkeypatch):
 
 
 def test_admin_password_stdin_rejects_tty(tmp_path, monkeypatch):
+    _set_audit_key(monkeypatch)
     monkeypatch.setattr(admin_cmd, "_stdin_is_tty", lambda: True)
     runner = CliRunner()
 
@@ -185,7 +197,7 @@ def test_admin_password_stdin_rejects_tty(tmp_path, monkeypatch):
 
 
 def test_admin_init_writes_hmac_archive_event_without_plain_username(tmp_path, monkeypatch):
-    monkeypatch.setenv("LOOM_FERNET_KEY", Fernet.generate_key().decode())
+    _set_audit_key(monkeypatch)
     monkeypatch.setenv("LOOM_INSTANCE_ID", "admin-test")
     runner = CliRunner()
 
@@ -208,7 +220,7 @@ def test_admin_init_writes_hmac_archive_event_without_plain_username(tmp_path, m
 
 
 def test_admin_remove_archive_uses_backup_basename_only(tmp_path, monkeypatch):
-    monkeypatch.setenv("LOOM_FERNET_KEY", Fernet.generate_key().decode())
+    _set_audit_key(monkeypatch)
     runner = CliRunner()
     init = runner.invoke(
         cli,
@@ -229,3 +241,86 @@ def test_admin_remove_archive_uses_backup_basename_only(tmp_path, monkeypatch):
     assert payload["backup_basename"].startswith("auth.json.disabled.")
     assert "/" not in payload["backup_basename"]
     assert str(tmp_path) not in archive_text
+
+
+def test_admin_init_requires_archive_writer_before_writing_auth_file(tmp_path, monkeypatch):
+    monkeypatch.delenv("LOOM_FERNET_KEY", raising=False)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli,
+        ["admin", "init", "--username", "admin", "--password-stdin", *_data_dir_arg(tmp_path)],
+        input="Admin123456!\n",
+    )
+
+    assert result.exit_code == 2
+    payload = _json_from_output(result.stderr)
+    assert payload["cli_schema_version"] == "1"
+    assert payload["error"] == "archive_unavailable"
+    assert payload["detail"] == "LOOM_FERNET_KEY required for admin audit"
+    assert not (tmp_path / "data" / AUTH_FILENAME).exists()
+
+
+def test_admin_reset_requires_archive_writer_before_rewriting_auth_file(tmp_path, monkeypatch):
+    _set_audit_key(monkeypatch)
+    runner = CliRunner()
+    init = runner.invoke(
+        cli,
+        ["admin", "init", "--username", "admin", "--password-stdin", *_data_dir_arg(tmp_path)],
+        input="Admin123456!\n",
+    )
+    before = read_auth_file(data_dir=tmp_path / "data")
+    monkeypatch.delenv("LOOM_FERNET_KEY", raising=False)
+
+    result = runner.invoke(
+        cli,
+        ["admin", "reset-password", "--password-stdin", *_data_dir_arg(tmp_path)],
+        input="NewAdmin123!\n",
+    )
+
+    after = read_auth_file(data_dir=tmp_path / "data")
+    assert init.exit_code == 0
+    assert result.exit_code == 2
+    assert _json_from_output(result.stderr)["error"] == "archive_unavailable"
+    assert after.password_hash == before.password_hash
+
+
+def test_admin_remove_requires_archive_writer_before_renaming_auth_file(tmp_path, monkeypatch):
+    _set_audit_key(monkeypatch)
+    runner = CliRunner()
+    init = runner.invoke(
+        cli,
+        ["admin", "init", "--username", "admin", "--password-stdin", *_data_dir_arg(tmp_path)],
+        input="Admin123456!\n",
+    )
+    monkeypatch.delenv("LOOM_FERNET_KEY", raising=False)
+
+    result = runner.invoke(cli, ["admin", "remove", "--confirm", *_data_dir_arg(tmp_path)])
+
+    assert init.exit_code == 0
+    assert result.exit_code == 2
+    assert _json_from_output(result.stderr)["error"] == "archive_unavailable"
+    assert (tmp_path / "data" / AUTH_FILENAME).exists()
+    assert not list((tmp_path / "data").glob("auth.json.disabled.*"))
+
+
+def test_admin_show_skips_archive_when_fernet_key_missing(tmp_path, monkeypatch):
+    _set_audit_key(monkeypatch)
+    monkeypatch.delenv("LOOM_AUTH_USERNAME", raising=False)
+    monkeypatch.delenv("LOOM_AUTH_PASSWORD_HASH", raising=False)
+    runner = CliRunner()
+    init = runner.invoke(
+        cli,
+        ["admin", "init", "--username", "admin", "--password-stdin", *_data_dir_arg(tmp_path)],
+        input="Admin123456!\n",
+    )
+    monkeypatch.delenv("LOOM_FERNET_KEY", raising=False)
+    archive_before = sorted((tmp_path / "data" / "archive" / str(AUTH_ARCHIVE_SESSION_ID)).glob("*.jsonl"))
+
+    result = runner.invoke(cli, ["admin", "show", "--json", *_data_dir_arg(tmp_path)])
+
+    archive_after = sorted((tmp_path / "data" / "archive" / str(AUTH_ARCHIVE_SESSION_ID)).glob("*.jsonl"))
+    assert init.exit_code == 0
+    assert result.exit_code == 0, result.output
+    assert _json_from_output(result.stdout)["username"] == "admin"
+    assert archive_after == archive_before

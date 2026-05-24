@@ -46,11 +46,12 @@ def init_cmd(data_dir: Path | None, username: str | None, password_stdin: bool, 
     password = _read_password(password_stdin)
     _validate_password_strength(password)
     doc = _new_auth_doc(username=username, password=password)
+    archive_writer = _require_archive_writer(root)
     try:
         path = atomic_write_auth_file(root, doc, force=force)
     except AuthCredentialsError as e:
         _exit(str(e), code=1 if "already exists" in str(e) else 2)
-    _append_admin_event(root, "auth.admin_init", username=username, payload={"source": "file"})
+    _append_admin_event(archive_writer, "auth.admin_init", username=username, payload={"source": "file"})
     click.echo(f"✓ admin user '{username}' created at {path}")
 
 
@@ -66,6 +67,7 @@ def reset_password_cmd(data_dir: Path | None, password_stdin: bool) -> None:
         current = read_auth_file(data_dir=root)
     except AuthCredentialsError as e:
         _exit(str(e), code=2)
+    archive_writer = _require_archive_writer(root)
     password = _read_password(password_stdin)
     _validate_password_strength(password)
     updated = AuthFileSchema(
@@ -78,7 +80,7 @@ def reset_password_cmd(data_dir: Path | None, password_stdin: bool) -> None:
         atomic_write_auth_file(root, updated, force=True)
     except AuthCredentialsError as e:
         _exit(str(e), code=2)
-    _append_admin_event(root, "auth.admin_password_reset", username=current.username, payload={})
+    _append_admin_event(archive_writer, "auth.admin_password_reset", username=current.username, payload={})
     click.echo(f"✓ admin user '{current.username}' password reset")
 
 
@@ -96,13 +98,19 @@ def remove_cmd(data_dir: Path | None, confirm: bool) -> None:
         current = read_auth_file(data_dir=root)
     except AuthCredentialsError as e:
         _exit(str(e), code=2)
+    archive_writer = _require_archive_writer(root)
     backup = root / f"auth.json.disabled.{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
     try:
         os.rename(auth_path, backup)
         _fsync_dir(root)
     except OSError as e:
         _exit(f"failed to rename {auth_path}: {e}", code=2)
-    _append_admin_event(root, "auth.admin_removed", username=current.username, payload={"backup_basename": backup.name})
+    _append_admin_event(
+        archive_writer,
+        "auth.admin_removed",
+        username=current.username,
+        payload={"backup_basename": backup.name},
+    )
     click.echo(f"✓ admin user '{current.username}' disabled; backup={backup.name}")
 
 
@@ -203,16 +211,29 @@ def _emit_json(payload: dict[str, object], *, err: bool = False) -> None:
     click.echo(json.dumps(payload, ensure_ascii=False, indent=2), err=err)
 
 
-def _append_admin_event(root: Path, event_type: str, *, username: str, payload: dict[str, object]) -> None:
-    writer = _archive_writer(root)
-    if writer is None:
-        return
+def _append_admin_event(
+    writer: InstanceArchiveWriter,
+    event_type: str,
+    *,
+    username: str,
+    payload: dict[str, object],
+) -> None:
     writer.append(
         AUTH_ARCHIVE_SESSION_ID,
         actor_id="auth",
         event_type=cast(ArchiveEventType, event_type),
         payload={"username_hmac": writer.hmac_text(username), **payload},
     )
+
+
+def _require_archive_writer(root: Path) -> InstanceArchiveWriter:
+    try:
+        writer = _archive_writer(root)
+    except Exception:
+        writer = None
+    if writer is None:
+        _exit_json("archive_unavailable", "LOOM_FERNET_KEY required for admin audit", code=2)
+    return writer
 
 
 def _archive_writer(root: Path) -> InstanceArchiveWriter | None:
@@ -234,6 +255,19 @@ def _archive_writer(root: Path) -> InstanceArchiveWriter | None:
 
 def _exit(message: str, *, code: int) -> NoReturn:
     click.echo(message, err=True)
+    sys.exit(code)
+
+
+def _exit_json(error: str, detail: str, *, code: int) -> NoReturn:
+    _emit_json(
+        {
+            "cli_schema_version": CLI_SCHEMA_VERSION,
+            "instance_id": _instance_id(),
+            "error": error,
+            "detail": detail,
+        },
+        err=True,
+    )
     sys.exit(code)
 
 
