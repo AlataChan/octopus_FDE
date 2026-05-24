@@ -20,7 +20,7 @@
 - 哈希字符串落在 `.env` 文件里，密码生成命令需要外部 Python 环境
 - 不符合"部署后初始化"的产品直觉
 
-目标：**部署后**用一条 `docker compose exec fde loom admin init` 完成凭据初始化，把哈希写入数据卷里的持久文件，env 只保留 `LOOM_FERNET_KEY`。
+目标：**部署后**用一条 `docker compose run --rm fde loom admin init` 完成凭据初始化，把哈希写入数据卷里的持久文件，env 只保留 `LOOM_FERNET_KEY`。
 
 ## 2. 目标与非目标
 
@@ -29,7 +29,7 @@
 - 凭据持久化到 `$LOOM_DATA_DIR/auth.json`（与 sessions DB 同卷），文件权限 0600
 - 鉴权加载优先级：**env > 文件 > 启动失败**（兼容现状不破坏既有部署）
 - `scripts/setup-env.sh` 加 `--fernet-only` 模式，只生成密钥不动账号；老用法保留
-- README 增加"推荐部署流程"段：单 fernet env + docker exec init
+- README 增加"推荐部署流程"段：单 fernet env + docker compose run --rm init
 - 密码强度校验（交互式 + 非交互式都强制）
 - 审计事件扩展
 
