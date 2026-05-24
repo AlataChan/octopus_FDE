@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import os
 from dataclasses import dataclass
 
 MIN_SCRYPT_N = 2**14
@@ -33,6 +34,23 @@ class ScryptHash:
 
 def validate_scrypt_hash(encoded: str) -> None:
     _parse_scrypt_hash(encoded)
+
+
+def hash_password(password: str) -> str:
+    salt = os.urandom(16)
+    digest = hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt,
+        n=MIN_SCRYPT_N,
+        r=EXPECTED_R,
+        p=EXPECTED_P,
+        dklen=DKLEN,
+        maxmem=SCRYPT_MAXMEM,
+    )
+    return (
+        f"scrypt${MIN_SCRYPT_N}${EXPECTED_R}${EXPECTED_P}$"
+        f"{base64.b64encode(salt).decode()}${base64.b64encode(digest).decode()}"
+    )
 
 
 def verify_password(password: str, encoded: str) -> bool:

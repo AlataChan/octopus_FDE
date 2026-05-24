@@ -1,5 +1,6 @@
 import click
 
+from loom.cli.commands import admin as cmd_admin
 from loom.cli.commands import brief as cmd_brief
 from loom.cli.commands import compile as cmd_compile
 from loom.cli.commands import hiagent_push as cmd_hiagent
@@ -15,6 +16,7 @@ def cli() -> None:
 
 
 cli.add_command(cmd_plan.plan)
+cli.add_command(cmd_admin.admin, name="admin")
 cli.add_command(cmd_brief.brief, name="brief")
 cli.add_command(cmd_validate.validate_cmd, name="validate")
 cli.add_command(cmd_compile.compile_cmd, name="compile")
