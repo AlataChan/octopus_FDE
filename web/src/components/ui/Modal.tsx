@@ -3,14 +3,22 @@ import { X } from "lucide-react";
 import { Button } from "./Button";
 import { Card } from "./Card";
 
+type ModalSize = "sm" | "lg";
+
 type ModalProps = {
   children: ReactNode;
   labelledBy?: string;
   onOpenChange?: (open: boolean) => void;
   open: boolean;
+  size?: ModalSize;
 };
 
-export function Modal({ children, labelledBy, onOpenChange, open }: ModalProps) {
+const SIZE_CLASS: Record<ModalSize, string> = {
+  sm: "max-w-lg",
+  lg: "max-w-4xl"
+};
+
+export function Modal({ children, labelledBy, onOpenChange, open, size = "sm" }: ModalProps) {
   useEffect(() => {
     if (!open) {
       return;
@@ -40,7 +48,7 @@ export function Modal({ children, labelledBy, onOpenChange, open }: ModalProps) 
         }
       }}
     >
-      <Card className="relative w-full max-w-lg">
+      <Card className={`relative w-full ${SIZE_CLASS[size]}`}>
         {onOpenChange ? (
           <Button
             aria-label="Close modal"
