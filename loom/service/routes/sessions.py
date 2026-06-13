@@ -124,6 +124,24 @@ def patch_session(
     return _session_detail_response(session, request, actor.id)
 
 
+@router.delete("/sessions/{session_id}", status_code=204)
+def delete_session(
+    session_id: UUID,
+    request: Request,
+    actor: ActorDep,
+) -> Response:
+    deleted = request.app.state.session_store.delete_session(session_id, actor_id=actor.id)
+    if not deleted:
+        raise not_found("session not found")
+    request.app.state.archive_writer.append(
+        session_id,
+        actor_id=actor.id,
+        event_type="session.deleted",
+        payload={},
+    )
+    return Response(status_code=204)
+
+
 @router.patch("/sessions/{session_id}/llm-config")
 def set_llm_config(
     session_id: UUID,

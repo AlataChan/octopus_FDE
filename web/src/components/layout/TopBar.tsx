@@ -6,6 +6,7 @@ import { useTheme } from "../../hooks/useTheme";
 import { useAuth } from "../../hooks/useAuth";
 import { getHealth, logout } from "../../lib/api";
 import { useActor } from "../../lib/useActor";
+import { BrandMark } from "../BrandMark";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 
@@ -38,10 +39,14 @@ export function TopBar() {
       <div className="flex min-w-0 items-center gap-4">
         <Link
           aria-label={t("app.title")}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-sm font-black tracking-tight text-primary dark:text-bg-app shadow-[0_0_28px_rgb(var(--accent)/0.22)]"
+          className="flex min-w-0 shrink-0 items-center rounded-lg focus-visible:ring-2 focus-visible:ring-ring/40"
           to="/"
         >
-          FDE
+          <BrandMark
+            className="max-w-[15rem]"
+            iconClassName="h-9 w-9"
+            textClassName="hidden max-w-[12rem] sm:block"
+          />
         </Link>
         <nav aria-label={t("topbar.breadcrumb")} className="min-w-0">
           <ol className="flex min-w-0 items-center gap-2 text-sm">

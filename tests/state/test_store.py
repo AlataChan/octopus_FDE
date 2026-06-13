@@ -145,3 +145,39 @@ def test_artifact_lookup_requires_session_and_artifact_ids(tmp_path):
     assert stored is not None
     assert stored.compile_warnings[0].code == "policy.audit.noop"
     assert store.get_artifact(uuid4(), artifact.artifact_id, actor_id="fde") is None
+
+
+def test_delete_session_removes_session_turns_and_artifacts_for_actor_only(tmp_path):
+    store = SessionStore(tmp_path / "sessions.db")
+    session = store.create_session(actor_id="fde")
+    turn = store.create_turn(
+        session.session_id,
+        actor_id="fde",
+        user_message="build workflow",
+        ir_before=None,
+    )
+    artifact = store.create_artifact(
+        session.session_id,
+        actor_id="fde",
+        workflow_id=uuid4(),
+        artifact_name="demo.zip",
+        artifact_kind="zip",
+        artifact_path="sessions/s/artifacts/a.zip",
+        artifact_size=12,
+        sha256="b" * 64,
+        target="hiagent",
+        mode="chat",
+        binding_handle="test",
+    )
+
+    assert store.delete_session(session.session_id, actor_id="other") is False
+    assert store.get_session(session.session_id, actor_id="fde") is not None
+    assert store.get_turn(turn.turn_id, actor_id="fde") is not None
+    assert store.get_artifact(session.session_id, artifact.artifact_id, actor_id="fde") is not None
+
+    assert store.delete_session(session.session_id, actor_id="fde") is True
+
+    assert store.get_session(session.session_id, actor_id="fde") is None
+    assert store.list_turns(session.session_id, actor_id="fde") == []
+    assert store.list_artifacts(session.session_id, actor_id="fde") == []
+    assert store.delete_session(session.session_id, actor_id="fde") is False

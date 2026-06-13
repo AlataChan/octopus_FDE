@@ -1,12 +1,13 @@
 import { type KeyboardEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Copy, MoreVertical, Pencil, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Copy, MoreVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
-import { listSessions, renameSession } from "../../lib/api";
+import { Link, useNavigate } from "react-router-dom";
+import { deleteSession, listSessions, renameSession } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import type { SessionSummary } from "../../lib/types";
 import { Button } from "../ui/Button";
+import { DeleteSessionDialog } from "./DeleteSessionDialog";
 
 const SIDEBAR_COLLAPSED_KEY = "fde-sessions-sidebar-collapsed-v1";
 
@@ -24,11 +25,14 @@ export function SessionsSidebar({
   onCreateSession
 }: Props) {
   const { i18n, t } = useTranslation();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [collapsed, setCollapsed] = useState(() => readCollapsed(defaultCollapsed));
   const [menuSessionId, setMenuSessionId] = useState<string | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [renameErrorSessionId, setRenameErrorSessionId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SessionSummary | null>(null);
+  const [deleteError, setDeleteError] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
   const isCollapsed = forceExpanded ? false : collapsed;
   const sessions = useQuery({
@@ -50,6 +54,25 @@ export function SessionsSidebar({
     onError: (_error, variables) => {
       setEditingSessionId(variables.sessionId);
       setRenameErrorSessionId(variables.sessionId);
+    }
+  });
+  const remove = useMutation({
+    mutationFn: (sessionId: string) => deleteSession(sessionId),
+    onMutate: () => {
+      setDeleteError(false);
+    },
+    onSuccess: async (_result, sessionId) => {
+      setMenuSessionId(null);
+      setDeleteTarget(null);
+      setDeleteError(false);
+      queryClient.removeQueries({ queryKey: ["session", sessionId] });
+      await queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      if (sessionId === currentSessionId) {
+        navigate("/sessions");
+      }
+    },
+    onError: () => {
+      setDeleteError(true);
     }
   });
   const sortedSessions = useMemo(
@@ -110,88 +133,118 @@ export function SessionsSidebar({
     setMenuSessionId(null);
   }
 
+  function requestDelete(session: SessionSummary) {
+    setMenuSessionId(null);
+    setDeleteError(false);
+    setDeleteTarget(session);
+  }
+
   return (
-    <aside
-      className={cn(
-        "flex h-full min-h-0 shrink-0 flex-col border-r border-border/40 bg-bg-muted/70 transition-[width] duration-200",
-        isCollapsed ? "w-14" : "w-[220px]"
-      )}
-      data-collapsed={isCollapsed}
-      data-testid="sessions-sidebar"
-    >
-      <div
+    <>
+      <aside
         className={cn(
-          "flex shrink-0 border-b border-border/30 p-2",
-          isCollapsed ? "h-24 flex-col gap-2" : "h-12 items-center gap-2"
+          "flex h-full min-h-0 shrink-0 flex-col border-r border-border/40 bg-bg-muted/70 transition-[width] duration-200",
+          isCollapsed ? "w-14" : "w-[220px]"
         )}
+        data-collapsed={isCollapsed}
+        data-testid="sessions-sidebar"
       >
-        <Button
-          aria-label={t("sessions.create")}
-          className={cn("min-w-0", isCollapsed ? "h-8 w-10 px-0" : "flex-1")}
-          icon={<Plus aria-hidden className="h-4 w-4" />}
-          size="sm"
-          variant="primary"
-          onClick={onCreateSession}
+        <div
+          className={cn(
+            "flex shrink-0 border-b border-border/30 p-2",
+            isCollapsed ? "h-24 flex-col gap-2" : "h-12 items-center gap-2"
+          )}
         >
-          {isCollapsed ? null : <span className="truncate">{t("sessions.create")}</span>}
-        </Button>
-        {forceExpanded ? null : (
           <Button
-            aria-label={isCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
-            className={cn("px-2", isCollapsed && "h-8 w-10")}
-            icon={
-              isCollapsed ? (
-                <ChevronRight aria-hidden className="h-4 w-4" />
-              ) : (
-                <ChevronLeft aria-hidden className="h-4 w-4" />
-              )
-            }
+            aria-label={t("sessions.create")}
+            className={cn("min-w-0", isCollapsed ? "h-8 w-10 px-0" : "flex-1")}
+            icon={<Plus aria-hidden className="h-4 w-4" />}
             size="sm"
-            variant="ghost"
-            onClick={toggleCollapsed}
-          />
-        )}
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
-        {sessions.isPending ? (
-          <p className={cn("text-xs text-fg-muted", isCollapsed && "sr-only")}>
-            {t("sessions.loading")}
-          </p>
-        ) : sessions.isError ? (
-          <p className={cn("text-xs text-destructive", isCollapsed && "sr-only")}>
-            {t("sessions.error")}
-          </p>
-        ) : sortedSessions.length === 0 ? (
-          <p className={cn("text-xs text-fg-muted", isCollapsed && "sr-only")}>{t("sessions.empty")}</p>
-        ) : (
-          <div className="flex min-w-0 flex-col gap-1">
-            {sortedSessions.map((session) => (
-              <SessionSidebarItem
-                collapsed={isCollapsed}
-                current={session.session_id === currentSessionId}
-                draftTitle={draftTitle}
-                editing={editingSessionId === session.session_id}
-                key={session.session_id}
-                language={i18n.language}
-                menuOpen={menuSessionId === session.session_id}
-                renameError={renameErrorSessionId === session.session_id}
-                renaming={rename.isPending}
-                session={session}
-                onBeginRename={beginRename}
-                onCopy={copySessionId}
-                onDraftTitleChange={(title) => {
-                  setDraftTitle(title);
-                  setRenameErrorSessionId(null);
-                }}
-                onMenuOpenChange={(open) => setMenuSessionId(open ? session.session_id : null)}
-                onRenameKeyDown={handleRenameKeyDown}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </aside>
+            variant="primary"
+            onClick={onCreateSession}
+          >
+            {isCollapsed ? null : <span className="truncate">{t("sessions.create")}</span>}
+          </Button>
+          {forceExpanded ? null : (
+            <Button
+              aria-label={isCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+              className={cn("px-2", isCollapsed && "h-8 w-10")}
+              icon={
+                isCollapsed ? (
+                  <ChevronRight aria-hidden className="h-4 w-4" />
+                ) : (
+                  <ChevronLeft aria-hidden className="h-4 w-4" />
+                )
+              }
+              size="sm"
+              variant="ghost"
+              onClick={toggleCollapsed}
+            />
+          )}
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {sessions.isPending ? (
+            <p className={cn("text-xs text-fg-muted", isCollapsed && "sr-only")}>
+              {t("sessions.loading")}
+            </p>
+          ) : sessions.isError ? (
+            <p className={cn("text-xs text-destructive", isCollapsed && "sr-only")}>
+              {t("sessions.error")}
+            </p>
+          ) : sortedSessions.length === 0 ? (
+            <p className={cn("text-xs text-fg-muted", isCollapsed && "sr-only")}>{t("sessions.empty")}</p>
+          ) : (
+            <div className="flex min-w-0 flex-col gap-1">
+              {sortedSessions.map((session) => (
+                <SessionSidebarItem
+                  collapsed={isCollapsed}
+                  current={session.session_id === currentSessionId}
+                  draftTitle={draftTitle}
+                  editing={editingSessionId === session.session_id}
+                  key={session.session_id}
+                  language={i18n.language}
+                  menuOpen={menuSessionId === session.session_id}
+                  renameError={renameErrorSessionId === session.session_id}
+                  renaming={rename.isPending}
+                  session={session}
+                  onBeginRename={beginRename}
+                  onCopy={copySessionId}
+                  onDelete={requestDelete}
+                  onDraftTitleChange={(title) => {
+                    setDraftTitle(title);
+                    setRenameErrorSessionId(null);
+                  }}
+                  onMenuOpenChange={(open) => setMenuSessionId(open ? session.session_id : null)}
+                  onRenameKeyDown={handleRenameKeyDown}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </aside>
+      <DeleteSessionDialog
+        deleting={remove.isPending}
+        error={deleteError ? t("sessions.delete.error") : null}
+        open={Boolean(deleteTarget)}
+        sessionTitle={deleteTarget ? sessionTitle(deleteTarget) : null}
+        onConfirm={() => {
+          if (deleteTarget) {
+            remove.mutate(deleteTarget.session_id);
+          }
+        }}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(null);
+            setDeleteError(false);
+          }
+        }}
+      />
+    </>
   );
+}
+
+function sessionTitle(session: SessionSummary): string {
+  return session.display_title || `Session ${session.session_id.slice(0, 8)}`;
 }
 
 function SessionSidebarItem({
@@ -206,6 +259,7 @@ function SessionSidebarItem({
   session,
   onBeginRename,
   onCopy,
+  onDelete,
   onDraftTitleChange,
   onMenuOpenChange,
   onRenameKeyDown
@@ -221,6 +275,7 @@ function SessionSidebarItem({
   session: SessionSummary;
   onBeginRename: (session: SessionSummary) => void;
   onCopy: (sessionId: string) => void;
+  onDelete: (session: SessionSummary) => void;
   onDraftTitleChange: (title: string) => void;
   onMenuOpenChange: (open: boolean) => void;
   onRenameKeyDown: (event: KeyboardEvent<HTMLInputElement>, sessionId: string) => void;
@@ -326,6 +381,15 @@ function SessionSidebarItem({
               >
                 <Copy aria-hidden className="h-4 w-4" />
                 {t("sidebar.copyId")}
+              </button>
+              <button
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10"
+                role="menuitem"
+                type="button"
+                onClick={() => onDelete(session)}
+              >
+                <Trash2 aria-hidden className="h-4 w-4" />
+                {t("sessions.delete.menu")}
               </button>
             </div>
           ) : null}

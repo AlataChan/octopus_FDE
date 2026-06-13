@@ -566,3 +566,30 @@ def test_patch_session_title_rejects_control_characters(tmp_path):
 
     assert client.patch(f"/v1/sessions/{sid}", json={"title": "bad\nname"}).status_code == 422
     assert client.patch(f"/v1/sessions/{sid}", json={"title": "<b>bad</b>"}).status_code == 422
+
+
+def test_delete_session_removes_it_from_history(tmp_path):
+    client = _client(tmp_path)
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+    client.app.state.session_store.create_turn(
+        sid,
+        actor_id="single-user",
+        user_message="temporary test session",
+        ir_before=None,
+    )
+
+    response = client.delete(f"/v1/sessions/{sid}")
+
+    assert response.status_code == 204
+    assert client.get(f"/v1/sessions/{sid}").status_code == 404
+    assert all(row["session_id"] != sid for row in client.get("/v1/sessions").json())
+    assert client.app.state.session_store.list_turns(sid, actor_id="single-user") == []
+    assert "session.deleted" in client.app.state.archive_writer.read_session_text(sid)
+
+
+def test_delete_session_returns_not_found_for_missing_session(tmp_path):
+    client = _client(tmp_path)
+
+    response = client.delete("/v1/sessions/00000000-0000-0000-0000-000000000000")
+
+    assert response.status_code == 404

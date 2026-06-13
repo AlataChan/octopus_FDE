@@ -43,6 +43,7 @@ export default function SessionDetailPage() {
   const [layoutResetVersion, setLayoutResetVersion] = useState(0);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [configDismissed, setConfigDismissed] = useState(false);
   const isLg = useIsLg();
   const isXl = useIsXl();
   const setConfig = useSetLLMConfig(sessionId);
@@ -76,6 +77,7 @@ export default function SessionDetailPage() {
 
   useEffect(() => {
     setSelectedNodeId(null);
+    setConfigDismissed(false);
   }, [sessionId]);
 
   useEffect(() => {
@@ -299,7 +301,12 @@ export default function SessionDetailPage() {
       </div>
       <LLMConfigModal
         isSaving={setConfig.isPending}
-        open={needsConfig}
+        open={needsConfig && !configDismissed}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConfigDismissed(true);
+          }
+        }}
         onSubmit={saveConfig}
       />
       <TemplateModal

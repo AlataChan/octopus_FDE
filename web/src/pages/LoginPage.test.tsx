@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "../lib/i18n";
@@ -20,7 +20,16 @@ function renderPage() {
 
 describe("LoginPage", () => {
   afterEach(() => {
+    cleanup();
     vi.unstubAllGlobals();
+  });
+
+  it("renders the Octopus FDE brand mark", () => {
+    renderPage();
+
+    const logo = screen.getByRole("img", { name: /Octopus FDE logo/i });
+    expect(logo).toHaveAttribute("src", "/brand/octopus-praser-icon-1024.png");
+    expect(screen.getByText(/Octopus FDE Console/i)).toBeInTheDocument();
   });
 
   it("submits username and password to the auth endpoint", async () => {

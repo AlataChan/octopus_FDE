@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "../../lib/i18n";
-import { listSessions, renameSession } from "../../lib/api";
+import { deleteSession, listSessions, renameSession } from "../../lib/api";
 import { SessionsSidebar } from "./SessionsSidebar";
 
 afterEach(cleanup);
@@ -12,6 +12,7 @@ vi.mock("../../lib/api", async () => {
   const actual = await vi.importActual<typeof import("../../lib/api")>("../../lib/api");
   return {
     ...actual,
+    deleteSession: vi.fn(),
     listSessions: vi.fn(),
     renameSession: vi.fn()
   };
@@ -65,6 +66,7 @@ describe("SessionsSidebar", () => {
       llm_model: null,
       title: "Renamed"
     });
+    vi.mocked(deleteSession).mockResolvedValue(undefined);
     localStorage.clear();
   });
 
@@ -113,5 +115,19 @@ describe("SessionsSidebar", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/保存失败|Save failed/i);
     expect(screen.getByLabelText(/Rename Active session|重命名 Active session/i)).toBeInTheDocument();
+  });
+
+  it("deletes a session from the item menu after confirmation", async () => {
+    renderSidebar();
+    await screen.findByText("Other session");
+
+    fireEvent.click(screen.getByRole("button", { name: /Actions for Other session|Other session 的操作/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Delete|删除/i }));
+
+    expect(screen.getByRole("dialog")).toHaveTextContent(/Other session/);
+
+    fireEvent.click(screen.getByRole("button", { name: /Delete session|确认删除/i }));
+
+    await waitFor(() => expect(deleteSession).toHaveBeenCalledWith("session-other"));
   });
 });

@@ -21,6 +21,7 @@ dist/
 # AI tooling local state
 .ccb/
 .cursor/
+.antigravitycli/
 
 # Customer Bindings - real customer files [keep example committed]
 config/customers/*.yaml

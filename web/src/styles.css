@@ -3,18 +3,18 @@
 @tailwind utilities;
 
 :root {
-  --bg: 250 246 238;
+  --bg: 248 250 252;
   --surface: 255 255 255;
-  --muted: 242 237 226;
-  --fg: 31 41 55;
-  --fg-muted: 87 83 78;
-  --border: 231 226 210;
-  --accent: 34 197 94;
+  --muted: 241 245 249;
+  --fg: 17 24 39;
+  --fg-muted: 71 85 105;
+  --border: 226 232 240;
+  --accent: 249 115 22;
   --warning: 245 158 11;
   --destructive: 220 38 38;
-  --ring: 31 41 55;
-  --primary: 15 23 42;
-  --primary-fg: 248 250 252;
+  --ring: 234 88 12;
+  --primary: 12 14 18;
+  --primary-fg: 255 255 255;
   color: rgb(var(--fg));
   background: rgb(var(--bg));
   font-family:
@@ -25,27 +25,24 @@
 }
 
 .dark {
-  --bg: 15 23 42;
-  --surface: 30 41 59;
-  --muted: 39 47 66;
+  --bg: 12 14 18;
+  --surface: 18 21 27;
+  --muted: 28 34 44;
   --fg: 248 250 252;
   --fg-muted: 148 163 184;
-  --border: 71 85 105;
-  --accent: 34 197 94;
+  --border: 55 65 81;
+  --accent: 251 146 60;
   --warning: 245 158 11;
   --destructive: 239 68 68;
-  --ring: 34 197 94;
+  --ring: 251 146 60;
   --primary: 248 250 252;
-  --primary-fg: 15 23 42;
+  --primary-fg: 12 14 18;
 }
 
 body {
   margin: 0;
   min-width: 320px;
-  background:
-    radial-gradient(circle at 12% 0%, rgb(var(--accent) / 0.1), transparent 30rem),
-    radial-gradient(circle at 92% 10%, rgb(var(--primary) / 0.06), transparent 28rem),
-    rgb(var(--bg));
+  background: rgb(var(--bg));
   color: rgb(var(--fg));
   transition:
     background-color 200ms ease,

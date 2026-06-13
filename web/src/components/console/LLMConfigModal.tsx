@@ -8,11 +8,12 @@ import { Modal } from "../ui/Modal";
 
 type Props = {
   isSaving: boolean;
+  onOpenChange?: (open: boolean) => void;
   open: boolean;
   onSubmit: (input: LLMConfigInput) => void;
 };
 
-export function LLMConfigModal({ isSaving, open, onSubmit }: Props) {
+export function LLMConfigModal({ isSaving, onOpenChange, open, onSubmit }: Props) {
   const { t } = useTranslation();
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("https://api.deepseek.com/v1");
@@ -28,7 +29,7 @@ export function LLMConfigModal({ isSaving, open, onSubmit }: Props) {
   }
 
   return (
-    <Modal labelledBy="llm-config-title" open={open}>
+    <Modal labelledBy="llm-config-title" open={open} onOpenChange={onOpenChange}>
       <form
         onSubmit={submit}
       >

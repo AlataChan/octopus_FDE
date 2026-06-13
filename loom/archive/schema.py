@@ -13,6 +13,7 @@ ArchiveEventType = Literal[
     "session.created",
     "llm_config_inherited",
     "session.llm_config_set",
+    "session.deleted",
     "auth.login_succeeded",
     "auth.login_failed",
     "auth.logout",

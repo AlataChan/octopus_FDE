@@ -43,6 +43,26 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   return (await response.json()) as T;
 }
 
+export async function apiFetchNoContent(path: string, init: RequestInit = {}): Promise<void> {
+  const headers = new Headers(init.headers);
+  headers.set("X-Actor-Id", DEFAULT_ACTOR.id);
+  if (!headers.has("Content-Type") && init.body) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    credentials: "include",
+    headers
+  });
+  if (response.status === 401) {
+    redirectToLogin();
+  }
+  if (!response.ok) {
+    throw new Error(`API request failed: ${response.status}`);
+  }
+}
+
 export async function apiBlob(path: string, init: RequestInit = {}): Promise<Blob> {
   const headers = new Headers(init.headers);
   headers.set("X-Actor-Id", DEFAULT_ACTOR.id);
@@ -123,6 +143,12 @@ export function renameSession(sessionId: string, title: string | null): Promise<
   return apiFetch<SessionDetail>(`/v1/sessions/${sessionId}`, {
     body: JSON.stringify({ title }),
     method: "PATCH"
+  });
+}
+
+export function deleteSession(sessionId: string): Promise<void> {
+  return apiFetchNoContent(`/v1/sessions/${sessionId}`, {
+    method: "DELETE"
   });
 }
 

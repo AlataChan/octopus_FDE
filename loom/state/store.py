@@ -223,6 +223,29 @@ class SessionStore:
         assert row is not None
         return row
 
+    def delete_session(self, session_id: UUID | str, *, actor_id: str) -> bool:
+        self._ensure_writable()
+        with self._connect() as con:
+            row = con.execute(
+                "SELECT 1 FROM sessions WHERE session_id = ? AND actor_id = ?",
+                (str(session_id), actor_id),
+            ).fetchone()
+            if row is None:
+                return False
+            con.execute(
+                "DELETE FROM artifacts WHERE session_id = ? AND actor_id = ?",
+                (str(session_id), actor_id),
+            )
+            con.execute(
+                "DELETE FROM turns WHERE session_id = ? AND actor_id = ?",
+                (str(session_id), actor_id),
+            )
+            con.execute(
+                "DELETE FROM sessions WHERE session_id = ? AND actor_id = ?",
+                (str(session_id), actor_id),
+            )
+        return True
+
     def set_llm_config(
         self,
         session_id: UUID | str,
