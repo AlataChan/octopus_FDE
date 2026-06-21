@@ -161,6 +161,7 @@ describe("ChatPanel clarify turns", () => {
                 { handle: "oms_order_api", kind: "http" },
                 { handle: "logistics_tracking_api", kind: "http" }
               ],
+              intent_clarifications: ["Buyer asks about order cancellation, tracking, and refund policy."],
               risks: ["Missing order id triggers handoff"],
               success_criteria: ["Returns a validated action JSON"],
               trigger: { mode: "manual" }
@@ -173,6 +174,7 @@ describe("ChatPanel clarify turns", () => {
 
     expect(screen.getByText(/流程设计简报确认|Flow design brief review/i)).toBeInTheDocument();
     expect(screen.getByText("manual")).toBeInTheDocument();
+    expect(screen.getByText("Buyer asks about order cancellation, tracking, and refund policy.")).toBeInTheDocument();
     expect(screen.getByText("oms_order_api (http)")).toBeInTheDocument();
     expect(screen.getByText("pii class default: medium")).toBeInTheDocument();
     expect(screen.getByText("Refund is blocked after shipment")).toBeInTheDocument();

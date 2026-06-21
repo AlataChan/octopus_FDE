@@ -11,6 +11,7 @@ type Props = {
 };
 
 const sectionKeys = [
+  "intent_clarifications",
   "trigger",
   "data_sources",
   "credentials",

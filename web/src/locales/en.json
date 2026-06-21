@@ -22,6 +22,7 @@
   "brief.field.compliance_boundary": "Compliance boundary",
   "brief.field.credentials": "Credentials",
   "brief.field.data_sources": "Data sources",
+  "brief.field.intent_clarifications": "Intent clarifications",
   "brief.field.risks": "Risks",
   "brief.field.success_criteria": "Success criteria",
   "brief.field.trigger": "Trigger",

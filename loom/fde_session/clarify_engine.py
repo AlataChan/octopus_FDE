@@ -143,6 +143,29 @@ def parse_field_answer(field_path: str, answer: str) -> dict[str, Any]:
     lower = text.lower()
     if not text:
         return {}
+    if field_path == "intent_clarification":
+        update: dict[str, Any] = {}
+        if _is_substantive_intent_clarification(text):
+            update.update({
+                "intent": redact_text(text),
+                "intent_clarifications": [redact_text(text)],
+                "known_edits": ["Intent clarified through FDE questioning."],
+            })
+        for inferred_field in (
+            "target_runtime",
+            "scope",
+            "trigger",
+            "data_sources",
+            "compliance_boundary",
+            "approval_points",
+            "success_criteria",
+        ):
+            if inferred_field == "success_criteria" and not _has_success_criteria_marker(text):
+                continue
+            for key, value in parse_field_answer(inferred_field, text).items():
+                if value not in (None, "", []):
+                    update[key] = value
+        return update
     if field_path == "target_runtime":
         if "dify" in lower:
             return {"target_runtime": "dify"}
@@ -198,7 +221,14 @@ def parse_field_answer(field_path: str, answer: str) -> dict[str, Any]:
             return {"trigger": TriggerSpec(mode="schedule", schedule_cron=_cron_from_answer(text))}
         if "webhook" in lower or "callback" in lower or "回调" in text:
             return {"trigger": TriggerSpec(mode="webhook", webhook_path="/webhook/self-design")}
-        if "manual" in lower or "手动" in text or "chat" in lower:
+        if (
+            "manual" in lower
+            or "手动" in text
+            or "chat" in lower
+            or "用户问" in text
+            or "客户问" in text
+            or "买家" in text
+        ):
             return {"trigger": TriggerSpec(mode="manual")}
         return {}
     if field_path == "data_sources":
@@ -216,7 +246,8 @@ def parse_field_answer(field_path: str, answer: str) -> dict[str, Any]:
             }
         return {}
     if field_path == "success_criteria":
-        return {"success_criteria": redact_text(text)} if len(text) >= 4 else {}
+        criteria = _success_criteria_from_answer(text)
+        return {"success_criteria": redact_text(criteria)} if len(criteria) >= 4 else {}
     return {}
 
 
@@ -272,6 +303,10 @@ def _data_sources_from_answer(answer: str) -> list[DataSourceRef]:
     known: dict[str, tuple[str, Literal["dataset", "kb", "table", "api"]]] = {
         "product_kb": ("product_kb", "kb"),
         "policy_kb": ("policy_kb", "kb"),
+        "logistics": ("logistics_api", "api"),
+        "物流": ("logistics_api", "api"),
+        "order": ("order_api", "api"),
+        "订单": ("order_api", "api"),
         "clinic_kb": ("clinic_kb", "kb"),
         "patient_history": ("patient_history", "dataset"),
         "shopify": ("shopify_api", "api"),
@@ -306,3 +341,31 @@ def _credential_from_answer(answer: str) -> CredentialBindingRef | None:
 def _reviewer_role(answer: str) -> str:
     match = re.search(r"([a-zA-Z_][a-zA-Z0-9_]*(?:_manager|_lead|_reviewer|_clinician)?)", answer)
     return match.group(1) if match else "human_reviewer"
+
+
+def _success_criteria_from_answer(answer: str) -> str:
+    patterns = (
+        r"成功标准(?:是|为|：|:)?\s*(.+)",
+        r"success criteria(?: is| are|:)?\s*(.+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, answer, re.I)
+        if match:
+            return match.group(1).strip()
+    return answer.strip()
+
+
+def _has_success_criteria_marker(answer: str) -> bool:
+    return bool(re.search(r"成功标准|success criteria", answer, re.I))
+
+
+def _is_substantive_intent_clarification(answer: str) -> bool:
+    if len(answer.strip()) >= 30:
+        return True
+    signals = (
+        "用户", "客户", "买家", "患者", "订单", "物流", "退款", "知识库",
+        "人工", "审核", "审批", "成功标准", "不能", "避免",
+        "customer", "buyer", "patient", "order", "refund", "review",
+    )
+    lower = answer.lower()
+    return sum(1 for token in signals if token in lower or token in answer) >= 2

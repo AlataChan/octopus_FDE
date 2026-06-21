@@ -22,6 +22,7 @@
   "brief.field.compliance_boundary": "合规边界",
   "brief.field.credentials": "凭证需求",
   "brief.field.data_sources": "数据源",
+  "brief.field.intent_clarifications": "意图澄清",
   "brief.field.risks": "风险提示",
   "brief.field.success_criteria": "成功标准",
   "brief.field.trigger": "触发场景",

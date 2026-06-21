@@ -24,6 +24,16 @@ def missing_fields(brief: WorkflowBrief | WorkflowBriefDraft) -> list[ClarifyQue
     intent = (brief.intent or "").lower()
 
     if isinstance(brief, WorkflowBriefDraft):
+        if _needs_intent_clarification(brief):
+            questions.append(
+                _block(
+                    "intent_clarification",
+                    (
+                        "请先补充业务目标、目标用户、关键场景、不能自动处理的边界，"
+                        "以及什么结果才算成功。"
+                    ),
+                )
+            )
         if not brief.target_runtime:
             questions.append(_block("target_runtime", "Which target runtime should this workflow compile to?"))
         if not brief.scope:
@@ -99,6 +109,34 @@ def missing_fields(brief: WorkflowBrief | WorkflowBriefDraft) -> list[ClarifyQue
 
 def _block(field_path: str, question: str) -> ClarifyQuestion:
     return ClarifyQuestion(field_path=field_path, question=question, severity="block")
+
+
+def _needs_intent_clarification(brief: WorkflowBriefDraft) -> bool:
+    if brief.intent_clarifications:
+        return False
+    if (
+        brief.target_runtime
+        and brief.scope
+        and brief.trigger is not None
+        and brief.compliance_boundary is not None
+        and bool((brief.success_criteria or "").strip())
+    ):
+        return False
+    intent = (brief.intent or "").strip()
+    if len(intent) < 40:
+        return True
+    signals = 0
+    signal_groups = (
+        ("用户", "客户", "买家", "患者", "客服", "operator", "buyer", "patient", "customer"),
+        ("订单", "物流", "退款", "知识库", "复诊", "随访", "api", "kb", "order", "refund"),
+        ("人工", "审核", "审批", "转人工", "review", "approve", "human"),
+        ("成功", "标准", "输出", "json", "citation", "source", "避免", "不能"),
+    )
+    lower = intent.lower()
+    for group in signal_groups:
+        if any(token in lower or token in intent for token in group):
+            signals += 1
+    return signals < 2
 
 
 def _needs_retrieval_source(intent: str) -> bool:

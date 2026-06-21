@@ -526,3 +526,42 @@ If doing this in one practical pass, do it in this order:
 6. Template metadata enrichment and Design Agent retrieval.
 
 This sequence preserves the current working system while moving user perception from "compiler console" to "AI 驻场流程工程师".
+
+---
+
+## 2026-06-21 Implementation Addendum: Draft-First Intent Clarification
+
+The most important correction after implementation review is that persona-first entry is useful, but not sufficient. Real users often begin with an incomplete draft such as "我要做一个客服 agent" or "帮我做一个诊所随访流程". The Design Agent must therefore treat clarification as the core product interaction, not as a form-filling prelude.
+
+### Product Decision
+
+FDE should first ask a business clarification question when the initial intent is vague. It should not immediately ask for `target_runtime`, `scope`, or other technical fields. The first blocking question for a rough idea is now:
+
+> 请先补充业务目标、目标用户、关键场景、不能自动处理的边界，以及什么结果才算成功。
+
+This keeps the user in their own language: goal, user, scenario, boundary, success.
+
+### Behavior Added
+
+- `WorkflowBriefDraft` records `intent_clarifications`.
+- `missing_fields()` prioritizes `intent_clarification` before runtime/scope/compliance when the intent is short or lacks enough business signals.
+- `DeterministicClarifyEngine` parses a substantive clarification answer and can infer:
+  - `scope`
+  - `trigger`
+  - `data_sources`
+  - `approval_points`
+  - `success_criteria`
+  - `target_runtime` when explicitly present
+- Short non-answers such as `hiagent` no longer satisfy the business clarification question. They can still fill the runtime field, but FDE keeps asking for the missing business context.
+- `BriefPanel` now displays the user's intent clarification as a first-class brief section before trigger, data sources, compliance, and success criteria.
+
+### Why This Matters
+
+This moves FDE from "ask missing schema fields" to "help users make their draft idea designable." The schema still exists, but the first interaction is now about intent quality. That is the foundation for turning the thirty internal modules into one useful design agent: the agent must understand the user's rough goal before retrieving patterns, applying persona constraints, or generating IR.
+
+### Acceptance Criteria Added
+
+- A vague first message such as `我要一个客服 FAQ` produces an `intent_clarification` question.
+- A substantive clarification answer enriches the brief instead of merely storing free text.
+- A short platform-only answer does not close the intent clarification gate.
+- The brief review card shows the clarification so the user can confirm or correct the interpretation before generation.

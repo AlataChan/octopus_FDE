@@ -130,7 +130,8 @@ def test_self_design_first_turn_returns_clarify_without_planning(tmp_path):
 
     assert turn["status"] == "succeeded"
     assert turn["kind"] == "clarify"
-    assert turn["clarify_question"]["field_path"] in {"target_runtime", "trigger", "compliance_boundary"}
+    assert turn["clarify_question"]["field_path"] == "intent_clarification"
+    assert "业务目标" in turn["clarify_question"]["text"]
     archive = client.get(f"/v1/archive/sessions/{sid}").text
     assert "turn.clarify_started" in archive
     assert "turn.clarify_replied" in archive
@@ -179,20 +180,28 @@ def test_stale_clarify_turn_id_repeats_current_question_without_merging_answer(t
 
     first = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "我要一个客服 FAQ"}).json()
     assert first["kind"] == "clarify"
-    assert first["clarify_question"]["field_path"] == "target_runtime"
-    second = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "hiagent"}).json()
+    assert first["clarify_question"]["field_path"] == "intent_clarification"
+    second = client.post(
+        f"/v1/sessions/{sid}/turns",
+        json={
+            "user_message": (
+                "面向跨境电商买家，处理订单取消和物流追踪，查 product_kb，"
+                "人工审核高风险回复，成功标准是回答有来源。"
+            )
+        },
+    ).json()
     assert second["kind"] == "clarify"
-    assert second["clarify_question"]["field_path"] == "scope"
+    assert second["clarify_question"]["field_path"] == "target_runtime"
 
     stale = client.post(
         f"/v1/sessions/{sid}/turns",
-        json={"user_message": f"turn_id={first['turn_id']} ecommerce/kb"},
+        json={"user_message": f"turn_id={first['turn_id']} hiagent"},
     ).json()
 
     assert stale["kind"] == "clarify"
-    assert stale["clarify_question"]["field_path"] == "scope"
+    assert stale["clarify_question"]["field_path"] == "target_runtime"
     assert stale["clarify_round"] == second["clarify_round"]
-    assert stale["brief_after"].get("scope") is None
+    assert stale["brief_after"].get("target_runtime") is None
 
 
 def test_ready_engine_without_target_runtime_is_overridden_by_gate(tmp_path):

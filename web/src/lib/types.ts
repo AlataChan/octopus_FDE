@@ -81,6 +81,7 @@ export type WorkflowBriefSnapshot = {
   approval_points?: unknown;
   success_criteria?: unknown;
   compliance_boundary?: unknown;
+  intent_clarifications?: unknown;
   business_rules?: unknown;
   risks?: unknown;
   [key: string]: unknown;
