@@ -7,17 +7,27 @@ import { Textarea } from "../ui/Textarea";
 
 type Props = {
   disabled?: boolean;
+  isLatestInteractive?: boolean;
   onSend: (message: string) => void;
   question: ClarifyQuestion;
 };
 
-export function ClarifyBubble({ disabled = false, onSend, question }: Props) {
+export function ClarifyBubble({
+  disabled = false,
+  isLatestInteractive = true,
+  onSend,
+  question
+}: Props) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState<string | null>(null);
   const [freeform, setFreeform] = useState("");
+  const effectiveDisabled = disabled || !isLatestInteractive;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (effectiveDisabled) {
+      return;
+    }
     const parts = [];
     if (selected) parts.push(`${question.field_path}=${selected}`);
     if (question.allow_freeform && freeform.trim()) {
@@ -30,7 +40,11 @@ export function ClarifyBubble({ disabled = false, onSend, question }: Props) {
   const canSubmit = Boolean(selected || (question.allow_freeform && freeform.trim()));
 
   return (
-    <form className="rounded-lg bg-bg-app/60 p-3 text-sm leading-6 text-fg ring-1 ring-accent/20" onSubmit={submit}>
+    <form
+      aria-disabled={effectiveDisabled}
+      className="rounded-lg bg-bg-app/60 p-3 text-sm leading-6 text-fg ring-1 ring-accent/20"
+      onSubmit={submit}
+    >
       <div className="space-y-3">
         <div>
           <div className="text-xs font-semibold uppercase text-fg-muted">{t("clarify.title")}</div>
@@ -46,7 +60,7 @@ export function ClarifyBubble({ disabled = false, onSend, question }: Props) {
                     ? "rounded-lg border border-accent/50 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-fg"
                     : "rounded-lg border border-border/60 bg-bg-muted px-3 py-1.5 text-xs font-semibold text-fg-muted hover:text-fg"
                 }
-                disabled={disabled}
+                disabled={effectiveDisabled}
                 onClick={() => setSelected(option.value)}
                 type="button"
               >
@@ -59,13 +73,14 @@ export function ClarifyBubble({ disabled = false, onSend, question }: Props) {
           <Textarea
             aria-label={question.field_path}
             className="h-20 resize-none"
+            disabled={effectiveDisabled}
             placeholder={t("clarify.freeformPlaceholder")}
             value={freeform}
             onChange={(event) => setFreeform(event.target.value)}
           />
         ) : null}
         <Button
-          disabled={disabled || !canSubmit}
+          disabled={effectiveDisabled || !canSubmit}
           icon={<Send aria-hidden className="h-4 w-4" />}
           size="sm"
           type="submit"

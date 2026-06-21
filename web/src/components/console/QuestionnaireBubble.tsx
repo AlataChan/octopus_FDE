@@ -7,13 +7,20 @@ import { Textarea } from "../ui/Textarea";
 
 type Props = {
   disabled?: boolean;
+  isLatestInteractive?: boolean;
   onSend: (message: string) => void;
   questions: ClarifyQuestion[];
 };
 
-export function QuestionnaireBubble({ disabled = false, onSend, questions }: Props) {
+export function QuestionnaireBubble({
+  disabled = false,
+  isLatestInteractive = true,
+  onSend,
+  questions
+}: Props) {
   const { t } = useTranslation();
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const effectiveDisabled = disabled || !isLatestInteractive;
 
   function setAnswer(fieldPath: string, value: string) {
     setAnswers((current) => ({ ...current, [fieldPath]: value }));
@@ -21,6 +28,9 @@ export function QuestionnaireBubble({ disabled = false, onSend, questions }: Pro
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (effectiveDisabled) {
+      return;
+    }
     const message = questions
       .map((question) => {
         const value = answers[question.field_path]?.trim();
@@ -34,7 +44,11 @@ export function QuestionnaireBubble({ disabled = false, onSend, questions }: Pro
   const canSubmit = questions.some((question) => Boolean(answers[question.field_path]?.trim()));
 
   return (
-    <form className="rounded-lg bg-bg-app/60 p-3 text-sm leading-6 text-fg ring-1 ring-warning/25" onSubmit={submit}>
+    <form
+      aria-disabled={effectiveDisabled}
+      className="rounded-lg bg-bg-app/60 p-3 text-sm leading-6 text-fg ring-1 ring-warning/25"
+      onSubmit={submit}
+    >
       <div className="space-y-4">
         <div>
           <div className="text-xs font-semibold uppercase text-fg-muted">{t("clarify.questionnaireTitle")}</div>
@@ -55,7 +69,7 @@ export function QuestionnaireBubble({ disabled = false, onSend, questions }: Pro
                         ? "rounded-lg border border-accent/50 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-fg"
                         : "rounded-lg border border-border/60 bg-bg-muted px-3 py-1.5 text-xs font-semibold text-fg-muted hover:text-fg"
                     }
-                    disabled={disabled}
+                    disabled={effectiveDisabled}
                     onClick={() => setAnswer(question.field_path, option.value)}
                     type="button"
                   >
@@ -68,6 +82,7 @@ export function QuestionnaireBubble({ disabled = false, onSend, questions }: Pro
               <Textarea
                 aria-label={question.field_path}
                 className="h-20 resize-none"
+                disabled={effectiveDisabled}
                 id={`clarify-${question.field_path}`}
                 placeholder={t("clarify.freeformPlaceholder")}
                 value={answers[question.field_path] || ""}
@@ -77,7 +92,7 @@ export function QuestionnaireBubble({ disabled = false, onSend, questions }: Pro
           </div>
         ))}
         <Button
-          disabled={disabled || !canSubmit}
+          disabled={effectiveDisabled || !canSubmit}
           icon={<Send aria-hidden className="h-4 w-4" />}
           size="sm"
           type="submit"

@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from loom.runtimes.warnings import CompileWarning
 
+TurnKind = Literal["clarify", "plan", "questionnaire", "brief_review"]
+
 
 class SessionRow(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -55,7 +57,7 @@ class TurnRow(BaseModel):
     planner_reply: str | None = None
     ir_before: str | None = None
     ir_after: str | None = None
-    kind: Literal["clarify", "plan", "questionnaire"] = "plan"
+    kind: TurnKind = "plan"
     clarify_question: str | None = None
     brief_before: str | None = None
     brief_after: str | None = None

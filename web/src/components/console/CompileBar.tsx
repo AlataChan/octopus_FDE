@@ -1,6 +1,7 @@
 import { FormEvent, useMemo, useState } from "react";
-import { Download, Rocket } from "lucide-react";
+import { CheckCircle2, Download, Rocket } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { markWorkflowDeployed } from "../../lib/api";
 import type {
   Artifact,
   BindingSummary,
@@ -11,7 +12,9 @@ import type {
 import { Button } from "../ui/Button";
 import { Card, CardBody, CardHeader } from "../ui/Card";
 import { Chip } from "../ui/Chip";
+import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
+import { Textarea } from "../ui/Textarea";
 
 type Props = {
   artifacts: Artifact[];
@@ -19,6 +22,13 @@ type Props = {
   isCompiling: boolean;
   onCompile: (input: CompileInput) => void;
   onDownload: (artifact: Artifact) => void;
+  onMarkDeployed?: (input: ArtifactDeploymentInput) => Promise<unknown> | unknown;
+};
+
+type ArtifactDeploymentInput = {
+  artifact: Artifact;
+  deployment_note: string | null;
+  platform_app_id: string;
 };
 
 export function CompileBar({
@@ -26,7 +36,8 @@ export function CompileBar({
   bindings,
   isCompiling,
   onCompile,
-  onDownload
+  onDownload,
+  onMarkDeployed = defaultMarkDeployed
 }: Props) {
   const { t } = useTranslation();
   const [target, setTarget] = useState<CompileTarget>("hiagent");
@@ -127,6 +138,7 @@ export function CompileBar({
               artifact={artifact}
               key={artifact.artifact_id}
               onDownload={onDownload}
+              onMarkDeployed={onMarkDeployed}
             />
           ))
         )}
@@ -138,31 +150,97 @@ export function CompileBar({
 type ArtifactCardProps = {
   artifact: Artifact;
   onDownload: (artifact: Artifact) => void;
+  onMarkDeployed: (input: ArtifactDeploymentInput) => Promise<unknown> | unknown;
 };
 
 function ArtifactCard({
   artifact,
-  onDownload
+  onDownload,
+  onMarkDeployed
 }: ArtifactCardProps) {
   const { t } = useTranslation();
+  const [deploymentNote, setDeploymentNote] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isMarking, setIsMarking] = useState(false);
+  const [marked, setMarked] = useState(false);
+  const [platformAppId, setPlatformAppId] = useState("");
+
+  async function submitDeployment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmedAppId = platformAppId.trim();
+    if (!trimmedAppId || isMarking) {
+      return;
+    }
+    setIsMarking(true);
+    setError(null);
+    try {
+      await onMarkDeployed({
+        artifact,
+        deployment_note: deploymentNote.trim() || null,
+        platform_app_id: trimmedAppId
+      });
+      setMarked(true);
+    } catch {
+      setError(t("compile.markFailed"));
+    } finally {
+      setIsMarking(false);
+    }
+  }
 
   return (
-    <article className="flex items-start justify-between gap-4 rounded-lg border border-border/50 bg-bg-app/45 p-4">
-      <div className="min-w-0">
-        <h3 className="truncate text-sm font-semibold text-fg">{artifact.artifact_name}</h3>
-        <p className="mt-1 break-all font-mono text-[11px] leading-5 text-fg-muted">
-          {artifact.target} / {artifact.mode || artifact.artifact_kind} / {artifact.sha256.slice(0, 12)}
-        </p>
+    <article className="rounded-lg border border-border/50 bg-bg-app/45 p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="truncate text-sm font-semibold text-fg">{artifact.artifact_name}</h3>
+          <p className="mt-1 break-all font-mono text-[11px] leading-5 text-fg-muted">
+            {artifact.target} / {artifact.mode || artifact.artifact_kind} / {artifact.sha256.slice(0, 12)}
+          </p>
+        </div>
+        <Button
+          className="self-center"
+          icon={<Download aria-hidden className="h-4 w-4" />}
+          size="md"
+          variant="accent"
+          onClick={() => onDownload(artifact)}
+        >
+          {t("compile.download")}
+        </Button>
       </div>
-      <Button
-        className="self-center"
-        icon={<Download aria-hidden className="h-4 w-4" />}
-        size="md"
-        variant="accent"
-        onClick={() => onDownload(artifact)}
-      >
-        {t("compile.download")}
-      </Button>
+      <form className="mt-3 grid gap-2 border-t border-border/30 pt-3" onSubmit={submitDeployment}>
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+          <Input
+            aria-label={t("compile.platformAppId")}
+            placeholder={t("compile.platformAppId")}
+            value={platformAppId}
+            onChange={(event) => setPlatformAppId(event.target.value)}
+          />
+          <Button
+            disabled={!platformAppId.trim() || marked}
+            icon={<CheckCircle2 aria-hidden className="h-4 w-4" />}
+            loading={isMarking}
+            size="md"
+            type="submit"
+            variant="secondary"
+          >
+            {marked ? t("compile.markImportedDone") : t("compile.markImported")}
+          </Button>
+        </div>
+        <Textarea
+          aria-label={t("compile.deploymentNote")}
+          className="h-16 resize-none"
+          placeholder={t("compile.deploymentNote")}
+          value={deploymentNote}
+          onChange={(event) => setDeploymentNote(event.target.value)}
+        />
+        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      </form>
     </article>
   );
+}
+
+function defaultMarkDeployed(input: ArtifactDeploymentInput) {
+  return markWorkflowDeployed(input.artifact.workflow_id, {
+    deployment_note: input.deployment_note,
+    platform_app_id: input.platform_app_id
+  });
 }

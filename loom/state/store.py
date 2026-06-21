@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 from cryptography.fernet import Fernet  # noqa: TC002
 
-from loom.state.models import ActorLLMConfigRow, ArtifactRow, SessionRow, TurnRow
+from loom.state.models import ActorLLMConfigRow, ArtifactRow, SessionRow, TurnKind, TurnRow
 from loom.state.sm import SessionState, transition
 from loom.runtimes.warnings import CompileWarning
 
@@ -358,7 +358,7 @@ class SessionStore:
         actor_id: str,
         user_message: str,
         ir_before: str | None,
-        kind: Literal["clarify", "plan", "questionnaire"] = "plan",
+        kind: TurnKind = "plan",
         brief_before: str | None = None,
     ) -> TurnRow:
         self._ensure_writable()
@@ -453,6 +453,44 @@ class SessionStore:
                 WHERE session_id = ? AND actor_id = ?
                 """,
                 (brief_after, clarify_round, target_runtime, scope, now, str(turn.session_id), actor_id),
+            )
+        row = self.get_turn(turn_id, actor_id=actor_id)
+        assert row is not None
+        return row
+
+    def finish_turn_brief_review(
+        self,
+        turn_id: UUID | str,
+        *,
+        actor_id: str,
+        planner_reply: str,
+        brief_before: str | None,
+        brief_after: str,
+        target_runtime: Literal["hiagent", "dify"] | None,
+        scope: str | None,
+    ) -> TurnRow:
+        self._ensure_writable()
+        turn = self.require_turn(turn_id, actor_id=actor_id)
+        now = _now()
+        with self._connect() as con:
+            con.execute(
+                """
+                UPDATE turns
+                SET status = 'succeeded', kind = 'brief_review', planner_reply = ?,
+                    clarify_question = NULL, brief_before = ?, brief_after = ?,
+                    validation_errors = '[]'
+                WHERE turn_id = ? AND actor_id = ?
+                """,
+                (planner_reply, brief_before, brief_after, str(turn_id), actor_id),
+            )
+            con.execute(
+                """
+                UPDATE sessions
+                SET brief_draft = ?, clarify_round = 0, target_runtime = ?,
+                    scope = ?, updated_at = ?
+                WHERE session_id = ? AND actor_id = ?
+                """,
+                (brief_after, target_runtime, scope, now, str(turn.session_id), actor_id),
             )
         row = self.get_turn(turn_id, actor_id=actor_id)
         assert row is not None

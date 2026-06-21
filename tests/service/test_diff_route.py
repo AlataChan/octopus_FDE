@@ -77,8 +77,12 @@ def test_diff_route_uses_turn_snapshots(tmp_path):
         f"/v1/sessions/{sid}/llm-config",
         json={"api_key": "sk-test", "base_url": "https://api.example.com/v1", "model": "deepseek-v4-flash"},
     )
-    turn_a = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "first"}).json()
-    turn_b = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "second"}).json()
+    review_a = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "first"}).json()
+    assert review_a["kind"] == "brief_review"
+    turn_a = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "确认生成"}).json()
+    assert turn_a["kind"] == "plan"
+    turn_b = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "retrieve top_k 5"}).json()
+    assert turn_b["kind"] == "plan"
 
     response = client.get(
         f"/v1/sessions/{sid}/ir/diff",
@@ -96,7 +100,11 @@ def test_diff_route_uses_turn_snapshots(tmp_path):
 
 def test_diff_route_rejects_turns_outside_session(tmp_path):
     ir = IRDocument.model_validate(_sample_ir())
-    client = _client(tmp_path, planner=lambda **kwargs: ir)
+    clarify_engine = FakeClarifyEngine([
+        ClarifyEngineResult(intent_update=_complete_draft().model_dump(mode="json"), next_action="ready"),
+        ClarifyEngineResult(intent_update=_complete_draft().model_dump(mode="json"), next_action="ready"),
+    ])
+    client = _client(tmp_path, planner=lambda **kwargs: ir, clarify_engine=clarify_engine)
     sid_a = client.post("/v1/sessions", json={}).json()["session_id"]
     sid_b = client.post("/v1/sessions", json={}).json()["session_id"]
     for sid in [sid_a, sid_b]:
@@ -104,8 +112,10 @@ def test_diff_route_rejects_turns_outside_session(tmp_path):
             f"/v1/sessions/{sid}/llm-config",
             json={"api_key": "sk-test", "base_url": "https://api.example.com/v1", "model": "deepseek-v4-flash"},
         )
-    turn_a = client.post(f"/v1/sessions/{sid_a}/turns", json={"user_message": "a"}).json()
-    turn_b = client.post(f"/v1/sessions/{sid_b}/turns", json={"user_message": "b"}).json()
+    client.post(f"/v1/sessions/{sid_a}/turns", json={"user_message": "a"})
+    turn_a = client.post(f"/v1/sessions/{sid_a}/turns", json={"user_message": "确认生成"}).json()
+    client.post(f"/v1/sessions/{sid_b}/turns", json={"user_message": "b"})
+    turn_b = client.post(f"/v1/sessions/{sid_b}/turns", json={"user_message": "确认生成"}).json()
 
     response = client.get(
         f"/v1/sessions/{sid_a}/ir/diff",

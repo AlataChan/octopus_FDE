@@ -19,6 +19,8 @@ from loom.fde_session.clarify import ClarifyQuestion as PolicyQuestion
 from loom.fde_session.clarify import missing_fields
 from loom.fde_session.redaction import redact_text
 
+QUESTIONNAIRE_AFTER_ROUNDS = 3
+
 
 class ClarifyOption(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)

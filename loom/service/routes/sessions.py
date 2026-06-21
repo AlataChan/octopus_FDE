@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 from collections.abc import Callable
 from dataclasses import asdict
@@ -18,8 +19,10 @@ from loom.diff.ir_diff import diff_ir
 from loom.fde_session.brief import WorkflowBriefDraft
 from loom.fde_session.clarify_engine import (
     ClarifyQuestion,
+    QUESTIONNAIRE_AFTER_ROUNDS,
     next_blocking_questions,
 )
+from loom.fde_session.edit_intent import parse_edit_intent
 from loom.fde_session.redaction import has_potential_secret, redact_draft, redact_text
 from loom.ir.canonicalize import canonical_ir_hash
 from loom.ir.models import IRDocument
@@ -38,6 +41,7 @@ router = APIRouter(prefix="/v1")
 ActorDep = Annotated[Actor, Depends(get_actor)]
 CLIENT_PLANNER_ERROR = "planner_error"
 REDACTED_SECRET_USER_MESSAGE = "[REDACTED:potential_secret]"
+BRIEF_REVIEW_REPLY = "Please review the workflow brief and confirm when it is ready to generate."
 
 
 class CreateSessionRequest(BaseModel):
@@ -210,7 +214,18 @@ def create_turn(
         brief_before=brief_before,
     )
     _archive_turn_started(request, session_id, actor.id, turn, body.user_message)
-    if _should_run_clarify(session):
+    if _is_brief_review_confirmation(last_turn, body.user_message):
+        draft = _load_draft(session.brief_draft) or _load_draft(last_turn.brief_after if last_turn else None)
+        if draft is not None:
+            return _finish_plan_from_draft(
+                request=request,
+                actor=actor,
+                session=session,
+                turn=turn,
+                draft=draft,
+                brief_before_json=brief_before,
+            )
+    if _should_run_clarify(session, body.user_message):
         return _handle_clarify_turn(
             request=request,
             actor=actor,
@@ -576,6 +591,19 @@ def _handle_clarify_turn(
             clarify_round=round_index,
         )
 
+    stale_response = _stale_turn_reference_response(
+        request=request,
+        actor=actor,
+        session=session,
+        turn=turn,
+        user_message=user_message,
+        last_turn=last_turn,
+        draft_before=draft_before,
+        brief_before_json=brief_before_json,
+    )
+    if stale_response is not None:
+        return stale_response
+
     pending_fields = _pending_field_paths(last_turn)
     result = request.app.state.clarify_engine.step(
         brief=draft_before,
@@ -586,7 +614,7 @@ def _handle_clarify_turn(
     draft_after = redact_draft(_merge_draft(draft_before, result.intent_update))
     block_questions = next_blocking_questions(draft_after)
     if result.next_action == "ready" and not block_questions:
-        return _finish_plan_from_draft(
+        return _finish_brief_review_response(
             request=request,
             actor=actor,
             session=session,
@@ -595,7 +623,7 @@ def _handle_clarify_turn(
             brief_before_json=brief_before_json,
         )
 
-    if session.clarify_round >= 3 and block_questions:
+    if session.clarify_round >= QUESTIONNAIRE_AFTER_ROUNDS and block_questions:
         payload: dict[str, object] = {"questions": [q.model_dump(mode="json") for q in block_questions]}
         request.app.state.archive_writer.append(
             session.session_id,
@@ -675,6 +703,43 @@ def _finish_clarify_response(
     )
     response = _turn_response(row)
     response["clarify_round"] = clarify_round
+    return response
+
+
+def _finish_brief_review_response(
+    *,
+    request: Request,
+    actor: Actor,
+    session: SessionRow,
+    turn: TurnRow,
+    draft: WorkflowBriefDraft,
+    brief_before_json: str | None,
+) -> dict[str, object]:
+    draft_json = _draft_json(draft)
+    row = request.app.state.session_store.finish_turn_brief_review(
+        turn.turn_id,
+        actor_id=actor.id,
+        planner_reply=BRIEF_REVIEW_REPLY,
+        brief_before=brief_before_json,
+        brief_after=draft_json,
+        target_runtime=draft.target_runtime,
+        scope=draft.scope,
+    )
+    request.app.state.archive_writer.append(
+        session.session_id,
+        actor_id=actor.id,
+        event_type="turn.clarify_replied",
+        payload={
+            "turn_id": str(turn.turn_id),
+            "ask_field_path": None,
+            "options_count": 0,
+            "draft_after_sha256": _sha256_text(draft_json),
+            "gate_pass": True,
+            "review_required": True,
+        },
+    )
+    response = _turn_response(row)
+    response["clarify_round"] = 0
     return response
 
 
@@ -767,13 +832,89 @@ def _finish_plan_from_draft(
         return _turn_response(row)
 
 
-def _should_run_clarify(session: SessionRow) -> bool:
+def _should_run_clarify(session: SessionRow, user_message: str) -> bool:
     """仅 self-design 会话进入澄清状态机。
     模板会话已由模板种子写入 IR，不应被二次澄清拦截。
     brief_draft 只作为审计/恢复快照，不再承担路由判定。
     这样避免模板路径和 self-design 路径因 IR/brief 状态混淆。
     """
+    if session.latest_ir_json and _looks_like_post_ir_edit(user_message):
+        return False
     return session.self_design
+
+
+def _is_brief_review_confirmation(last_turn: TurnRow | None, user_message: str) -> bool:
+    if last_turn is None or last_turn.kind != "brief_review":
+        return False
+    text = user_message.strip().lower()
+    if not text:
+        return False
+    confirmation_tokens = ("confirm", "confirmed", "确认", "生成", "继续")
+    return any(token in text for token in confirmation_tokens)
+
+
+def _looks_like_post_ir_edit(user_message: str) -> bool:
+    parsed = parse_edit_intent(user_message)
+    if getattr(parsed, "kind", "") != "mark_unrecognized":
+        return True
+    return bool(
+        re.search(
+            r"\b(change|modify|threshold|retry|top[_ -]?k|manual\s+review)\b|改|修改|阈值",
+            user_message,
+            re.I,
+        )
+    )
+
+
+def _stale_turn_reference_response(
+    *,
+    request: Request,
+    actor: Actor,
+    session: SessionRow,
+    turn: TurnRow,
+    user_message: str,
+    last_turn: TurnRow | None,
+    draft_before: WorkflowBriefDraft | None,
+    brief_before_json: str | None,
+) -> dict[str, object] | None:
+    referenced_turn_id = _referenced_turn_id(user_message)
+    if referenced_turn_id is None or last_turn is None or referenced_turn_id == str(last_turn.turn_id):
+        return None
+    draft_after = _load_draft(last_turn.brief_after) or draft_before
+    if last_turn.kind == "brief_review" and draft_after is not None:
+        return _finish_brief_review_response(
+            request=request,
+            actor=actor,
+            session=session,
+            turn=turn,
+            draft=draft_after,
+            brief_before_json=brief_before_json,
+        )
+    if last_turn.kind not in {"clarify", "questionnaire"} or not last_turn.clarify_question:
+        return None
+    question_payload = json.loads(last_turn.clarify_question)
+    return _finish_clarify_response(
+        request=request,
+        actor=actor,
+        session=session,
+        turn=turn,
+        kind=cast(Literal["clarify", "questionnaire"], last_turn.kind),
+        question_payload=question_payload,
+        draft_before_json=brief_before_json,
+        draft_after=draft_after or WorkflowBriefDraft(title="Self-Design workflow", intent=""),
+        clarify_round=session.clarify_round,
+    )
+
+
+def _referenced_turn_id(user_message: str) -> str | None:
+    match = re.search(r"\bturn_id=([0-9a-fA-F-]{32,36})\b", user_message)
+    if not match:
+        return None
+    raw = match.group(1)
+    try:
+        return str(UUID(raw))
+    except ValueError:
+        return raw
 
 
 def _load_draft(raw: str | None) -> WorkflowBriefDraft | None:
