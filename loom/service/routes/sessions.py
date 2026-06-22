@@ -348,7 +348,12 @@ def get_ir_diff(
     before_snapshot = _turn_snapshot(before)
     after_snapshot = _turn_snapshot(after)
     if before_snapshot is None or after_snapshot is None:
-        raise not_found("turn snapshot not found")
+        return {
+            "from": str(from_turn),
+            "to": str(to_turn),
+            "changes": [],
+            "summary": {"nodes": 0, "edges": 0, "total": 0},
+        }
     payload = diff_ir(json.loads(before_snapshot), json.loads(after_snapshot))
     return {"from": str(from_turn), "to": str(to_turn), **payload}
 

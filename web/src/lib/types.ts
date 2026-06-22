@@ -69,7 +69,7 @@ export type AuthMe = {
 export type ClarifyQuestion = {
   text: string;
   field_path: string;
-  options?: { label: string; value: string }[] | null;
+  options?: { description?: string | null; label: string; value: string }[] | null;
   allow_freeform: boolean;
   severity: "block" | "warn";
 };

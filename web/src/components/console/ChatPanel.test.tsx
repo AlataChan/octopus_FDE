@@ -34,8 +34,8 @@ describe("ChatPanel clarify turns", () => {
               allow_freeform: false,
               field_path: "target_runtime",
               options: [
-                { label: "HiAgent", value: "hiagent" },
-                { label: "Dify", value: "dify" }
+                { description: "适合先交付到当前主平台。", label: "HiAgent", value: "hiagent" },
+                { description: "适合验证 Dify YAML 导入。", label: "Dify", value: "dify" }
               ],
               severity: "block",
               text: "Which target runtime should this workflow compile to?"
@@ -49,6 +49,7 @@ describe("ChatPanel clarify turns", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dify" }));
     fireEvent.click(screen.getByRole("button", { name: /回答|Reply/i }));
 
+    expect(screen.getByText("适合验证 Dify YAML 导入。")).toBeInTheDocument();
     expect(onSend).toHaveBeenCalledWith("target_runtime=dify");
   });
 
@@ -112,7 +113,13 @@ describe("ChatPanel clarify turns", () => {
                 {
                   allow_freeform: false,
                   field_path: "scope",
-                  options: [{ label: "Ecommerce KB", value: "ecommerce/kb" }],
+                  options: [
+                    {
+                      description: "围绕商品、政策和 FAQ 知识库回答问题。",
+                      label: "Ecommerce KB",
+                      value: "ecommerce/kb"
+                    }
+                  ],
                   severity: "block",
                   text: "Which registry scope should constrain datasets, tools, and credentials?"
                 },
@@ -130,8 +137,11 @@ describe("ChatPanel clarify turns", () => {
       />
     );
 
+    expect(screen.getByText(/问题 1 \/ 2|Question 1 \/ 2/i)).toBeInTheDocument();
+    expect(screen.getByText(/问题 2 \/ 2|Question 2 \/ 2/i)).toBeInTheDocument();
+    expect(screen.getByText("围绕商品、政策和 FAQ 知识库回答问题。")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Ecommerce KB" }));
-    fireEvent.change(screen.getByLabelText(/success_criteria/i), {
+    fireEvent.change(screen.getByLabelText(/success criteria/i), {
       target: { value: "Answer with citations." }
     });
     fireEvent.click(screen.getByRole("button", { name: /提交问卷|Submit questionnaire/i }));

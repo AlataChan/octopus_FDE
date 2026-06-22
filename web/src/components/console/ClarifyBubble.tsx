@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { ClarifyQuestion } from "../../lib/types";
 import { Button } from "../ui/Button";
 import { Textarea } from "../ui/Textarea";
+import { ClarifyOptionButton } from "./ClarifyOptionButton";
 
 type Props = {
   disabled?: boolean;
@@ -42,37 +43,31 @@ export function ClarifyBubble({
   return (
     <form
       aria-disabled={effectiveDisabled}
-      className="rounded-lg bg-bg-app/60 p-3 text-sm leading-6 text-fg ring-1 ring-accent/20"
+      className="rounded-lg border border-accent/25 bg-bg-surface p-4 text-sm leading-6 text-fg shadow-glow sm:p-5"
       onSubmit={submit}
     >
-      <div className="space-y-3">
-        <div>
-          <div className="text-xs font-semibold uppercase text-fg-muted">{t("clarify.title")}</div>
-          <p className="mt-1 text-sm leading-6">{question.text}</p>
+      <div className="space-y-4">
+        <div className="border-b border-border/35 pb-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.08em] text-accent">{t("clarify.title")}</div>
+          <p className="mt-2 text-base font-semibold leading-7">{question.text}</p>
         </div>
         {question.options && question.options.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
+          <div className="grid gap-2 sm:grid-cols-2">
             {question.options.map((option) => (
-              <button
+              <ClarifyOptionButton
                 key={option.value}
-                className={
-                  selected === option.value
-                    ? "rounded-lg border border-accent/50 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-fg"
-                    : "rounded-lg border border-border/60 bg-bg-muted px-3 py-1.5 text-xs font-semibold text-fg-muted hover:text-fg"
-                }
                 disabled={effectiveDisabled}
-                onClick={() => setSelected(option.value)}
-                type="button"
-              >
-                {option.label}
-              </button>
+                option={option}
+                selected={selected === option.value}
+                onSelect={setSelected}
+              />
             ))}
           </div>
         ) : null}
         {question.allow_freeform ? (
           <Textarea
-            aria-label={question.field_path}
-            className="h-20 resize-none"
+            aria-label={question.text}
+            className="min-h-28 resize-y"
             disabled={effectiveDisabled}
             placeholder={t("clarify.freeformPlaceholder")}
             value={freeform}

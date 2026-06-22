@@ -27,6 +27,7 @@ class ClarifyOption(BaseModel):
 
     label: str
     value: str
+    description: str | None = None
 
 
 class ClarifyQuestion(BaseModel):
@@ -183,7 +184,20 @@ def parse_field_answer(field_path: str, answer: str) -> dict[str, Any]:
             return {"scope": "ecommerce/kb"}
         return {}
     if field_path == "compliance_boundary":
-        if any(token in lower for token in ("high", "clinical", "medical", "patient")) or "患者" in text:
+        explicit_value = _explicit_field_value(field_path, text)
+        if explicit_value in {"none", "low", "medium", "high"}:
+            regulatory_tags = ["clinical"] if explicit_value == "high" else []
+            return {
+                "compliance_boundary": ComplianceBoundary(
+                    pii_class_default=explicit_value,
+                    regulatory_tags=regulatory_tags,
+                    geographies=["CN"],
+                )
+            }
+        if (
+            any(token in lower for token in ("high", "clinical", "medical", "patient"))
+            or any(token in text for token in ("患者", "病历", "诊断", "证件", "身份证", "处方", "高敏"))
+        ):
             return {
                 "compliance_boundary": ComplianceBoundary(
                     pii_class_default="high",
@@ -191,15 +205,7 @@ def parse_field_answer(field_path: str, answer: str) -> dict[str, Any]:
                     geographies=["CN"],
                 )
             }
-        if "medium" in lower or "pii" in lower or "个人信息" in text:
-            return {
-                "compliance_boundary": ComplianceBoundary(
-                    pii_class_default="medium",
-                    regulatory_tags=[],
-                    geographies=["CN"],
-                )
-            }
-        if "none" in lower or "无" in text:
+        if "none" in lower or any(token in text for token in ("无", "不涉及", "公开资料", "匿名")):
             return {
                 "compliance_boundary": ComplianceBoundary(
                     pii_class_default="none",
@@ -207,7 +213,23 @@ def parse_field_answer(field_path: str, answer: str) -> dict[str, Any]:
                     geographies=["CN"],
                 )
             }
-        if "low" in lower or "低" in text or "一般" in text:
+        if (
+            "medium" in lower
+            or "pii" in lower
+            or any(token in text for token in ("订单", "手机号", "手机", "邮箱", "地址", "联系方式", "个人信息"))
+        ):
+            return {
+                "compliance_boundary": ComplianceBoundary(
+                    pii_class_default="medium",
+                    regulatory_tags=[],
+                    geographies=["CN"],
+                )
+            }
+        if (
+            "low pii" in lower
+            or "low personal" in lower
+            or any(token in text for token in ("低敏", "一般个人信息", "昵称", "普通咨询"))
+        ):
             return {
                 "compliance_boundary": ComplianceBoundary(
                     pii_class_default="low",
@@ -263,27 +285,39 @@ def _title_from_message(message: str) -> str:
     return stripped[:80] if stripped else "Self-Design workflow"
 
 
+def _explicit_field_value(field_path: str, answer: str) -> str | None:
+    match = re.search(rf"(?:^|[;\n])\s*{re.escape(field_path)}\s*=\s*([^;\n]+)", answer, re.I)
+    return match.group(1).strip().lower() if match else None
+
+
 def _options_for_field(field_path: str) -> list[ClarifyOption] | None:
-    options: dict[str, list[tuple[str, str]]] = {
-        "target_runtime": [("HiAgent", "hiagent"), ("Dify", "dify")],
+    options: dict[str, list[tuple[str, str, str]]] = {
+        "target_runtime": [
+            ("HiAgent", "hiagent", "优先交付到当前主平台，适合后续生成 HiAgent 应用或 ChatFlow。"),
+            ("Dify", "dify", "生成 Dify YAML，适合用来验证导入和跨平台表达。"),
+        ],
         "scope": [
-            ("Ecommerce KB", "ecommerce/kb"),
-            ("Ecommerce Ops", "ecommerce/ops"),
-            ("Clinic KB", "clinic/kb"),
-            ("Clinic Ops", "clinic/ops"),
+            ("电商知识库问答", "ecommerce/kb", "围绕商品、政策、FAQ 和引用来源回答用户问题。"),
+            ("电商运营流程", "ecommerce/ops", "处理订单、物流、退款、售后升级等运营动作。"),
+            ("中医知识库问答", "clinic/kb", "围绕诊所知识、服务说明和咨询前信息收集。"),
+            ("中医门诊运营", "clinic/ops", "处理预约、随访、复诊、库存和人工审核流程。"),
         ],
         "compliance_boundary": [
-            ("No PII", "none"),
-            ("Low PII", "low"),
-            ("Medium PII", "medium"),
-            ("High / clinical PII", "high"),
+            ("不涉及个人信息", "none", "只处理公开内容、商品资料、政策说明或匿名问题。"),
+            ("只涉及低敏信息", "low", "例如昵称、渠道、普通咨询内容，不包含订单和联系方式。"),
+            ("涉及订单或联系方式", "medium", "例如订单号、手机号、邮箱、地址等，需要隐私保护。"),
+            ("涉及病历、诊断或证件等高敏信息", "high", "必须启用更严格的脱敏、人工审核和合规提示。"),
         ],
-        "trigger": [("Manual", "manual"), ("Schedule", "schedule"), ("Webhook", "webhook")],
+        "trigger": [
+            ("用户提问时启动", "manual", "客服、运营或用户在聊天窗口里发起请求。"),
+            ("按固定时间自动运行", "schedule", "例如每天、每小时或每周生成报告和提醒。"),
+            ("收到系统通知时启动", "webhook", "例如订单状态变化、退款事件或外部系统回调。"),
+        ],
     }
     values = options.get(field_path)
     if values is None:
         return None
-    return [ClarifyOption(label=label, value=value) for label, value in values]
+    return [ClarifyOption(label=label, value=value, description=description) for label, value, description in values]
 
 
 def _allow_freeform(field_path: str) -> bool:

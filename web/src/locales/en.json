@@ -40,6 +40,7 @@
   "clarify.questionnaireSubtitle": "Answer the remaining blocking fields so flow design IR generation can start.",
   "clarify.questionnaireTitle": "Clarification checklist",
   "clarify.reply": "Reply",
+  "clarify.step": "Question {{current}} / {{total}}",
   "clarify.submitQuestionnaire": "Submit questionnaire",
   "clarify.title": "Clarify",
   "common.saveFailed": "Save failed. Please try again.",

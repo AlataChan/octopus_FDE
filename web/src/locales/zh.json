@@ -40,6 +40,7 @@
   "clarify.questionnaireSubtitle": "补齐剩余阻塞字段后即可生成流程设计 IR。",
   "clarify.questionnaireTitle": "澄清问卷",
   "clarify.reply": "回答",
+  "clarify.step": "问题 {{current}} / {{total}}",
   "clarify.submitQuestionnaire": "提交问卷",
   "clarify.title": "澄清",
   "common.saveFailed": "保存失败，请重试。",

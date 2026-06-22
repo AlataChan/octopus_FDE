@@ -123,3 +123,44 @@ def test_diff_route_rejects_turns_outside_session(tmp_path):
     )
 
     assert response.status_code == 404
+
+
+def test_diff_route_returns_empty_diff_for_turns_without_ir_snapshots(tmp_path):
+    clarify_engine = FakeClarifyEngine([
+        ClarifyEngineResult(
+            question={
+                "text": "请补充业务目标。",
+                "field_path": "intent_clarification",
+                "allow_freeform": True,
+                "severity": "block",
+            },
+            next_action="ask",
+        ),
+        ClarifyEngineResult(
+            question={
+                "text": "请选择运行平台。",
+                "field_path": "target_runtime",
+                "options": [{"label": "HiAgent", "value": "hiagent"}],
+                "allow_freeform": False,
+                "severity": "block",
+            },
+            next_action="ask",
+        ),
+    ])
+    client = _client(tmp_path, planner=lambda **_kwargs: IRDocument.model_validate(_sample_ir()), clarify_engine=clarify_engine)
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+    first = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "我要一个客服 FAQ"}).json()
+    second = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "补充一点"}).json()
+
+    response = client.get(
+        f"/v1/sessions/{sid}/ir/diff",
+        params={"from_turn": first["turn_id"], "to_turn": second["turn_id"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "from": first["turn_id"],
+        "to": second["turn_id"],
+        "changes": [],
+        "summary": {"nodes": 0, "edges": 0, "total": 0},
+    }

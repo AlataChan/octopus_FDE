@@ -23,6 +23,7 @@ import { useCompileSession, useIRDiff, useSession, useSetLLMConfig } from "../..
 import { usePlannerTurn } from "../../hooks/usePlannerTurn";
 import { useIsXl } from "../../hooks/useIsXl";
 import { useIsLg } from "../../hooks/useIsLg";
+import { selectIRDiffTurnIds } from "../../lib/session-diff";
 import { useEffect, useState } from "react";
 
 const PANEL_GROUP_AUTOSAVE_ID = "fde-session-panels-v1";
@@ -94,11 +95,7 @@ export default function SessionDetailPage() {
     (count, artifact) => count + artifact.compile_warnings.length,
     0
   );
-  const successfulTurns = (turns.data || []).filter((turn) => turn.status === "succeeded");
-  const fromTurn =
-    successfulTurns.length >= 2 ? successfulTurns[successfulTurns.length - 2].turn_id : null;
-  const toTurn =
-    successfulTurns.length >= 2 ? successfulTurns[successfulTurns.length - 1].turn_id : null;
+  const { fromTurn, toTurn } = selectIRDiffTurnIds(turns.data || []);
   const diff = useIRDiff(sessionId, fromTurn, toTurn);
   const compileWarnings = (session.data?.artifacts || []).flatMap((artifact) => artifact.compile_warnings);
   const flowDiffSummary = diff.data
