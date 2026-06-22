@@ -120,7 +120,7 @@ Initial use-case archetypes (these drive the IR scope and must be validated or r
 4. **TCM follow-up and treatment-course operations** *(shadow)* — scheduled follow-up → anomaly escalation → record writeback.
 5. **Cross-border ecommerce order-exception triage** — order/shipment/return anomalies → multilingual customer reply + ops queue routing + refund / replacement workflow with manager approval where SLA-impacting.
 
-**These are SOW-backed hypotheses, not generic demos.** Phase 0's first task is to validate or replace them against five workflow candidates in the SOW. The SOW can come from a real partner or a synthetic Bambu Lab-style ecommerce operator. If the SOW list looks materially different, the IR scope re-opens before Phase 1.
+**These are SOW-backed hypotheses, not generic demos.** Phase 0's first task is to validate or replace them against five workflow candidates in the SOW. The SOW can come from a real partner or a synthetic cross-border ecommerce operator. If the SOW list looks materially different, the IR scope re-opens before Phase 1.
 
 ### FDE capability model
 
@@ -450,7 +450,7 @@ This is the spec the Deployer enforces. It eliminates the "we approved one thing
 
 > **Cost-budget escape hatch (cross-phase contract, decided 2026-05-06).** v1 ships dual-runtime (Hiagent primary + Dify secondary). If during execution the cost of running both runtimes exceeds the project's budget for any single phase (Phase 1 / 1.5 / 2A / 2B), the project owner may invoke the escape hatch: **drop Dify, keep Hiagent**. Gate criteria for the dropped runtime become N/A in the corresponding gate report; Hiagent rows must still pass at the full bar. Web target picker, runtime coverage matrix, conformance / parity / reverse / drift / publish flows are all written so that one runtime missing is a configuration drop (`loom/runtimes/registry.unregister("dify")`), not a refactor. The escape hatch is recorded as an ADR 0002 amendment with date and reason.
 
-**Phase 0 — Discovery and default-contract lock (2 weeks).** Phase 0 no longer waits for external partner confirmation. The first FDE step is an **SOW / requirements intake**: persona, business goal, target runtime, channels, datasets/tools, credential bindings, reviewer policy, success criteria, and five workflow candidates. The SOW may come from a real partner or from a synthetic partner profile (for example a Bambu Lab-style cross-border ecommerce operator) so engineering can start without BD blocking the project. Hand-author the five SOW workflows as IR and run them against the Phase 0 engineering target.
+**Phase 0 — Discovery and default-contract lock (2 weeks).** Phase 0 no longer waits for external partner confirmation. The first FDE step is an **SOW / requirements intake**: persona, business goal, target runtime, channels, datasets/tools, credential bindings, reviewer policy, success criteria, and five workflow candidates. The SOW may come from a real partner or from a synthetic partner profile, for example a generic cross-border ecommerce operator, so engineering can start without BD blocking the project. Hand-author the five SOW workflows as IR and run them against the Phase 0 engineering target.
 
 **Phase 0 decisions/defaults (must be written before Phase 1 code):**
 
@@ -648,7 +648,7 @@ The previous five Phase 0 external blockers are now Phase 0 **default decisions*
 
 If we agree on the shape above, the next concrete pieces of work are:
 
-1. **Write the SOW / requirements intake contract and first SOW packet.** Capture persona, business goal, target runtime, workflow candidates, tools/datasets, credential binding plan, reviewer policy, and success criteria. Use a real partner if available; otherwise write `sow/default-ecommerce/phase0-synthetic-sow.yaml` from a synthetic cross-border ecommerce operator such as a Bambu Lab-style profile. ~1 day.
+1. **Write the SOW / requirements intake contract and first SOW packet.** Capture persona, business goal, target runtime, workflow candidates, tools/datasets, credential binding plan, reviewer policy, and success criteria. Use a real partner if available; otherwise write `sow/default-ecommerce/phase0-synthetic-sow.yaml` from a generic synthetic cross-border ecommerce operator profile. ~1 day.
 2. **Fill five SOW workflow candidates.** For each workflow, capture oral-style request, expected clarifying questions, expected edit instructions, reviewer concerns, and runtime handoff evidence.
 3. **Lock the IR v0.3 schema against the five SOW workflows.** Draft the JSON Schema + a sample IR for each workflow. Review together, iterate. ~2 days.
 4. **Hand-author the 5 archetypes against the Phase 0 engineering target (Dify).** Confirm every IR construct compiles to working Dify DSL. The Hiagent equivalent ships in Phase 1 Task 11.5 alongside the RuntimeAdapter. This is the Phase 0 gate. ~3 days.

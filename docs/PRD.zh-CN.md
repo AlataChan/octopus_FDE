@@ -277,7 +277,7 @@ flowchart LR
 
 ### Phase 0（2 周，发现与默认契约锁定）
 
-目标：不再把外部设计伙伴签字当成工程硬阻塞，而是先锁定 FDE 的 **SOW / 需求输入契约**：Persona、业务目标、目标运行时、渠道、工具/数据集、凭证绑定、Reviewer 策略、成功标准、5 个候选工作流。SOW 可来自真实伙伴，也可来自合成伙伴画像（例如 Bambu Lab 风格的跨境电商运营方），这样工程不被 BD 节奏阻塞。
+目标：不再把外部设计伙伴签字当成工程硬阻塞，而是先锁定 FDE 的 **SOW / 需求输入契约**：Persona、业务目标、目标运行时、渠道、工具/数据集、凭证绑定、Reviewer 策略、成功标准、5 个候选工作流。SOW 可来自真实伙伴，也可来自通用跨境电商运营方画像，这样工程不被 BD 节奏阻塞。
 
 Phase 0 默认决策：
 
@@ -390,7 +390,7 @@ FDE 对话界面、Web Authoring、语义 diff、Trace 观测、FDE 原生 RBAC�
 
 ## 12. 立即下一步
 
-1. 写 SOW / 需求输入契约和第一份 SOW 包：Persona、业务目标、目标运行时、候选工作流、工具/数据集、凭证绑定、Reviewer 策略、成功标准。真实伙伴优先；没有就写 `sow/default-ecommerce/phase0-synthetic-sow.yaml`，使用 Bambu Lab 风格的合成跨境电商运营画像（约 1 天）
+1. 写 SOW / 需求输入契约和第一份 SOW 包：Persona、业务目标、目标运行时、候选工作流、工具/数据集、凭证绑定、Reviewer 策略、成功标准。真实伙伴优先；没有就写 `sow/default-ecommerce/phase0-synthetic-sow.yaml`，使用通用合成跨境电商运营画像（约 1 天）
 2. 填 5 个 SOW 工作流候选：口述请求、预期澄清问题、预期编辑指令、Reviewer 关注点、交接证据
 3. 基于 5 个 SOW 工作流锁定 IR v0.3 Schema 与样例（约 2 天）
 4. 在 Phase 0 工程目标（Dify）实例上手写并验证 5 个原型工作流；Hiagent 等价物在 Phase 1 Task 11.5 ship（约 3 天）

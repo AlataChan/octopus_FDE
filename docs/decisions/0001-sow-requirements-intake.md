@@ -18,7 +18,7 @@ Required fields:
 - `reviewer_policy`
 - `success_metrics`
 
-Synthetic-partner mode is valid: if no real partner is ready, use a Bambu Lab-style cross-border ecommerce operator profile to fill the SOW and move engineering forward.
+Synthetic-partner mode is valid: if no real partner is ready, use a generic cross-border ecommerce operator profile to fill the SOW and move engineering forward.
 
 ## Context
 
