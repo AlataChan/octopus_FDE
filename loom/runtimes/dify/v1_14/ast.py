@@ -17,7 +17,7 @@ from typing import Any, cast
 
 import yaml  # type: ignore[import-untyped]
 
-CANONICAL_AST_VERSION = "1"
+CANONICAL_AST_VERSION = "2"
 
 # Top-level paths whose value Dify silently sets on import. Stripped before
 # hashing. Keep aligned with the pinned Dify version (ADR 0002).
@@ -29,15 +29,19 @@ _STRIP_DEFAULTS: list[tuple[str, Any]] = [
 ]
 
 # Lists whose order is not semantically significant. Sorted before hashing.
+# React Flow nodes/edges live at workflow.graph.{nodes,edges} in the actual
+# compiler output (loom/runtimes/dify/v1_14/compiler.py) — not workflow.nodes.
 _ORDER_INVARIANT_LISTS: list[str] = [
-    "workflow.nodes",
-    "workflow.edges",
+    "workflow.graph.nodes",
+    "workflow.graph.edges",
 ]
 
 
 def canonical_dify_ast(yaml_text: str) -> dict[str, Any]:
     """Parse Dify DSL YAML to a canonical Python dict."""
     raw = yaml.safe_load(yaml_text) or {}
+    for p, default in _STRIP_DEFAULTS:
+        _strip_at(raw, p, default)
     return cast("dict[str, Any]", _canon(raw, path=""))
 
 
@@ -53,12 +57,6 @@ def canonical_dify_ast_hash(yaml_text: str) -> str:
 
 def _canon(value: Any, *, path: str) -> Any:
     if isinstance(value, dict):
-        # Strip defaults rooted here.
-        for p, default in _STRIP_DEFAULTS:
-            if _path_join(path, "") == "" and p.startswith(path):
-                _strip_at(value, _suffix(p, path), default)
-            elif p == path + "." + (path and "."):
-                pass
         cleaned: dict[str, Any] = {}
         for k in sorted(value.keys()):
             child_path = _path_join(path, k)
@@ -77,12 +75,6 @@ def _canon(value: Any, *, path: str) -> Any:
 
 def _path_join(parent: str, child: str) -> str:
     return f"{parent}.{child}" if parent else child
-
-
-def _suffix(full: str, prefix: str) -> str:
-    if not prefix:
-        return full
-    return full[len(prefix) + 1:] if full.startswith(prefix + ".") else full
 
 
 def _strip_at(node: dict[str, Any], rel_path: str, default: Any) -> None:
