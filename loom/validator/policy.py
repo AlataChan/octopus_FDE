@@ -125,6 +125,17 @@ _PY_DANGEROUS_ATTR_ROOTS = {
     "ctypes", "multiprocessing", "threading", "requests", "urllib", "http",
     "ftplib", "smtplib", "pickle", "marshal", "ssl",
 }
+# Object-introspection attribute names used by classic sandbox-escape chains
+# (e.g. `().__class__.__bases__[0].__subclasses__()` reaches arbitrary
+# builtins without importing anything or naming a blocked root). None of the
+# import-allowlisted stdlib modules need these on a workflow code node, so
+# any use is rejected regardless of what object the attribute is accessed on.
+_PY_DANGEROUS_ATTR_NAMES = {
+    "__class__", "__bases__", "__base__", "__subclasses__", "__mro__",
+    "__globals__", "__builtins__", "__import__", "__loader__", "__spec__",
+    "__code__", "__closure__", "__func__", "__self__", "__dict__",
+    "__getattribute__", "__reduce__", "__reduce_ex__", "__init_subclass__",
+}
 _JS_DANGEROUS_PATTERNS = [
     re.compile(r"\beval\("),
     re.compile(r"\bnew\s+Function\("),
@@ -161,6 +172,11 @@ def _check_python_sandbox(source: str) -> list[str]:
         elif isinstance(stmt, ast.Name) and stmt.id in _PY_DANGEROUS_CALLS:
             reasons.append(f"reference to {stmt.id!r} is forbidden in a sandboxed code node")
         elif isinstance(stmt, ast.Attribute):
+            if stmt.attr in _PY_DANGEROUS_ATTR_NAMES:
+                reasons.append(
+                    f"access to {stmt.attr!r} is forbidden in a sandboxed code node "
+                    "(object-introspection attributes can escape the import allowlist)"
+                )
             root = stmt
             while isinstance(root, ast.Attribute):
                 root = root.value

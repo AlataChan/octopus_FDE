@@ -177,6 +177,21 @@ def test_js_code_node_dangerous_pattern_rejected():
     assert any("forbidden pattern" in f.detail for f in failures)
 
 
+def test_code_node_subclasses_sandbox_escape_rejected():
+    # Classic Python sandbox-escape chain: reaches arbitrary builtins via
+    # object introspection without importing anything or naming a blocked
+    # root (`().__class__` starts from a literal, not an `os`/`sys`/... name).
+    ir = _ir_with_code(
+        "x = ().__class__.__bases__[0].__subclasses__()\nreturn {'x': str(x)}"
+    )
+    failures = check_policy(ir)
+    assert any(
+        "'__subclasses__'" in f.detail and "introspection" in f.detail for f in failures
+    ), failures
+    assert any("'__bases__'" in f.detail for f in failures), failures
+    assert any("'__class__'" in f.detail for f in failures), failures
+
+
 # ---------------------------------------------------------------------------
 # H-3: trust-boundary delimiters for untrusted content in prompts.
 # ---------------------------------------------------------------------------
