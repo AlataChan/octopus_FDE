@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for multi-agent reasoning with shared memory context.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: []
   credentials: []
@@ -29,7 +29,7 @@ nodes:
   - id: manager
     type: llm
     model: configured-planner-model
-    prompt: "Topic: ${input.topic}\nMemory: ${memory_fetch.body}\nDefine analysis and critique tasks."
+    prompt: "Topic: <untrusted>${input.topic}</untrusted>\nMemory: <untrusted>${memory_fetch.body}</untrusted>\nDefine analysis and critique tasks."
     output_schema:
       type: object
       properties:
@@ -45,7 +45,7 @@ nodes:
         - id: analysis_agent
           type: llm
           model: configured-small-model
-          prompt: "Topic: ${input.topic}\nMemory: ${memory_fetch.body}\nTask: ${manager.analysis_task}"
+          prompt: "Topic: <untrusted>${input.topic}</untrusted>\nMemory: <untrusted>${memory_fetch.body}</untrusted>\nTask: ${manager.analysis_task}"
           output_schema:
             type: object
             properties:
@@ -55,7 +55,7 @@ nodes:
         - id: critique_agent
           type: llm
           model: configured-small-model
-          prompt: "Topic: ${input.topic}\nMemory: ${memory_fetch.body}\nTask: ${manager.critique_task}"
+          prompt: "Topic: <untrusted>${input.topic}</untrusted>\nMemory: <untrusted>${memory_fetch.body}</untrusted>\nTask: ${manager.critique_task}"
           output_schema:
             type: object
             properties:

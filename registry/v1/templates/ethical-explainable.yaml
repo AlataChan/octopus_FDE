@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for transparent decisions with safety review.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: [policy_kb]
   credentials: []
@@ -30,7 +30,7 @@ nodes:
   - id: decide
     type: llm
     model: configured-planner-model
-    prompt: "Context: ${input.decision_context}\nMake an ethical decision, note risks, and score confidence."
+    prompt: "Context: <untrusted>${input.decision_context}</untrusted>\nMake an ethical decision, note risks, and score confidence."
     temperature: 0
     output_schema:
       type: object

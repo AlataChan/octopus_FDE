@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for legal knowledge retrieval and reasoning.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: [legal_case_law_kb]
   credentials: []
@@ -32,7 +32,7 @@ nodes:
   - id: reason
     type: llm
     model: configured-small-model
-    prompt: "Question: ${input.legal_question}\nCase law: ${retrieve_cases.chunks}\nExplain relevant legal reasoning and include a non-advice caveat."
+    prompt: "Question: <untrusted>${input.legal_question}</untrusted>\nCase law: <untrusted>${retrieve_cases.chunks}</untrusted>\nExplain relevant legal reasoning and include a non-advice caveat."
     temperature: 0
     output_schema:
       type: object

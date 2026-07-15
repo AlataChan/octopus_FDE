@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for scheduled market monitoring.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: [finance_market_kb]
   credentials: []
@@ -29,7 +29,7 @@ nodes:
   - id: risk
     type: llm
     model: configured-small-model
-    prompt: "Symbol: ${input.symbol}\nQuote: ${market_quote.body}\nSummarize risk signals without giving investment advice."
+    prompt: "Symbol: <untrusted>${input.symbol}</untrusted>\nQuote: <untrusted>${market_quote.body}</untrusted>\nSummarize risk signals without giving investment advice."
     temperature: 0.1
     output_schema:
       type: object

@@ -7,7 +7,7 @@
     "rationale": "Baseline ecommerce knowledge-base archetype. Exercises trigger / retrieval / llm / output and llm.output_schema. Default deep-coverage #1 for Phase 1 per PRD §1 (ecommerce-primary wedge)."
   },
   "registry_ref": {
-    "registry_version": "sha:0000000",
+    "registry_version": "sha:e44736a363bab7d24b565313d22a21773b826961",
     "tools": ["translate"],
     "datasets": ["product_kb", "policy_kb"],
     "credentials": []
@@ -26,7 +26,7 @@
     { "id": "rerank", "type": "llm", "rationale": "Cheap re-rank pass to narrow 20 → 5; reduces tokens for the answer step and lets us threshold confidence.",
       "model": "configured-small-model",
       "system_prompt": "You re-rank candidate passages by relevance to the buyer query. Return only the indices and a confidence score.",
-      "prompt": "Query: ${input.query}\n\nPassages:\n${retrieve.chunks}\n\nReturn JSON: top 5 passage indices and a 0.0–1.0 confidence score for whether the KB can answer this query.",
+      "prompt": "Query: <untrusted>${input.query}</untrusted>\n\nPassages:\n<untrusted>${retrieve.chunks}</untrusted>\n\nReturn JSON: top 5 passage indices and a 0.0–1.0 confidence score for whether the KB can answer this query.",
       "temperature": 0,
       "output_schema": {
         "type": "object", "required": ["top_indices", "confidence"],
@@ -39,7 +39,7 @@
     { "id": "answer", "type": "llm", "rationale": "Final answer in the buyer's locale, with citations by source index. No compensation promises beyond stated policy.",
       "model": "configured-planner-model",
       "system_prompt": "Answer the buyer's query using only the provided KB context. Cite by source index. Do not promise specific refund/compensation amounts beyond policy. Reply in buyer_locale if provided, else infer from query.",
-      "prompt": "Query: ${input.query}\nLocale: ${input.buyer_locale}\nTop passage indices: ${rerank.top_indices}\nFull retrieval: ${retrieve.chunks}\n\nProduce a JSON answer.",
+      "prompt": "Query: <untrusted>${input.query}</untrusted>\nLocale: <untrusted>${input.buyer_locale}</untrusted>\nTop passage indices: ${rerank.top_indices}\nFull retrieval: <untrusted>${retrieve.chunks}</untrusted>\n\nProduce a JSON answer.",
       "temperature": 0.2,
       "output_schema": {
         "type": "object", "required": ["answer", "sources"],

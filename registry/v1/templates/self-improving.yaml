@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for feedback-driven response improvement.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: []
   credentials: []
@@ -24,7 +24,7 @@ nodes:
   - id: initial
     type: llm
     model: configured-planner-model
-    prompt: "Task: ${input.task}\nDraft a first answer and note assumptions."
+    prompt: "Task: <untrusted>${input.task}</untrusted>\nDraft a first answer and note assumptions."
     temperature: 0.2
     output_schema:
       type: object
@@ -42,7 +42,7 @@ nodes:
   - id: refine
     type: llm
     model: configured-planner-model
-    prompt: "Task: ${input.task}\nInitial answer: ${initial.answer}\nFeedback: ${feedback_fetch.body}\nRefine the answer."
+    prompt: "Task: <untrusted>${input.task}</untrusted>\nInitial answer: ${initial.answer}\nFeedback: <untrusted>${feedback_fetch.body}</untrusted>\nRefine the answer."
     temperature: 0.1
     output_schema:
       type: object

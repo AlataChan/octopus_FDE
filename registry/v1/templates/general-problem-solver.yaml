@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for broad stepwise problem solving.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: []
   credentials: []
@@ -24,7 +24,7 @@ nodes:
   - id: decompose
     type: llm
     model: configured-planner-model
-    prompt: "Problem: ${input.problem}\nReturn a short ordered list of solution steps."
+    prompt: "Problem: <untrusted>${input.problem}</untrusted>\nReturn a short ordered list of solution steps."
     output_schema:
       type: object
       properties:
@@ -39,7 +39,7 @@ nodes:
       - id: solve_step
         type: llm
         model: configured-small-model
-        prompt: "Problem: ${input.problem}\nStep: ${solve.step}\nSolve this step."
+        prompt: "Problem: <untrusted>${input.problem}</untrusted>\nStep: ${solve.step}\nSolve this step."
         output_schema:
           type: object
           properties:
@@ -49,7 +49,7 @@ nodes:
   - id: synthesize
     type: llm
     model: configured-planner-model
-    prompt: "Problem: ${input.problem}\nStep results: ${solve.results}\nWrite the final answer."
+    prompt: "Problem: <untrusted>${input.problem}</untrusted>\nStep results: ${solve.results}\nWrite the final answer."
     output_schema:
       type: object
       properties:

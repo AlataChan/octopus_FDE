@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for audio-to-insight workflows.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: []
   credentials: []
@@ -31,7 +31,7 @@ nodes:
   - id: analyze
     type: llm
     model: configured-small-model
-    prompt: "Transcript: ${transcribe.body}\nSummarize intent, key facts, and follow-up actions."
+    prompt: "Transcript: <untrusted>${transcribe.body}</untrusted>\nSummarize intent, key facts, and follow-up actions."
     temperature: 0.1
     output_schema:
       type: object

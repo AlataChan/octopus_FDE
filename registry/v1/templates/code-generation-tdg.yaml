@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing code generation template using a test-first sequence.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: []
   credentials: []
@@ -24,7 +24,7 @@ nodes:
   - id: tests
     type: llm
     model: configured-small-model
-    prompt: "Request: ${input.request}\nWrite concise executable tests first."
+    prompt: "Request: <untrusted>${input.request}</untrusted>\nWrite concise executable tests first."
     temperature: 0
     output_schema:
       type: object
@@ -34,7 +34,7 @@ nodes:
   - id: code
     type: llm
     model: configured-planner-model
-    prompt: "Request: ${input.request}\nTests: ${tests.tests}\nWrite code that satisfies the tests."
+    prompt: "Request: <untrusted>${input.request}</untrusted>\nTests: ${tests.tests}\nWrite code that satisfies the tests."
     temperature: 0.1
     output_schema:
       type: object
