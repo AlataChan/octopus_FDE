@@ -5,6 +5,12 @@ from typing import TYPE_CHECKING, Any, cast
 
 import yaml  # type: ignore[import-untyped]
 
+from loom.runtimes.base import (
+    CompileContext,
+    UnsupportedRuntimeOperation,
+    assert_runtime_ir_supported,
+    capability_redlines,
+)
 from loom.runtimes.dify.v1_14 import DIFY_VERSION
 from loom.runtimes.dify.v1_14.ast import canonical_dify_ast_hash
 from loom.runtimes.dify.v1_14.compiler import compile_ir as compile_to_yaml
@@ -25,13 +31,23 @@ class DifyAdapter:
     target = "dify"
     version = DIFY_VERSION
 
-    def compile(self, ir: IRDocument) -> tuple[str, list[CompileWarning]]:
+    def compile(
+        self,
+        ir: IRDocument,
+        *,
+        context: CompileContext | None = None,
+    ) -> tuple[str, list[CompileWarning]]:
+        del context
+        assert_runtime_ir_supported(ir, target=self.target, version=self.version)
         # compile_to_yaml already returns YAML string; the adapter passes it through.
         return compile_to_yaml(ir)
 
     def reverse(self, dsl: Any) -> tuple[IRDocument, list[UnrecognizedConstruct]]:
-        raise NotImplementedError(
-            "Dify reverse compiler is first-customer-deferred (MVP scope; needs live runtime)"
+        raise UnsupportedRuntimeOperation(
+            target=self.target,
+            version=self.version,
+            operation="reverse",
+            reason="reverse compiler is first-customer-deferred and needs a live runtime",
         )
 
     def canonical_ast_hash(self, dsl: Any) -> str:
@@ -47,19 +63,27 @@ class DifyAdapter:
         return yaml.safe_load(raw)
 
     async def push_draft(self, dsl: Any, ctx: PushContext) -> DraftHandle:
-        raise NotImplementedError(
-            "Dify push_draft is first-customer-deferred (MVP scope; needs customer Dify endpoint)"
+        raise UnsupportedRuntimeOperation(
+            target=self.target,
+            version=self.version,
+            operation="push_draft",
+            reason="first-customer-deferred and needs a customer Dify endpoint",
         )
 
     async def publish(self, handle: DraftHandle, ctx: PublishContext) -> PublishHandle:
-        raise NotImplementedError("first-customer-deferred")
+        raise UnsupportedRuntimeOperation(
+            target=self.target, version=self.version, operation="publish", reason="first-customer-deferred"
+        )
 
     async def export_draft(self, draft_id: str) -> Any:
-        raise NotImplementedError("first-customer-deferred")
+        raise UnsupportedRuntimeOperation(
+            target=self.target, version=self.version, operation="export_draft", reason="first-customer-deferred"
+        )
 
     async def run_draft(self, draft_id: str, *, inputs: dict[str, Any]) -> dict[str, Any]:
-        raise NotImplementedError("first-customer-deferred")
+        raise UnsupportedRuntimeOperation(
+            target=self.target, version=self.version, operation="run_draft", reason="first-customer-deferred"
+        )
 
     def redlines(self) -> list[str]:
-        # Pinned Dify v1.14 native gaps; conformance baseline at first customer integration fills these in.
-        return []
+        return capability_redlines(self.target, self.version)

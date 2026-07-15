@@ -6,6 +6,7 @@ import pytest
 
 from loom.runtimes import registry
 from loom.runtimes.base import (
+    CompileContext,
     DraftHandle,
     PublishContext,
     PublishHandle,
@@ -26,8 +27,14 @@ class FakeAdapter:
     target = "fake"
     version = "0.0"
 
-    def compile(self, ir: Any) -> dict[str, bool]:
-        return {"ok": True}
+    def compile(
+        self,
+        ir: Any,
+        *,
+        context: CompileContext | None = None,
+    ) -> tuple[dict[str, bool], list[Any]]:
+        del ir, context
+        return {"ok": True}, []
 
     def reverse(self, dsl: Any) -> tuple[None, list[UnrecognizedConstruct]]:
         return None, []
