@@ -40,3 +40,30 @@ When real authentication lands, the backend must:
   rows to a stable actor id.
 - Future RBAC can reuse dependency injection seams without reshaping every route.
 - No deployment may treat `X-Actor-Id` as an authentication mechanism.
+
+## Update (2026-07-15): registry endpoint audit (H-11)
+
+Item 4 of the Decision section called for an audit of every endpoint once
+authentication landed. `loom/service/routes/registry.py` was the one surface
+still missing it: list/get returned every actor's rows, and `mark-deployed`
+accepted a workflow id from any authenticated actor regardless of who created
+it.
+
+That audit is now done for the registry routes:
+
+- `list` and `get` are scoped to the requesting actor's own rows
+  (`WorkflowRegistryStore` filters by `created_by_actor`, indexed).
+- `mark-deployed` requires the requesting actor to be the workflow's creator;
+  a mismatched or unknown workflow id returns 404 in both cases so existence
+  isn't leaked to a non-owning actor.
+- `mark-deployed` additionally checks the actor's role against an explicit
+  allow-list (`DEPLOY_CAPABLE_ROLES`), so a future non-deploying role (e.g. a
+  read-only viewer) is excluded without another code change.
+
+This remains a **single-admin-equivalent** limitation, not full RBAC: every
+authenticated actor still carries the same `role="fde"`, so today the role
+check above is a no-op and the real boundary is per-actor ownership, exactly
+as it already works for sessions, turns, and artifacts. Genuine multi-role
+authorization (distinct roles beyond ownership, admin override of another
+actor's rows) is still future work and should get its own ADR when real
+multi-tenant auth lands.

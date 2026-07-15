@@ -36,30 +36,30 @@ class WorkflowRegistryStore:
     def list(
         self,
         *,
+        actor_id: str,
         target: str | None = None,
         binding_handle: str | None = None,
     ) -> list[WorkflowRecord]:
         query = "SELECT * FROM workflow_records"
-        filters: list[str] = []
-        args: list[str] = []
+        filters: list[str] = ["created_by_actor = ?"]
+        args: list[str] = [actor_id]
         if target:
             filters.append("target = ?")
             args.append(target)
         if binding_handle:
             filters.append("binding_handle = ?")
             args.append(binding_handle)
-        if filters:
-            query += " WHERE " + " AND ".join(filters)
+        query += " WHERE " + " AND ".join(filters)
         query += " ORDER BY compiled_at DESC"
         with self._connect() as con:
             rows = con.execute(query, args).fetchall()
         return [_row_to_record(row) for row in rows]
 
-    def get(self, workflow_id: UUID | str) -> WorkflowRecord | None:
+    def get(self, workflow_id: UUID | str, *, actor_id: str) -> WorkflowRecord | None:
         with self._connect() as con:
             row = con.execute(
-                "SELECT * FROM workflow_records WHERE workflow_id = ?",
-                (str(workflow_id),),
+                "SELECT * FROM workflow_records WHERE workflow_id = ? AND created_by_actor = ?",
+                (str(workflow_id), actor_id),
             ).fetchone()
         return _row_to_record(row) if row else None
 
@@ -71,17 +71,20 @@ class WorkflowRegistryStore:
         deployment_note: str | None,
         deployed_by_actor: str,
     ) -> WorkflowRecord:
+        """Mark a workflow deployed. Only the owning actor may deploy their own workflow."""
         deployed_at = datetime.now(UTC).isoformat()
         with self._connect() as con:
-            con.execute(
+            cur = con.execute(
                 """
                 UPDATE workflow_records
                 SET platform_app_id = ?, deployment_note = ?, deployed_at = ?, deployed_by_actor = ?
-                WHERE workflow_id = ?
+                WHERE workflow_id = ? AND created_by_actor = ?
                 """,
-                (platform_app_id, deployment_note, deployed_at, deployed_by_actor, str(workflow_id)),
+                (platform_app_id, deployment_note, deployed_at, deployed_by_actor, str(workflow_id), deployed_by_actor),
             )
-        record = self.get(workflow_id)
+            if cur.rowcount == 0:
+                raise KeyError(f"workflow not found: {workflow_id}")
+        record = self.get(workflow_id, actor_id=deployed_by_actor)
         if record is None:
             raise KeyError(f"workflow not found: {workflow_id}")
         return record
@@ -116,6 +119,9 @@ class WorkflowRegistryStore:
                     deployed_by_actor TEXT
                 )
                 """
+            )
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS idx_workflow_records_owner ON workflow_records(created_by_actor)"
             )
 
 
