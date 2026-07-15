@@ -77,4 +77,51 @@ describe("FlowCanvas", () => {
 
     expect(onNodeSelect).toHaveBeenCalledWith("answer");
   });
+
+  describe("error and empty states", () => {
+    it("renders empty state message when IR is null", () => {
+      render(<FlowCanvas ir={null} selectedNodeId={null} onNodeSelect={vi.fn()} />);
+
+      expect(screen.getByText(/描述你的业务流程/)).toBeInTheDocument();
+    });
+
+    it("renders an error panel for a cycle in the IR graph", () => {
+      const cycleIR = {
+        nodes: [
+          { id: "start", type: "trigger", next: "answer" },
+          { id: "answer", type: "llm", next: "start" }
+        ]
+      };
+
+      render(<FlowCanvas ir={cycleIR} selectedNodeId={null} onNodeSelect={vi.fn()} />);
+
+      expect(screen.getByText("Flow 无法渲染")).toBeInTheDocument();
+    });
+
+    it("renders an error panel when the IR is missing a trigger node", () => {
+      const missingTriggerIR = {
+        nodes: [
+          { id: "answer", type: "llm" },
+          { id: "out", type: "output" }
+        ]
+      };
+
+      render(<FlowCanvas ir={missingTriggerIR} selectedNodeId={null} onNodeSelect={vi.fn()} />);
+
+      expect(screen.getByText("Flow 无法渲染")).toBeInTheDocument();
+    });
+
+    it("renders an error panel for an unsupported node type", () => {
+      const invalidTypeIR = {
+        nodes: [
+          { id: "start", type: "trigger" },
+          { id: "mystery", type: "teleport" }
+        ]
+      };
+
+      render(<FlowCanvas ir={invalidTypeIR} selectedNodeId={null} onNodeSelect={vi.fn()} />);
+
+      expect(screen.getByText("Flow 无法渲染")).toBeInTheDocument();
+    });
+  });
 });
