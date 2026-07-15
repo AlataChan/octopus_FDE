@@ -19,6 +19,7 @@ def plan(req: IntentRequest, *, client: PlannerClient | None = None) -> PlannerR
     t0 = time.monotonic()
     attempt = 0
     last_failures: list[FailureRecord] = []
+    intent = _intent_with_extra_context(req)
 
     while attempt < req.max_retries + 1:
         attempt += 1
@@ -26,7 +27,7 @@ def plan(req: IntentRequest, *, client: PlannerClient | None = None) -> PlannerR
         # policy and target-runtime redlines are persona/target-dependent. Skipping these
         # would silently regress Persona Brief enforcement on retry attempts.
         call = client.call(
-            intent=req.intent,
+            intent=intent,
             scope=req.scope,
             persona_brief=req.persona_brief,
             target=req.target,
@@ -58,6 +59,17 @@ def plan(req: IntentRequest, *, client: PlannerClient | None = None) -> PlannerR
     return PlannerResult(
         ir=None, attempts=attempt, ok=False, failures=last_failures,
         cost_usd=total_cost, latency_s=time.monotonic() - t0,
+    )
+
+
+def _intent_with_extra_context(req: IntentRequest) -> str:
+    if not req.extra_context:
+        return req.intent
+    return (
+        f"{req.intent}\n\n"
+        "# Existing workflow context\n"
+        f"{json.dumps(req.extra_context, ensure_ascii=False, sort_keys=True)}\n\n"
+        "Apply only the declared edit and preserve every field outside allowed_change_fields."
     )
 
 

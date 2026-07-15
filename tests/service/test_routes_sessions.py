@@ -1,13 +1,23 @@
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier, Event
 
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from loom.ir.models import IRDocument
-from loom.fde_session.brief import ComplianceBoundary, DataSourceRef, TriggerSpec, WorkflowBriefDraft
+from loom.fde_session.brief import (
+    ComplianceBoundary,
+    DataSourceRef,
+    TriggerSpec,
+    WorkflowBriefDraft,
+)
 from loom.fde_session.clarify_engine import ClarifyEngineResult, FakeClarifyEngine
+from loom.ir.models import IRDocument
+from loom.planner.client import CallResult
+from loom.planner.retry import plan as plan_with_retries
+from loom.planner.types import IntentRequest
 from loom.service.app import create_app
 from loom.service.deps import Settings
 
@@ -49,7 +59,18 @@ def _client(tmp_path, planner=None, clarify_engine=None) -> TestClient:
         fernet_key=Fernet.generate_key().decode(),
         binding_dir=bindings,
     )
-    return TestClient(create_app(settings=settings, planner=planner, clarify_engine=clarify_engine))
+    client = TestClient(create_app(settings=settings, planner=planner, clarify_engine=clarify_engine))
+    client.app.state.session_store.grant_binding_access(
+        tenant_id=settings.instance_id,
+        actor_id="single-user",
+        binding_handle="test",
+    )
+    client.app.state.session_store.grant_binding_access(
+        tenant_id=settings.instance_id,
+        actor_id="single-user",
+        binding_handle="demo",
+    )
+    return client
 
 
 def test_session_turn_compile_download_archive_and_registry_round_trip(tmp_path):
@@ -300,7 +321,7 @@ def test_questionnaire_submission_completes_to_brief_review_then_confirm_plans(t
     assert planned["status"] == "succeeded"
 
 
-def test_self_design_post_ir_edit_skips_clarify_and_runs_planner(tmp_path):
+def test_self_design_post_ir_edit_patches_existing_ir_without_planner(tmp_path):
     calls = {"planner": 0}
 
     def planner(**_kwargs):
@@ -318,8 +339,127 @@ def test_self_design_post_ir_edit_skips_clarify_and_runs_planner(tmp_path):
     ).json()
 
     assert turn["kind"] == "plan"
+    assert turn["status"] == "succeeded"
     assert turn["clarify_question"] is None
-    assert calls["planner"] == 1
+    assert calls["planner"] == 0
+    updated = client.get(f"/v1/sessions/{sid}/ir").json()["ir"]
+    assert len(updated["nodes"]) == len(_sample_ir().nodes)
+    assert next(node for node in updated["nodes"] if node["id"] == "retrieve")["top_k"] == 8
+
+
+def test_existing_ir_planner_edit_rejects_changes_outside_declared_scope(tmp_path):
+    received_context = {}
+
+    def planner(**kwargs):
+        received_context.update(kwargs["extra_context"])
+        ir = _sample_ir()
+        metadata = ir.metadata.model_copy(update={"name": "unauthorized rewrite"})
+        return ir.model_copy(update={"metadata": metadata})
+
+    client = _client(tmp_path, planner=planner)
+    sid = client.post(
+        "/v1/sessions",
+        json={"template_id": "knowledge-retrieval-rag", "scope": "ecommerce/kb"},
+    ).json()["session_id"]
+    before = client.get(f"/v1/sessions/{sid}").json()["latest_ir_sha256"]
+
+    response = client.post(
+        f"/v1/sessions/{sid}/turns",
+        json={"user_message": "manual review after retrieve reviewer ops"},
+    )
+
+    assert response.status_code == 400
+    assert "declared edit scope" in response.text
+    assert client.get(f"/v1/sessions/{sid}").json()["latest_ir_sha256"] == before
+    assert received_context["base_ir_sha256"] == before
+    assert received_context["parsed_edit"]["kind"] == "add_manual_review_gate"
+    assert received_context["workflow_brief"] is None
+    assert received_context["allowed_change_fields"] == [
+        "nodes.manual_review_after_retrieve",
+        "edges",
+    ]
+
+
+def test_manual_review_edit_rejects_unrelated_edge_rewrite(tmp_path):
+    def planner(**kwargs):
+        raw = json.loads(json.dumps(kwargs["extra_context"]["current_ir"]))
+        gate_id = "manual_review_after_retrieve"
+        raw["nodes"].append(
+            {
+                "id": gate_id,
+                "type": "code",
+                "language": "python",
+                "source": "raise RuntimeError('manual_review_required')",
+                "rationale": "Blocking manual review gate requiring approval from ops.",
+            }
+        )
+        outgoing = next(edge for edge in raw["edges"] if edge["from"] == "retrieve")
+        raw["edges"].remove(outgoing)
+        raw["edges"].extend(
+            [
+                {"from": "retrieve", "to": gate_id},
+                {"from": gate_id, "to": outgoing["to"]},
+            ]
+        )
+        next(edge for edge in raw["edges"] if edge["from"] == "start")["data"] = False
+        return IRDocument.model_validate(raw)
+
+    client = _client(tmp_path, planner=planner)
+    sid = client.post(
+        "/v1/sessions",
+        json={"template_id": "knowledge-retrieval-rag", "scope": "ecommerce/kb"},
+    ).json()["session_id"]
+    before = client.get(f"/v1/sessions/{sid}").json()["latest_ir_sha256"]
+
+    response = client.post(
+        f"/v1/sessions/{sid}/turns",
+        json={"user_message": "manual review after retrieve reviewer ops"},
+    )
+
+    assert response.status_code == 400
+    assert "declared edit scope" in response.text
+    assert client.get(f"/v1/sessions/{sid}").json()["latest_ir_sha256"] == before
+
+
+def test_planner_retry_threads_extra_context_through_every_attempt():
+    good = _sample_ir().model_dump(by_alias=True, exclude_none=True)
+    bad = json.loads(json.dumps(good))
+    del bad["nodes"][1]["rationale"]
+
+    class FakeClient:
+        def __init__(self):
+            self.intents = []
+            self.outputs = iter([bad, good])
+
+        def call(self, **kwargs):
+            self.intents.append(kwargs["intent"])
+            return CallResult(
+                ir_text=json.dumps(next(self.outputs)),
+                cost_usd=0.0,
+                latency_s=0.0,
+            )
+
+    fake = FakeClient()
+    context = {
+        "base_ir_sha256": "abc123",
+        "allowed_change_fields": ["nodes.retrieve.top_k"],
+        "current_ir": {"nodes": [{"id": "retrieve", "top_k": 20}]},
+    }
+
+    result = plan_with_retries(
+        IntentRequest(
+            intent="set retrieve top_k 8",
+            scope="ecommerce/kb",
+            max_retries=1,
+            extra_context=context,
+        ),
+        client=fake,
+    )
+
+    assert result.ok
+    assert len(fake.intents) == 2
+    assert all("# Existing workflow context" in intent for intent in fake.intents)
+    assert all('"base_ir_sha256": "abc123"' in intent for intent in fake.intents)
 
 
 def test_turn_failure_keeps_latest_ir_pointer(tmp_path):
@@ -348,7 +488,10 @@ def test_turn_failure_keeps_latest_ir_pointer(tmp_path):
     before = before_session["latest_ir_sha256"]
     assert before_session["state"] == "validated"
 
-    failed = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "change retriever top_k 9"}).json()
+    failed = client.post(
+        f"/v1/sessions/{sid}/turns",
+        json={"user_message": "manual review after retrieve reviewer ops"},
+    ).json()
     after_session = client.get(f"/v1/sessions/{sid}").json()
     after = after_session["latest_ir_sha256"]
     assert failed["status"] == "failed"
@@ -356,9 +499,15 @@ def test_turn_failure_keeps_latest_ir_pointer(tmp_path):
     assert after_session["state"] == before_session["state"]
 
 
-def test_planner_exception_is_not_reflected_to_client_or_db(tmp_path):
+def test_planner_exception_is_not_reflected_to_client_db_or_logs(tmp_path, capsys):
+    secret_fragments = [
+        "https://example.com/secret?token=xyz",
+        "Authorization: Bearer top-secret-token",
+        "-----BEGIN PRIVATE KEY-----",
+    ]
+
     def planner(**_kwargs):
-        raise RuntimeError("boom https://example.com/secret?token=xyz")
+        raise RuntimeError("boom " + " ".join(secret_fragments))
 
     clarify_engine = FakeClarifyEngine([
         ClarifyEngineResult(intent_update=_complete_draft().model_dump(mode="json"), next_action="ready"),
@@ -385,6 +534,11 @@ def test_planner_exception_is_not_reflected_to_client_or_db(tmp_path):
     assert rows[-1].error_correlation_id in archive
     assert "example.com" not in archive
     assert "token=xyz" not in archive
+    captured = capsys.readouterr()
+    for secret in secret_fragments:
+        assert secret not in captured.err
+    assert "error_code=planner_error" in captured.err
+    assert "error_type=RuntimeError" in captured.err
 
 
 def test_artifact_path_traversal_is_not_part_of_api(tmp_path):
@@ -392,6 +546,130 @@ def test_artifact_path_traversal_is_not_part_of_api(tmp_path):
     sid = client.post("/v1/sessions", json={}).json()["session_id"]
     resp = client.get(f"/v1/sessions/{sid}/artifacts/../../pyproject.toml")
     assert resp.status_code in {404, 422}
+
+
+def test_compile_binding_rejects_path_traversal(tmp_path):
+    client = _client(tmp_path)
+    sid = client.post(
+        "/v1/sessions",
+        json={"template_id": "knowledge-retrieval-rag", "scope": "ecommerce/kb"},
+    ).json()["session_id"]
+    outside = tmp_path / "outside.hiagent.yaml"
+    outside.write_text((ROOT / "tests" / "fixtures" / "test.hiagent.yaml").read_text())
+
+    response = client.post(
+        f"/v1/sessions/{sid}/compile",
+        json={"target": "hiagent", "mode": "chatflow", "binding": "../outside"},
+    )
+
+    assert response.status_code in {400, 422}
+    assert "binding" in response.text.lower()
+    assert client.get(f"/v1/sessions/{sid}/artifacts").json() == []
+
+
+def test_compile_binding_rejects_symlink(tmp_path):
+    client = _client(tmp_path)
+    sid = client.post(
+        "/v1/sessions",
+        json={"template_id": "knowledge-retrieval-rag", "scope": "ecommerce/kb"},
+    ).json()["session_id"]
+    outside = tmp_path / "outside.hiagent.yaml"
+    outside.write_text((ROOT / "tests" / "fixtures" / "test.hiagent.yaml").read_text())
+    (client.app.state.settings.binding_dir / "linked.hiagent.yaml").symlink_to(outside)
+
+    response = client.post(
+        f"/v1/sessions/{sid}/compile",
+        json={"target": "hiagent", "mode": "chatflow", "binding": "linked"},
+    )
+
+    assert response.status_code == 400
+    assert "binding" in response.text.lower()
+    assert client.get(f"/v1/sessions/{sid}/artifacts").json() == []
+
+
+def test_concurrent_turns_return_conflict_instead_of_losing_update(tmp_path):
+    barrier = Barrier(2)
+
+    def planner(*, extra_context: dict, **_kwargs):
+        barrier.wait(timeout=5)
+        raw = json.loads(json.dumps(extra_context["current_ir"]))
+        contract = extra_context["manual_review_gate_contract"]
+        review_id = contract["gate_id"]
+        raw["nodes"].append(contract["gate_node"])
+        original_edge = next(
+            edge for edge in raw["edges"] if edge["from"] == contract["after_node_id"]
+        )
+        raw["edges"].remove(original_edge)
+        raw["edges"].extend(
+            [
+                {"from": original_edge["from"], "to": review_id},
+                {"from": review_id, "to": original_edge["to"]},
+            ]
+        )
+        return IRDocument.model_validate(raw)
+
+    client = _client(tmp_path, planner=planner)
+    sid = client.post(
+        "/v1/sessions",
+        json={"template_id": "knowledge-retrieval-rag", "scope": "ecommerce/kb"},
+    ).json()["session_id"]
+
+    def submit(message: str):
+        return client.post(f"/v1/sessions/{sid}/turns", json={"user_message": message})
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(
+            pool.map(
+                submit,
+                [
+                    "manual review after retrieve reviewer alpha",
+                    "manual review after retrieve reviewer beta",
+                ],
+            )
+        )
+
+    assert sorted(response.status_code for response in responses) == [200, 409]
+    turns = client.app.state.session_store.list_turns(sid, actor_id="single-user")
+    assert sum(turn.status == "succeeded" for turn in turns[-2:]) == 1
+    assert sum(turn.status == "failed" for turn in turns[-2:]) == 1
+
+
+def test_turn_creation_rejects_session_changed_after_route_read(tmp_path):
+    client = _client(tmp_path, planner=lambda **_kwargs: _sample_ir())
+    sid = client.post(
+        "/v1/sessions",
+        json={"template_id": "knowledge-retrieval-rag", "scope": "ecommerce/kb"},
+    ).json()["session_id"]
+    store = client.app.state.session_store
+    original_create_turn = store.create_turn
+    route_reached_create = Event()
+    allow_create = Event()
+
+    def delayed_create_turn(*args, **kwargs):
+        route_reached_create.set()
+        assert allow_create.wait(timeout=5)
+        return original_create_turn(*args, **kwargs)
+
+    store.create_turn = delayed_create_turn
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            client.post,
+            f"/v1/sessions/{sid}/turns",
+            json={"user_message": "retrieve top_k 8"},
+        )
+        assert route_reached_create.wait(timeout=5)
+        current = store.get_session(sid, actor_id="single-user")
+        assert current is not None and current.latest_ir_json is not None
+        replacement = json.loads(current.latest_ir_json)
+        next(node for node in replacement["nodes"] if node["id"] == "retrieve")["top_k"] = 6
+        replacement_json = json.dumps(replacement, ensure_ascii=False, sort_keys=True)
+        store.update_latest_ir(sid, actor_id="single-user", ir_json=replacement_json)
+        allow_create.set()
+        response = future.result(timeout=10)
+
+    assert response.status_code == 409
+    latest = client.get(f"/v1/sessions/{sid}/ir").json()["ir"]
+    assert next(node for node in latest["nodes"] if node["id"] == "retrieve")["top_k"] == 6
 
 
 def test_compile_rejects_init_session(tmp_path):
@@ -412,6 +690,26 @@ def test_bindings_route_returns_handles_not_raw_yaml(tmp_path):
         {"handle": "test", "target": "hiagent", "display_name": "test"},
     ]
     assert "workspace_id" not in rows[0]
+
+
+def test_binding_catalog_and_compile_are_actor_scoped(tmp_path):
+    client = _client(tmp_path)
+    headers = {"X-Actor-Id": "other-actor"}
+    assert client.get("/v1/bindings", headers=headers).json() == []
+    sid = client.post(
+        "/v1/sessions",
+        headers=headers,
+        json={"template_id": "knowledge-retrieval-rag", "scope": "ecommerce/kb"},
+    ).json()["session_id"]
+
+    response = client.post(
+        f"/v1/sessions/{sid}/compile",
+        headers=headers,
+        json={"target": "dify", "binding": "demo"},
+    )
+
+    assert response.status_code == 400
+    assert "binding" in response.text.lower()
 
 
 def test_download_artifact_with_non_ascii_filename(tmp_path):
@@ -478,7 +776,7 @@ def test_create_session_from_template_seeds_validated_ir_and_sentinel_turn(tmp_p
     assert "template_seeded" in archive
 
 
-def test_template_session_follow_up_turn_does_not_enter_clarify(tmp_path):
+def test_template_session_unrecognized_follow_up_is_rejected_without_planner(tmp_path):
     calls = {"planner": 0}
 
     def planner(**_kwargs):
@@ -491,10 +789,11 @@ def test_template_session_follow_up_turn_does_not_enter_clarify(tmp_path):
         json={"template_id": "knowledge-retrieval-rag", "scope": "ecommerce/kb"},
     ).json()["session_id"]
 
-    turn = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "adjust it"}).json()
+    response = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "adjust it"})
 
-    assert turn["kind"] == "plan"
-    assert calls["planner"] == 1
+    assert response.status_code == 400
+    assert "not recognized" in response.text
+    assert calls["planner"] == 0
 
 
 def test_blank_session_is_marked_self_design_and_enters_clarify(tmp_path):

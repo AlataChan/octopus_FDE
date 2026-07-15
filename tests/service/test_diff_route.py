@@ -4,7 +4,12 @@ from pathlib import Path
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from loom.fde_session.brief import ComplianceBoundary, DataSourceRef, TriggerSpec, WorkflowBriefDraft
+from loom.fde_session.brief import (
+    ComplianceBoundary,
+    DataSourceRef,
+    TriggerSpec,
+    WorkflowBriefDraft,
+)
 from loom.fde_session.clarify_engine import ClarifyEngineResult, FakeClarifyEngine
 from loom.ir.models import IRDocument
 from loom.service.app import create_app
@@ -50,19 +55,7 @@ def _client(tmp_path, planner, clarify_engine=None) -> TestClient:
 
 def test_diff_route_uses_turn_snapshots(tmp_path):
     first = _sample_ir()
-    second = json.loads(json.dumps(first))
-    second["nodes"][1]["top_k"] = 5
-    second["nodes"].append(
-        {
-            "id": "format_answer",
-            "type": "code",
-            "language": "python",
-            "source": "return {'answer': inputs['answer']}",
-            "inputs": {"answer": "${answer.answer}"},
-            "rationale": "Format answer payload.",
-        }
-    )
-    calls = iter([IRDocument.model_validate(first), IRDocument.model_validate(second)])
+    calls = iter([IRDocument.model_validate(first)])
 
     def planner(**kwargs):
         return next(calls)
@@ -93,7 +86,7 @@ def test_diff_route_uses_turn_snapshots(tmp_path):
     payload = response.json()
     assert payload["from"] == turn_a["turn_id"]
     assert payload["to"] == turn_b["turn_id"]
-    assert any(c["kind"] == "added" and c["node_id"] == "format_answer" for c in payload["changes"])
+    assert not any(c["kind"] in {"added", "removed"} for c in payload["changes"])
     retrieve = next(c for c in payload["changes"] if c.get("node_id") == "retrieve")
     assert retrieve["fields"] == [{"path": "top_k", "before": 20, "after": 5}]
 

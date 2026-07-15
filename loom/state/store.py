@@ -4,19 +4,24 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from collections.abc import Callable
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003
-from typing import Callable, Literal
+from typing import Literal
 from uuid import UUID, uuid4
 
 from cryptography.fernet import Fernet  # noqa: TC002
 
+from loom.runtimes.warnings import CompileWarning
 from loom.state.models import ActorLLMConfigRow, ArtifactRow, SessionRow, TurnKind, TurnRow
 from loom.state.sm import SessionState, transition
-from loom.runtimes.warnings import CompileWarning
 
 AuditEventWriter = Callable[[UUID, list[tuple[str, dict[str, object]]]], None]
+
+
+class StaleSessionRevision(RuntimeError):
+    """Raised when a turn tries to replace an IR newer than its base revision."""
 
 
 class SessionStore:
@@ -194,12 +199,21 @@ class SessionStore:
         return [_session_row(row) for row in rows]
 
     def get_session(self, session_id: UUID | str, *, actor_id: str) -> SessionRow | None:
+        snapshot = self.get_session_with_revision(session_id, actor_id=actor_id)
+        return snapshot[0] if snapshot is not None else None
+
+    def get_session_with_revision(
+        self,
+        session_id: UUID | str,
+        *,
+        actor_id: str,
+    ) -> tuple[SessionRow, int] | None:
         with self._connect() as con:
             row = con.execute(
                 "SELECT * FROM sessions WHERE session_id = ? AND actor_id = ?",
                 (str(session_id), actor_id),
             ).fetchone()
-        return _session_row(row) if row else None
+        return (_session_row(row), int(row["revision"])) if row else None
 
     def update_session_title(
         self,
@@ -272,7 +286,8 @@ class SessionStore:
                 """
                 UPDATE sessions
                 SET state = ?, llm_api_key_encrypted = ?, llm_base_url = ?,
-                    llm_model = ?, llm_key_version = 1, updated_at = ?
+                    llm_model = ?, llm_key_version = 1, revision = revision + 1,
+                    updated_at = ?
                 WHERE session_id = ? AND actor_id = ?
                 """,
                 (state, encrypted, base_url, model, _now(), str(session_id), actor_id),
@@ -285,7 +300,8 @@ class SessionStore:
             con.execute(
                 """
                 UPDATE sessions
-                SET latest_ir_json = ?, latest_ir_sha256 = ?, updated_at = ?
+                SET latest_ir_json = ?, latest_ir_sha256 = ?, revision = revision + 1,
+                    updated_at = ?
                 WHERE session_id = ? AND actor_id = ?
                 """,
                 (ir_json, digest, _now(), str(session_id), actor_id),
@@ -307,7 +323,8 @@ class SessionStore:
                 con.execute(
                     """
                     UPDATE sessions
-                    SET target_runtime = ?, scope = ?, updated_at = ?
+                    SET target_runtime = ?, scope = ?, revision = revision + 1,
+                        updated_at = ?
                     WHERE session_id = ? AND actor_id = ?
                     """,
                     (target_runtime, scope, _now(), str(session_id), actor_id),
@@ -316,7 +333,8 @@ class SessionStore:
                 con.execute(
                     """
                     UPDATE sessions
-                    SET target_runtime = ?, scope = ?, self_design = ?, updated_at = ?
+                    SET target_runtime = ?, scope = ?, self_design = ?,
+                        revision = revision + 1, updated_at = ?
                     WHERE session_id = ? AND actor_id = ?
                     """,
                     (target_runtime, scope, int(self_design), _now(), str(session_id), actor_id),
@@ -342,7 +360,7 @@ class SessionStore:
                 """
                 UPDATE sessions
                 SET brief_draft = ?, clarify_round = ?, target_runtime = ?,
-                    scope = ?, updated_at = ?
+                    scope = ?, revision = revision + 1, updated_at = ?
                 WHERE session_id = ? AND actor_id = ?
                 """,
                 (brief_draft, clarify_round, target_runtime, scope, _now(), str(session_id), actor_id),
@@ -360,21 +378,62 @@ class SessionStore:
         ir_before: str | None,
         kind: TurnKind = "plan",
         brief_before: str | None = None,
+        expected_revision: int | None = None,
     ) -> TurnRow:
         self._ensure_writable()
-        self.require_session(session_id, actor_id=actor_id)
         turn_id = uuid4()
         now = _now()
         with self._connect() as con:
+            session = con.execute(
+                """
+                SELECT latest_ir_json, latest_ir_sha256, revision
+                FROM sessions
+                WHERE session_id = ? AND actor_id = ?
+                """,
+                (str(session_id), actor_id),
+            ).fetchone()
+            if session is None:
+                raise KeyError(f"session not found: {session_id}")
+            if expected_revision is not None and session["revision"] != expected_revision:
+                raise StaleSessionRevision(
+                    f"session changed before turn creation: {session_id}"
+                )
+            expected_hash = (
+                hashlib.sha256(ir_before.encode("utf-8")).hexdigest()
+                if ir_before is not None
+                else None
+            )
+            current_hash = session["latest_ir_sha256"]
+            if current_hash is None and session["latest_ir_json"] is not None:
+                current_hash = hashlib.sha256(
+                    session["latest_ir_json"].encode("utf-8")
+                ).hexdigest()
+            if expected_hash != current_hash:
+                raise StaleSessionRevision(
+                    f"session changed before turn creation: {session_id}"
+                )
             con.execute(
                 """
                 INSERT INTO turns (
                     turn_id, session_id, actor_id, user_message, ir_before,
-                    kind, brief_before, validation_errors, status, created_at
+                    kind, brief_before, base_revision, base_ir_sha256,
+                    validation_errors, status, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)
                 """,
-                (str(turn_id), str(session_id), actor_id, user_message, ir_before, kind, brief_before, "[]", now),
+                (
+                    str(turn_id),
+                    str(session_id),
+                    actor_id,
+                    user_message,
+                    session["latest_ir_json"] if session["latest_ir_json"] is not None else ir_before,
+                    kind,
+                    brief_before,
+                    session["revision"],
+                    session["latest_ir_sha256"],
+                    "[]",
+                    now,
+                ),
             )
         row = self.get_turn(turn_id, actor_id=actor_id)
         assert row is not None
@@ -390,29 +449,64 @@ class SessionStore:
         brief_after: str | None = None,
     ) -> TurnRow:
         self._ensure_writable()
-        turn = self.require_turn(turn_id, actor_id=actor_id)
         digest = hashlib.sha256(ir_after.encode("utf-8")).hexdigest()
         now = _now()
+        stale = False
         with self._connect() as con:
-            con.execute(
+            turn = con.execute(
                 """
-                UPDATE turns
-                SET status = 'succeeded', kind = 'plan', planner_reply = ?,
-                    ir_after = ?, brief_after = ?, validation_errors = '[]'
+                SELECT session_id, base_revision, status
+                FROM turns
                 WHERE turn_id = ? AND actor_id = ?
                 """,
-                (planner_reply, ir_after, brief_after, str(turn_id), actor_id),
-            )
-            con.execute(
+                (str(turn_id), actor_id),
+            ).fetchone()
+            if turn is None:
+                raise KeyError(f"turn not found: {turn_id}")
+            if turn["status"] != "running":
+                raise ValueError(f"turn is already finished: {turn_id}")
+            updated = con.execute(
                 """
                 UPDATE sessions
                 SET state = ?, latest_ir_json = ?, latest_ir_sha256 = ?,
                     brief_draft = COALESCE(?, brief_draft), clarify_round = 0,
-                    updated_at = ?
-                WHERE session_id = ? AND actor_id = ?
+                    revision = revision + 1, updated_at = ?
+                WHERE session_id = ? AND actor_id = ? AND revision = ?
                 """,
-                (SessionState.VALIDATED.value, ir_after, digest, brief_after, now, str(turn.session_id), actor_id),
+                (
+                    SessionState.VALIDATED.value,
+                    ir_after,
+                    digest,
+                    brief_after,
+                    now,
+                    turn["session_id"],
+                    actor_id,
+                    turn["base_revision"],
+                ),
             )
+            if updated.rowcount != 1:
+                stale = True
+                con.execute(
+                    """
+                    UPDATE turns
+                    SET status = 'failed', planner_reply = 'conflict',
+                        validation_errors = '["stale_session_revision"]'
+                    WHERE turn_id = ? AND actor_id = ? AND status = 'running'
+                    """,
+                    (str(turn_id), actor_id),
+                )
+            else:
+                con.execute(
+                """
+                UPDATE turns
+                SET status = 'succeeded', kind = 'plan', planner_reply = ?,
+                    ir_after = ?, brief_after = ?, validation_errors = '[]'
+                WHERE turn_id = ? AND actor_id = ? AND status = 'running'
+                """,
+                (planner_reply, ir_after, brief_after, str(turn_id), actor_id),
+            )
+        if stale:
+            raise StaleSessionRevision(f"stale session revision for turn {turn_id}")
         row = self.get_turn(turn_id, actor_id=actor_id)
         assert row is not None
         return row
@@ -432,28 +526,63 @@ class SessionStore:
         scope: str | None,
     ) -> TurnRow:
         self._ensure_writable()
-        turn = self.require_turn(turn_id, actor_id=actor_id)
         now = _now()
+        stale = False
         with self._connect() as con:
-            con.execute(
+            turn = con.execute(
+                """
+                SELECT session_id, base_revision, status
+                FROM turns
+                WHERE turn_id = ? AND actor_id = ?
+                """,
+                (str(turn_id), actor_id),
+            ).fetchone()
+            if turn is None:
+                raise KeyError(f"turn not found: {turn_id}")
+            if turn["status"] != "running":
+                raise ValueError(f"turn is already finished: {turn_id}")
+            updated = con.execute(
+                """
+                UPDATE sessions
+                SET brief_draft = ?, clarify_round = ?, target_runtime = ?,
+                    scope = ?, revision = revision + 1, updated_at = ?
+                WHERE session_id = ? AND actor_id = ? AND revision = ?
+                """,
+                (
+                    brief_after,
+                    clarify_round,
+                    target_runtime,
+                    scope,
+                    now,
+                    turn["session_id"],
+                    actor_id,
+                    turn["base_revision"],
+                ),
+            )
+            if updated.rowcount != 1:
+                stale = True
+                con.execute(
+                    """
+                    UPDATE turns
+                    SET status = 'failed', planner_reply = 'conflict',
+                        validation_errors = '["stale_session_revision"]'
+                    WHERE turn_id = ? AND actor_id = ? AND status = 'running'
+                    """,
+                    (str(turn_id), actor_id),
+                )
+            else:
+                con.execute(
                 """
                 UPDATE turns
                 SET status = 'succeeded', kind = ?, planner_reply = ?,
                     clarify_question = ?, brief_before = ?, brief_after = ?,
                     validation_errors = '[]'
-                WHERE turn_id = ? AND actor_id = ?
+                WHERE turn_id = ? AND actor_id = ? AND status = 'running'
                 """,
                 (kind, planner_reply, clarify_question, brief_before, brief_after, str(turn_id), actor_id),
             )
-            con.execute(
-                """
-                UPDATE sessions
-                SET brief_draft = ?, clarify_round = ?, target_runtime = ?,
-                    scope = ?, updated_at = ?
-                WHERE session_id = ? AND actor_id = ?
-                """,
-                (brief_after, clarify_round, target_runtime, scope, now, str(turn.session_id), actor_id),
-            )
+        if stale:
+            raise StaleSessionRevision(f"stale session revision for turn {turn_id}")
         row = self.get_turn(turn_id, actor_id=actor_id)
         assert row is not None
         return row
@@ -470,28 +599,62 @@ class SessionStore:
         scope: str | None,
     ) -> TurnRow:
         self._ensure_writable()
-        turn = self.require_turn(turn_id, actor_id=actor_id)
         now = _now()
+        stale = False
         with self._connect() as con:
-            con.execute(
+            turn = con.execute(
+                """
+                SELECT session_id, base_revision, status
+                FROM turns
+                WHERE turn_id = ? AND actor_id = ?
+                """,
+                (str(turn_id), actor_id),
+            ).fetchone()
+            if turn is None:
+                raise KeyError(f"turn not found: {turn_id}")
+            if turn["status"] != "running":
+                raise ValueError(f"turn is already finished: {turn_id}")
+            updated = con.execute(
+                """
+                UPDATE sessions
+                SET brief_draft = ?, clarify_round = 0, target_runtime = ?,
+                    scope = ?, revision = revision + 1, updated_at = ?
+                WHERE session_id = ? AND actor_id = ? AND revision = ?
+                """,
+                (
+                    brief_after,
+                    target_runtime,
+                    scope,
+                    now,
+                    turn["session_id"],
+                    actor_id,
+                    turn["base_revision"],
+                ),
+            )
+            if updated.rowcount != 1:
+                stale = True
+                con.execute(
+                    """
+                    UPDATE turns
+                    SET status = 'failed', planner_reply = 'conflict',
+                        validation_errors = '["stale_session_revision"]'
+                    WHERE turn_id = ? AND actor_id = ? AND status = 'running'
+                    """,
+                    (str(turn_id), actor_id),
+                )
+            else:
+                con.execute(
                 """
                 UPDATE turns
                 SET status = 'succeeded', kind = 'brief_review', planner_reply = ?,
                     clarify_question = NULL, brief_before = ?, brief_after = ?,
                     validation_errors = '[]'
-                WHERE turn_id = ? AND actor_id = ?
+                WHERE turn_id = ? AND actor_id = ? AND status = 'running'
                 """,
                 (planner_reply, brief_before, brief_after, str(turn_id), actor_id),
             )
-            con.execute(
-                """
-                UPDATE sessions
-                SET brief_draft = ?, clarify_round = 0, target_runtime = ?,
-                    scope = ?, updated_at = ?
-                WHERE session_id = ? AND actor_id = ?
-                """,
-                (brief_after, target_runtime, scope, now, str(turn.session_id), actor_id),
-            )
+        if stale:
+            raise StaleSessionRevision(f"stale session revision for turn {turn_id}")
         row = self.get_turn(turn_id, actor_id=actor_id)
         assert row is not None
         return row
@@ -528,6 +691,58 @@ class SessionStore:
                 (str(session_id), actor_id),
             ).fetchall()
         return [_turn_row(row) for row in rows]
+
+    def grant_binding_access(
+        self,
+        *,
+        tenant_id: str,
+        actor_id: str,
+        binding_handle: str,
+    ) -> None:
+        self._ensure_writable()
+        with self._connect() as con:
+            con.execute(
+                """
+                INSERT OR IGNORE INTO binding_grants (
+                    tenant_id, actor_id, binding_handle, created_at
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (tenant_id, actor_id, binding_handle, _now()),
+            )
+
+    def binding_is_authorized(
+        self,
+        *,
+        tenant_id: str,
+        actor_id: str,
+        binding_handle: str,
+    ) -> bool:
+        with self._connect() as con:
+            row = con.execute(
+                """
+                SELECT 1 FROM binding_grants
+                WHERE tenant_id = ? AND actor_id = ? AND binding_handle = ?
+                """,
+                (tenant_id, actor_id, binding_handle),
+            ).fetchone()
+        return row is not None
+
+    def list_authorized_binding_handles(
+        self,
+        *,
+        tenant_id: str,
+        actor_id: str,
+    ) -> set[str]:
+        with self._connect() as con:
+            rows = con.execute(
+                """
+                SELECT binding_handle FROM binding_grants
+                WHERE tenant_id = ? AND actor_id = ?
+                """,
+                (tenant_id, actor_id),
+            ).fetchall()
+        return {str(row["binding_handle"]) for row in rows}
 
     def get_turn(self, turn_id: UUID | str, *, actor_id: str) -> TurnRow | None:
         with self._connect() as con:
@@ -672,6 +887,7 @@ class SessionStore:
                     brief_draft TEXT,
                     clarify_round INTEGER NOT NULL DEFAULT 0,
                     self_design INTEGER NOT NULL DEFAULT 0,
+                    revision INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -688,6 +904,8 @@ class SessionStore:
                     brief_before TEXT,
                     brief_after TEXT,
                     error_correlation_id TEXT,
+                    base_revision INTEGER NOT NULL DEFAULT 0,
+                    base_ir_sha256 TEXT,
                     validation_errors TEXT NOT NULL,
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL
@@ -718,6 +936,13 @@ class SessionStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS binding_grants (
+                    tenant_id TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    binding_handle TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (tenant_id, actor_id, binding_handle)
+                );
                 """
             )
             columns = {row["name"] for row in con.execute("PRAGMA table_info(artifacts)").fetchall()}
@@ -736,6 +961,8 @@ class SessionStore:
                 con.execute("ALTER TABLE sessions ADD COLUMN clarify_round INTEGER NOT NULL DEFAULT 0")
             if "self_design" not in session_columns:
                 con.execute("ALTER TABLE sessions ADD COLUMN self_design INTEGER NOT NULL DEFAULT 0")
+            if "revision" not in session_columns:
+                con.execute("ALTER TABLE sessions ADD COLUMN revision INTEGER NOT NULL DEFAULT 0")
             turn_columns = {row["name"] for row in con.execute("PRAGMA table_info(turns)").fetchall()}
             if "kind" not in turn_columns:
                 con.execute("ALTER TABLE turns ADD COLUMN kind TEXT NOT NULL DEFAULT 'plan'")
@@ -747,6 +974,10 @@ class SessionStore:
                 con.execute("ALTER TABLE turns ADD COLUMN brief_after TEXT")
             if "error_correlation_id" not in turn_columns:
                 con.execute("ALTER TABLE turns ADD COLUMN error_correlation_id TEXT")
+            if "base_revision" not in turn_columns:
+                con.execute("ALTER TABLE turns ADD COLUMN base_revision INTEGER NOT NULL DEFAULT 0")
+            if "base_ir_sha256" not in turn_columns:
+                con.execute("ALTER TABLE turns ADD COLUMN base_ir_sha256 TEXT")
 
     @staticmethod
     def _get_actor_llm_config_con(
