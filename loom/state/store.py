@@ -408,7 +408,7 @@ class SessionStore:
                 current_hash = hashlib.sha256(
                     session["latest_ir_json"].encode("utf-8")
                 ).hexdigest()
-            if expected_hash != current_hash:
+            if current_hash is not None and expected_hash != current_hash:
                 raise StaleSessionRevision(
                     f"session changed before turn creation: {session_id}"
                 )
