@@ -168,6 +168,7 @@ def _llm_data(node: LLMNode, ctx: EmitContext) -> dict[str, Any]:
         "memory": None,
         "model": {
             **DEFAULT_MODEL,
+            "name": node.model,
             "completion_params": {
                 "temperature": node.temperature if node.temperature is not None else 0.7,
             },

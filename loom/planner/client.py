@@ -19,6 +19,8 @@ from openai import OpenAI
 
 from loom.ir.schema import load_schema
 from loom.planner.scope import render_registry_block
+from loom.runtimes import registry as runtime_registry
+from loom.runtimes.bootstrap import register_all as register_runtime_adapters
 from loom.validator.registry import Registry
 
 if TYPE_CHECKING:
@@ -53,7 +55,15 @@ def render_persona_block(persona: PersonaBrief | None) -> str:
 
 
 def render_target_block(target: str) -> str:
-    return f"# Target runtime\nThe deployment target is **{target}**. Both runtimes implement the same IR contract; do not emit features the chosen runtime cannot honor [see runtime adapter docs]."
+    register_runtime_adapters()
+    adapter = runtime_registry.get(target)
+    redlines = adapter.redlines()
+    gap_text = "\n".join(f"- {item}" for item in redlines) or "- none"
+    return (
+        f"# Target runtime\nThe deployment target is **{target}** ({adapter.version}). "
+        "Runtime capabilities differ; do not emit any construct listed below.\n"
+        f"## Blocking runtime redlines\n{gap_text}"
+    )
 
 
 class PlannerClient:

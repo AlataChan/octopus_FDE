@@ -18,8 +18,8 @@ from pydantic import BaseModel, Field
 from loom.diff.ir_diff import diff_ir
 from loom.fde_session.brief import WorkflowBriefDraft
 from loom.fde_session.clarify_engine import (
-    ClarifyQuestion,
     QUESTIONNAIRE_AFTER_ROUNDS,
+    ClarifyQuestion,
     next_blocking_questions,
 )
 from loom.fde_session.edit_intent import parse_edit_intent
@@ -27,9 +27,10 @@ from loom.fde_session.redaction import has_potential_secret, redact_draft, redac
 from loom.ir.canonicalize import canonical_ir_hash
 from loom.ir.models import IRDocument
 from loom.registry.models import WorkflowRecord
-from loom.runtimes.dify.v1_14.compiler import compile_ir as compile_dify
+from loom.runtimes import registry as runtime_registry
+from loom.runtimes.base import CompileContext, UnsupportedConstruct
+from loom.runtimes.bootstrap import register_all as register_runtime_adapters
 from loom.runtimes.hiagent.binding import HiagentBinding
-from loom.runtimes.hiagent.v2_6.compiler import compile_ir, compile_ir_chatflow
 from loom.runtimes.warnings import CompileWarning
 from loom.service.deps import Actor, get_actor
 from loom.service.errors import bad_request, conflict, not_found
@@ -380,6 +381,8 @@ def compile_session(
         mode=body.mode,
         binding_handle=body.binding,
         binding_dir=request.app.state.settings.binding_dir,
+        actor=actor.id,
+        tenant=request.app.state.settings.instance_id,
     )
     digest = hashlib.sha256(artifact_bytes).hexdigest()
     workflow_id = uuid4()
@@ -1038,16 +1041,33 @@ def _compile_artifact(
     mode: Literal["chat", "chatflow"] | None,
     binding_handle: str,
     binding_dir: Path,
+    actor: str,
+    tenant: str,
 ) -> tuple[bytes, str, Literal["zip", "yaml"], list[CompileWarning]]:
+    register_runtime_adapters()
+    adapter = runtime_registry.get(target)
+    binding: object = binding_handle
+    if target == "hiagent":
+        binding_path = binding_dir / f"{binding_handle}.hiagent.yaml"
+        if not binding_path.exists():
+            raise bad_request(f"binding not found: {binding_handle}")
+        binding = HiagentBinding.load(binding_path)
+    context = CompileContext(
+        binding=binding,
+        mode=mode,
+        actor=actor,
+        tenant=tenant,
+    )
+    try:
+        dsl, warnings = adapter.compile(ir, context=context)
+    except UnsupportedConstruct as exc:
+        raise bad_request(str(exc)) from exc
+    serialized = adapter.serialize_dsl(dsl)
     if target == "dify":
-        text, warnings = compile_dify(ir)
+        text = serialized if isinstance(serialized, str) else serialized.decode("utf-8")
         return text.encode("utf-8"), f"{ir.metadata.name}.yaml", "yaml", warnings
-    binding_path = binding_dir / f"{binding_handle}.hiagent.yaml"
-    if not binding_path.exists():
-        raise bad_request(f"binding not found: {binding_handle}")
-    binding = HiagentBinding.load(binding_path)
-    bundle, warnings = compile_ir_chatflow(ir, binding) if mode == "chatflow" else compile_ir(ir, binding)
-    return bundle.to_zip_bytes(), f"{ir.metadata.name}.zip", "zip", warnings
+    raw = serialized if isinstance(serialized, bytes) else serialized.encode("utf-8")
+    return raw, f"{ir.metadata.name}.zip", "zip", warnings
 
 
 def _seed_session_from_template(
