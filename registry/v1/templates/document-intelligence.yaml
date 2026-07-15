@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for document parsing and information extraction.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: []
   credentials: []
@@ -31,7 +31,7 @@ nodes:
   - id: extract
     type: llm
     model: configured-small-model
-    prompt: "Parsed document: ${parse_doc.body}\nExtract a summary and key fields."
+    prompt: "Parsed document: <untrusted>${parse_doc.body}</untrusted>\nExtract a summary and key fields."
     temperature: 0
     output_schema:
       type: object

@@ -1,5 +1,5 @@
 {
-  "version": "sha:0000000",
+  "version": "sha:e44736a363bab7d24b565313d22a21773b826961",
   "tools": [
     {
       "handle": "web_search",
@@ -68,19 +68,31 @@
       "handle": "shopify_api",
       "description": "Shopify Admin API token for store-level order/listing reads and customer reply posting.",
       "vault_path": "secret/fde/shopify_api",
-      "scopes": ["ecommerce/ops"]
+      "scopes": ["ecommerce/ops"],
+      "auth_scheme": "bearer",
+      "placement": "header",
+      "allowed_hosts": ["admin.shopify.com"],
+      "require_tls": true
     },
     {
       "handle": "amazon_sp_api",
       "description": "Amazon Selling Partner API for orders, returns, listings, and feedback.",
       "vault_path": "secret/fde/amazon_sp_api",
-      "scopes": ["ecommerce/ops"]
+      "scopes": ["ecommerce/ops"],
+      "auth_scheme": "bearer",
+      "placement": "header",
+      "allowed_hosts": ["sellingpartnerapi-na.amazon.com", "sellingpartnerapi-eu.amazon.com"],
+      "require_tls": true
     },
     {
       "handle": "clinic_system_api",
       "description": "Clinic system API key for operations-summary jobs (shadow).",
       "vault_path": "secret/fde/clinic_system_api",
-      "scopes": ["clinic/ops"]
+      "scopes": ["clinic/ops"],
+      "auth_scheme": "api_key",
+      "placement": "header",
+      "allowed_hosts": ["clinic-system.internal.example.com"],
+      "require_tls": true
     }
   ]
 }

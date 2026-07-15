@@ -62,6 +62,7 @@ def test_diff_route_uses_turn_snapshots(tmp_path):
             "rationale": "Format answer payload.",
         }
     )
+    second["edges"].append({"from": "answer", "to": "format_answer"})
     calls = iter([IRDocument.model_validate(first), IRDocument.model_validate(second)])
 
     def planner(**kwargs):

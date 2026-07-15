@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing planning template for multi-step work.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: []
   credentials: []
@@ -22,7 +22,7 @@ nodes:
   - id: decompose
     type: llm
     model: configured-planner-model
-    prompt: "Objective: ${input.objective}\nReturn a short ordered list of executable steps."
+    prompt: "Objective: <untrusted>${input.objective}</untrusted>\nReturn a short ordered list of executable steps."
     temperature: 0.1
     output_schema:
       type: object
@@ -38,7 +38,7 @@ nodes:
       - id: execute_step
         type: llm
         model: configured-small-model
-        prompt: "Objective: ${input.objective}\nCurrent step: ${execute.step}\nReturn step result."
+        prompt: "Objective: <untrusted>${input.objective}</untrusted>\nCurrent step: ${execute.step}\nReturn step result."
         output_schema:
           type: object
           properties:

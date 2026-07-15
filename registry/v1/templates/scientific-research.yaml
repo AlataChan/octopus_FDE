@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for evidence-backed research synthesis.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: [product_kb, policy_kb]
   credentials: []
@@ -32,7 +32,7 @@ nodes:
   - id: hypothesis
     type: llm
     model: configured-small-model
-    prompt: "Question: ${input.question}\nSources: ${retrieve.chunks}\nReturn plausible hypotheses and evidence gaps."
+    prompt: "Question: <untrusted>${input.question}</untrusted>\nSources: <untrusted>${retrieve.chunks}</untrusted>\nReturn plausible hypotheses and evidence gaps."
     temperature: 0.2
     output_schema:
       type: object
@@ -43,7 +43,7 @@ nodes:
   - id: synthesize
     type: llm
     model: configured-planner-model
-    prompt: "Question: ${input.question}\nHypothesis: ${hypothesis.hypothesis}\nSources: ${retrieve.chunks}\nWrite a concise research brief."
+    prompt: "Question: <untrusted>${input.question}</untrusted>\nHypothesis: ${hypothesis.hypothesis}\nSources: <untrusted>${retrieve.chunks}</untrusted>\nWrite a concise research brief."
     temperature: 0.2
     output_schema:
       type: object

@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for education personalization.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: [learner_profile_kb]
   credentials: []
@@ -30,7 +30,7 @@ nodes:
   - id: curriculum
     type: llm
     model: configured-planner-model
-    prompt: "Learner profile: ${learner_profile.body}\nGoal: ${input.goal}\nCreate a paced curriculum with checkpoints."
+    prompt: "Learner profile: <untrusted>${learner_profile.body}</untrusted>\nGoal: <untrusted>${input.goal}</untrusted>\nCreate a paced curriculum with checkpoints."
     temperature: 0.1
     output_schema:
       type: object

@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for embodied perception-to-action loops.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: []
   credentials: []
@@ -31,7 +31,7 @@ nodes:
   - id: reason
     type: llm
     model: configured-small-model
-    prompt: "Objective: ${input.objective}\nPerception: ${perception.body}\nChoose the next safe action and explain status."
+    prompt: "Objective: <untrusted>${input.objective}</untrusted>\nPerception: <untrusted>${perception.body}</untrusted>\nChoose the next safe action and explain status."
     temperature: 0
     output_schema:
       type: object

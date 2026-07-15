@@ -1,6 +1,7 @@
 """Per-node policy invariants beyond what the JSON Schema enforces."""
 from __future__ import annotations
 
+import ast
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -12,6 +13,7 @@ from loom.ir.models import (
     LoopNode,
     OutputNode,
     ParallelNode,
+    RetrievalNode,
 )
 from loom.validator.errors import ValidationFailure
 from loom.validator.refs import RefParseError, VarRef, parse_refs
@@ -66,6 +68,10 @@ def check_policy(ir: IRDocument, *, audit_max_retention_days: int = 365) -> list
             failures.append(ValidationFailure(
                 "policy", "code with retry must declare idempotency_key", location=loc,
             ))
+        # code: sandbox allowlist — reject anything the Validator can't vet statically.
+        if isinstance(n, CodeNode):
+            for reason in _check_code_sandbox(n):
+                failures.append(ValidationFailure("policy", reason, location=loc))
         # agent: budget tightening, fallback edge existence, tools subset.
         if isinstance(n, AgentNode):
             if default_budget is not None:
@@ -97,6 +103,120 @@ def check_policy(ir: IRDocument, *, audit_max_retention_days: int = 365) -> list
     if ir.ir_version == "0.4":
         failures.extend(_check_v04_policy(ir, node_by_id, audit_max_retention_days))
 
+    failures.extend(_check_trust_boundaries(ir))
+
+    return failures
+
+
+# ---------------------------------------------------------------------------
+# Code sandbox: AST/import allowlist. Anything the Validator can't vet
+# statically (an import outside the allowlist, a dangerous builtin) is
+# rejected — "if it can't be sandboxed, reject the code node."
+# ---------------------------------------------------------------------------
+
+_PY_IMPORT_ALLOWLIST = {
+    "json", "re", "math", "statistics", "decimal", "datetime", "itertools",
+    "functools", "collections", "typing", "dataclasses", "string", "textwrap",
+    "uuid", "enum",
+}
+_PY_DANGEROUS_CALLS = {"eval", "exec", "compile", "__import__", "open", "input"}
+_PY_DANGEROUS_ATTR_ROOTS = {
+    "os", "sys", "subprocess", "socket", "shutil", "pathlib", "importlib",
+    "ctypes", "multiprocessing", "threading", "requests", "urllib", "http",
+    "ftplib", "smtplib", "pickle", "marshal", "ssl",
+}
+_JS_DANGEROUS_PATTERNS = [
+    re.compile(r"\beval\("),
+    re.compile(r"\bnew\s+Function\("),
+    re.compile(r"\brequire\(\s*['\"](?:child_process|fs|net|dgram|http|https|os|cluster)['\"]\s*\)"),
+    re.compile(r"\bfetch\("),
+    re.compile(r"\bXMLHttpRequest\b"),
+    re.compile(r"\bWebSocket\("),
+]
+
+
+def _check_code_sandbox(node: CodeNode) -> list[str]:
+    if node.language == "python":
+        return _check_python_sandbox(node.source)
+    return _check_js_sandbox(node.source)
+
+
+def _check_python_sandbox(source: str) -> list[str]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as e:
+        return [f"code does not parse as python: {e}"]
+
+    reasons: list[str] = []
+    for stmt in ast.walk(tree):
+        if isinstance(stmt, ast.Import):
+            for alias in stmt.names:
+                root = alias.name.split(".")[0]
+                if root not in _PY_IMPORT_ALLOWLIST:
+                    reasons.append(f"import {alias.name!r} is not in the sandbox allowlist")
+        elif isinstance(stmt, ast.ImportFrom):
+            root = (stmt.module or "").split(".")[0]
+            if stmt.level or root not in _PY_IMPORT_ALLOWLIST:
+                reasons.append(f"import from {stmt.module!r} is not in the sandbox allowlist")
+        elif isinstance(stmt, ast.Name) and stmt.id in _PY_DANGEROUS_CALLS:
+            reasons.append(f"reference to {stmt.id!r} is forbidden in a sandboxed code node")
+        elif isinstance(stmt, ast.Attribute):
+            root = stmt
+            while isinstance(root, ast.Attribute):
+                root = root.value
+            if isinstance(root, ast.Name) and root.id in _PY_DANGEROUS_ATTR_ROOTS:
+                reasons.append(f"access to {root.id!r} is forbidden in a sandboxed code node")
+    return reasons
+
+
+def _check_js_sandbox(source: str) -> list[str]:
+    return [
+        f"js source matches forbidden pattern {p.pattern!r}"
+        for p in _JS_DANGEROUS_PATTERNS if p.search(source)
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Trust-boundary delimiters: prompts must not splice untrusted content
+# (raw user input, retrieved KB text, external HTTP responses) directly
+# into instructions without an explicit <untrusted>...</untrusted> wrapper.
+# ---------------------------------------------------------------------------
+
+_UNTRUSTED_BLOCK_RE = re.compile(r"<untrusted>.*?</untrusted>", re.S)
+
+
+def _untrusted_producer_ids(ir: IRDocument) -> set[str]:
+    ids = {"input"}
+    for n in _walk(ir.nodes):
+        if isinstance(n, (RetrievalNode, HTTPNode)):
+            ids.add(n.id)
+    return ids
+
+
+def _check_trust_boundaries(ir: IRDocument) -> list[ValidationFailure]:
+    failures: list[ValidationFailure] = []
+    untrusted = _untrusted_producer_ids(ir)
+
+    for n in _walk(ir.nodes):
+        fields: list[tuple[str, str]] = []
+        if isinstance(n, LLMNode):
+            fields.append(("prompt", n.prompt))
+            if n.system_prompt:
+                fields.append(("system_prompt", n.system_prompt))
+        elif isinstance(n, AgentNode) and n.system_prompt:
+            fields.append(("system_prompt", n.system_prompt))
+
+        for field_label, text in fields:
+            spans = [(m.start(), m.end()) for m in _UNTRUSTED_BLOCK_RE.finditer(text)]
+            for pid in untrusted:
+                ref_re = re.compile(rf"\$\{{{re.escape(pid)}(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[\d+\])*\}}")
+                for m in ref_re.finditer(text):
+                    if not any(s <= m.start() and m.end() <= e for s, e in spans):
+                        failures.append(ValidationFailure(
+                            "policy",
+                            f"prompt references untrusted producer {pid!r} outside a <untrusted> delimiter",
+                            location=f"nodes[{n.id}].{field_label}",
+                        ))
     return failures
 
 

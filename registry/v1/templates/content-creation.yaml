@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for controlled content production.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: []
   credentials: []
@@ -25,7 +25,7 @@ nodes:
   - id: draft
     type: llm
     model: configured-planner-model
-    prompt: "Brief: ${input.brief}\nChannel: ${input.channel}\nDraft channel-ready content."
+    prompt: "Brief: <untrusted>${input.brief}</untrusted>\nChannel: <untrusted>${input.channel}</untrusted>\nDraft channel-ready content."
     temperature: 0.6
     output_schema:
       type: object
@@ -35,7 +35,7 @@ nodes:
   - id: review
     type: llm
     model: configured-small-model
-    prompt: "Brief: ${input.brief}\nDraft: ${draft.draft}\nReview and return a polished final version."
+    prompt: "Brief: <untrusted>${input.brief}</untrusted>\nDraft: ${draft.draft}\nReview and return a polished final version."
     temperature: 0.2
     output_schema:
       type: object

@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing agent template for controlled tool-assisted decisions.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: [web_search, fetch_url]
   datasets: []
   credentials: []
@@ -23,7 +23,7 @@ nodes:
   - id: plan
     type: llm
     model: configured-small-model
-    prompt: "Task: ${input.task}\nPlan the minimum tool calls needed and success criteria."
+    prompt: "Task: <untrusted>${input.task}</untrusted>\nPlan the minimum tool calls needed and success criteria."
     temperature: 0
     output_schema:
       type: object
