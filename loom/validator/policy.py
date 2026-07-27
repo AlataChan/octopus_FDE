@@ -136,6 +136,21 @@ _PY_DANGEROUS_ATTR_NAMES = {
     "__code__", "__closure__", "__func__", "__self__", "__dict__",
     "__getattribute__", "__reduce__", "__reduce_ex__", "__init_subclass__",
 }
+# Builtins that reach an attribute or a namespace dynamically. They produce an
+# `ast.Call`, not an `ast.Attribute`, so the attribute-name checks above never
+# see them: `getattr(object, "__subcl" + "asses__")()` rebuilds the escape chain
+# with no `ast.Attribute` node in the tree at all.
+#
+# `getattr`/`setattr`/`delattr` take the attribute name as their second
+# positional argument. When that argument is a string literal the name can be
+# resolved statically and checked like any other attribute access. When it is
+# computed, the checker cannot prove it safe and rejects it.
+#
+# `vars`/`globals`/`locals` return whole namespaces and have no verifiable
+# literal form, so they are rejected outright.
+_PY_ATTR_ACCESS_CALLS = {"getattr", "setattr", "delattr"}
+_PY_NAMESPACE_CALLS = {"vars", "globals", "locals"}
+_PY_DYNAMIC_ACCESS_CALLS = _PY_ATTR_ACCESS_CALLS | _PY_NAMESPACE_CALLS
 _JS_DANGEROUS_PATTERNS = [
     re.compile(r"\beval\("),
     re.compile(r"\bnew\s+Function\("),
@@ -173,6 +188,11 @@ class _PythonSandboxVisitor(ast.NodeVisitor):
     def __init__(self) -> None:
         self.reasons: list[str] = []
         self._scopes: list[_PythonNameScope] = []
+        # Call sites whose attribute name resolved to a safe string literal.
+        # `visit_Call` records the callee here before descending, so the
+        # `visit_Name` reference check can tell a verified call apart from a
+        # bare reference that defers the name to runtime.
+        self._verified_callees: set[ast.expr] = set()
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
@@ -190,14 +210,53 @@ class _PythonSandboxVisitor(ast.NodeVisitor):
             )
 
     def visit_Name(self, node: ast.Name) -> None:
-        if (
-            isinstance(node.ctx, ast.Load)
-            and node.id in _PY_DANGEROUS_CALLS
-            and not self._is_locally_bound(node.id)
-        ):
+        if not isinstance(node.ctx, ast.Load) or self._is_locally_bound(node.id):
+            return
+        if node.id in _PY_DANGEROUS_CALLS:
             self.reasons.append(
                 f"reference to {node.id!r} is forbidden in a sandboxed code node"
             )
+        elif node.id in _PY_DYNAMIC_ACCESS_CALLS and node not in self._verified_callees:
+            # Reached as a value rather than a verified call: aliased
+            # (`g = getattr`) or passed on (`map(getattr, ...)`). The attribute
+            # name is only known at runtime, so it cannot be checked.
+            self.reasons.append(
+                f"reference to {node.id!r} is forbidden in a sandboxed code node "
+                "unless called directly with a literal attribute name "
+                "(a deferred reference hides the attribute name from static checks)"
+            )
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        if isinstance(func, ast.Name) and not self._is_locally_bound(func.id):
+            if func.id in _PY_NAMESPACE_CALLS:
+                self.reasons.append(
+                    f"call to {func.id!r} is forbidden in a sandboxed code node "
+                    "(it returns a namespace that defeats attribute checks)"
+                )
+            elif func.id in _PY_ATTR_ACCESS_CALLS:
+                self._check_dynamic_attribute_call(func.id, node)
+        self.generic_visit(node)
+
+    def _check_dynamic_attribute_call(self, builtin: str, node: ast.Call) -> None:
+        name_arg = node.args[1] if len(node.args) > 1 else None
+        if isinstance(name_arg, ast.Constant) and isinstance(name_arg.value, str):
+            if name_arg.value in _PY_DANGEROUS_ATTR_NAMES:
+                self.reasons.append(
+                    f"{builtin}(...) access to {name_arg.value!r} is forbidden in a "
+                    "sandboxed code node (object-introspection attributes can "
+                    "escape the import allowlist)"
+                )
+            else:
+                # Statically resolved to a harmless name; the callee reference
+                # itself is fine.
+                self._verified_callees.add(node.func)
+            return
+        self.reasons.append(
+            f"{builtin}(...) requires a literal attribute name in a sandboxed code "
+            "node; a computed name cannot be checked against the forbidden "
+            "introspection attributes"
+        )
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if node.attr in _PY_DANGEROUS_ATTR_NAMES:

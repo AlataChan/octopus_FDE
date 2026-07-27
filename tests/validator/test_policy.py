@@ -278,6 +278,92 @@ def test_code_node_subclasses_sandbox_escape_rejected():
 
 
 # ---------------------------------------------------------------------------
+# Dynamic attribute/namespace access.
+#
+# The attribute-name checks above only see `ast.Attribute` nodes. Every builtin
+# that reaches an attribute or a namespace *dynamically* produces an `ast.Call`
+# instead, so it walks straight past them. `getattr(object, "__subcl" +
+# "asses__")()` reconstructs the escape chain above with no `ast.Attribute` node
+# anywhere in the tree.
+#
+# Names that cannot be resolved statically are rejected: the checker cannot
+# prove them safe, so it fails closed.
+# ---------------------------------------------------------------------------
+
+
+def test_getattr_with_computed_attribute_name_is_rejected():
+    source = (
+        'def handler(input=""):\n'
+        '    c = getattr(object, "__subcl" + "asses__")()\n'
+        "    return {}\n"
+    )
+
+    reasons = _check_python_sandbox(source)
+
+    assert any("getattr" in reason for reason in reasons), reasons
+
+
+def test_getattr_with_dangerous_literal_attribute_name_is_rejected():
+    source = 'def handler(input=""):\n    return {"a": getattr(object, "__subclasses__")}\n'
+
+    reasons = _check_python_sandbox(source)
+
+    assert any("__subclasses__" in reason for reason in reasons), reasons
+
+
+def test_getattr_with_safe_literal_attribute_name_is_allowed():
+    # Static resolution succeeds and the name is harmless, so this must not be
+    # over-blocked: legitimate code nodes do read attributes by literal name.
+    source = 'def handler(input=""):\n    return {"a": getattr(input, "strip", None)}\n'
+
+    assert _check_python_sandbox(source) == []
+
+
+def test_namespace_introspection_builtins_are_rejected():
+    for builtin in ("vars", "globals", "locals"):
+        source = f'def handler(input=""):\n    return {builtin}()\n'
+
+        reasons = _check_python_sandbox(source)
+
+        assert any(builtin in reason for reason in reasons), (builtin, reasons)
+
+
+def test_setattr_and_delattr_with_computed_name_are_rejected():
+    for builtin in ("setattr", "delattr"):
+        source = (
+            'def handler(input=""):\n'
+            f'    {builtin}(object, "__cl" + "ass__", 1)\n'
+            "    return {}\n"
+        )
+
+        reasons = _check_python_sandbox(source)
+
+        assert any(builtin in reason for reason in reasons), (builtin, reasons)
+
+
+def test_bare_dynamic_access_reference_is_rejected():
+    # Aliasing or passing the builtin as a value defers the attribute name to
+    # runtime, so no call site is available to inspect.
+    aliased = 'def handler(input=""):\n    g = getattr\n    return {"a": g(object, "__class__")}\n'
+    passed = 'def handler(input=""):\n    return list(map(getattr, [object], ["__class__"]))\n'
+
+    assert any("getattr" in r for r in _check_python_sandbox(aliased))
+    assert any("getattr" in r for r in _check_python_sandbox(passed))
+
+
+def test_locally_bound_dynamic_access_name_is_not_flagged():
+    # Consistent with builtin shadowing: a local binding means this is the
+    # author's own variable, not the builtin.
+    source = (
+        'def handler(input=""):\n'
+        "    getattr = 1\n"
+        '    return {"a": getattr}\n'
+    )
+
+    assert _check_python_sandbox(source) == []
+
+
+# ---------------------------------------------------------------------------
 # H-3: trust-boundary delimiters for untrusted content in prompts.
 # ---------------------------------------------------------------------------
 
