@@ -7,7 +7,7 @@ import re
 import sys
 from dataclasses import asdict
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, NoReturn, cast
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
@@ -22,6 +22,10 @@ from loom.fde_session.clarify_engine import (
     next_blocking_questions,
 )
 from loom.fde_session.edit_intent import parse_edit_intent
+from loom.fde_session.planner_payload import (
+    PlannerPayloadBlocked,
+    prepare_outbound_planner_payload,
+)
 from loom.fde_session.redaction import has_potential_secret, redact_draft, redact_text
 from loom.ir.canonicalize import canonical_ir_hash
 from loom.ir.models import IRDocument
@@ -31,7 +35,7 @@ from loom.runtimes.base import CompileContext, UnsupportedConstruct
 from loom.runtimes.bootstrap import register_all as register_runtime_adapters
 from loom.runtimes.hiagent.binding import HiagentBinding
 from loom.service.deps import Actor, get_actor
-from loom.service.errors import bad_request, conflict, not_found
+from loom.service.errors import bad_request, conflict, not_found, unprocessable_entity
 from loom.service.models import SessionDetail, SessionPatchInput, SessionSummary
 from loom.state.store import StaleSessionRevision
 from loom.validator.validate import validate
@@ -271,17 +275,16 @@ def create_turn(
             ir_doc, expected_diff = deterministic
             planner_reply = "IR patched deterministically"
         else:
-            planner_message = (
-                _planner_message_with_context(body.user_message, extra_context)
-                if extra_context is not None
-                else body.user_message
+            outbound = prepare_outbound_planner_payload(
+                intent=body.user_message,
+                extra_context=extra_context,
             )
             ir = request.app.state.planner(
-                user_message=planner_message,
+                user_message=outbound.user_message,
                 session=session,
                 target=_session_target_runtime(session),
                 scope=_session_scope(session),
-                extra_context=extra_context,
+                extra_context=outbound.extra_context,
                 llm_config={
                     "api_key": request.app.state.fernet.decrypt(session.llm_api_key_encrypted).decode("utf-8")
                     if session.llm_api_key_encrypted
@@ -326,6 +329,14 @@ def create_turn(
             payload=archive_payload,
         )
         return _turn_response(row)
+    except PlannerPayloadBlocked as e:
+        _raise_planner_payload_blocked(
+            request=request,
+            session_id=session_id,
+            actor_id=actor.id,
+            turn_id=turn.turn_id,
+            error=e,
+        )
     except StaleSessionRevision as e:
         raise conflict("session IR changed; rebase this edit and retry") from e
     except EditRejected as e:
@@ -622,6 +633,46 @@ def _archive_planner_failure(
     )
 
 
+def _raise_planner_payload_blocked(
+    *,
+    request: Request,
+    session_id: UUID,
+    actor_id: str,
+    turn_id: UUID,
+    error: PlannerPayloadBlocked,
+) -> NoReturn:
+    request.app.state.session_store.finish_turn_failed(
+        turn_id,
+        actor_id=actor_id,
+        error_kind="planner_payload_blocked",
+        validation_errors=["planner_payload_blocked"],
+    )
+    print(
+        "planner_payload_blocked "
+        f"field={error.field_path} "
+        f"category={error.category}",
+        file=sys.stderr,
+    )
+    request.app.state.archive_writer.append(
+        session_id,
+        actor_id=actor_id,
+        event_type="turn.failed",
+        payload={
+            "turn_id": str(turn_id),
+            "error_kind": "planner_payload_blocked",
+            "field_path": error.field_path,
+            "category": error.category,
+        },
+    )
+    raise unprocessable_entity(
+        {
+            "error": "planner_payload_blocked",
+            "field": error.field_path,
+            "category": error.category,
+        }
+    ) from error
+
+
 def _handle_clarify_turn(
     *,
     request: Request,
@@ -836,8 +887,12 @@ def _finish_plan_from_draft(
     del brief_before_json
     draft_json = _draft_json(draft)
     try:
+        outbound = prepare_outbound_planner_payload(
+            intent=draft.intent or "",
+            brief=draft,
+        )
         ir = request.app.state.planner(
-            user_message=_draft_to_planner_message(draft),
+            user_message=outbound.user_message,
             session=session,
             target=cast("Literal['hiagent', 'dify']", draft.target_runtime),
             scope=draft.scope or _session_scope(session),
@@ -893,6 +948,14 @@ def _finish_plan_from_draft(
             },
         )
         return _turn_response(row)
+    except PlannerPayloadBlocked as e:
+        _raise_planner_payload_blocked(
+            request=request,
+            session_id=session.session_id,
+            actor_id=actor.id,
+            turn_id=turn.turn_id,
+            error=e,
+        )
     except StaleSessionRevision as e:
         raise conflict("session IR changed; rebase this edit and retry") from e
     except Exception as e:  # noqa: BLE001 - service records planner/validation failures
@@ -980,15 +1043,6 @@ def _allowed_change_fields(parsed_edit: object) -> list[str]:
         contract = _manual_review_gate_contract(parsed_edit)
         return [f"nodes.{contract['gate_id']}", "edges"]
     return []
-
-
-def _planner_message_with_context(user_message: str, context: dict[str, object]) -> str:
-    return (
-        f"{user_message}\n\n"
-        "# Existing workflow context\n"
-        f"{json.dumps(context, ensure_ascii=False, sort_keys=True)}\n\n"
-        "Apply only the declared edit and preserve every field outside allowed_change_fields."
-    )
 
 
 def _apply_deterministic_edit(
@@ -1269,14 +1323,6 @@ def _redact_patch_value(value: object) -> object:
 def _draft_json(draft: WorkflowBriefDraft) -> str:
     redacted = redact_draft(draft)
     return json.dumps(redacted.model_dump(mode="json", exclude_none=True), ensure_ascii=False, sort_keys=True)
-
-
-def _draft_to_planner_message(draft: WorkflowBriefDraft) -> str:
-    return "\n\n".join([
-        redact_text(draft.intent or ""),
-        "# Workflow brief draft",
-        _draft_json(draft),
-    ]).strip()
 
 
 def _pending_field_paths(last_turn: TurnRow | None) -> list[str]:

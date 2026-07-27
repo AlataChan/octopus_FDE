@@ -8,8 +8,11 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from loom.fde_session.brief import (
+    ApprovalPoint,
     ComplianceBoundary,
+    CredentialBindingRef,
     DataSourceRef,
+    InputSpec,
     TriggerSpec,
     WorkflowBriefDraft,
 )
@@ -177,6 +180,180 @@ def test_secret_like_turn_message_is_rejected_before_raw_text_is_persisted(tmp_p
     assert "turn.clarify_started" in archive
     assert "Bearer" not in archive
     assert "abc1234567890abcdef" not in archive
+
+
+def test_planner_payload_block_returns_value_free_422_for_draft_intent(
+    tmp_path,
+    capsys,
+):
+    detected_value = "patient@clinic.cn"
+    unsafe_draft = _complete_draft().model_copy(
+        update={"intent": f"Send follow-ups to {detected_value}."}
+    )
+    calls = {"planner": 0}
+
+    def planner(**_kwargs):
+        calls["planner"] += 1
+        return _sample_ir()
+
+    clarify_engine = FakeClarifyEngine([
+        ClarifyEngineResult(
+            intent_update=unsafe_draft.model_dump(mode="json"),
+            next_action="ready",
+        ),
+    ])
+    client = _client(
+        tmp_path,
+        planner=planner,
+        clarify_engine=clarify_engine,
+    )
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+    review = client.post(
+        f"/v1/sessions/{sid}/turns",
+        json={"user_message": "build follow-up workflow"},
+    )
+    assert review.status_code == 200
+    assert review.json()["kind"] == "brief_review"
+
+    response = client.post(
+        f"/v1/sessions/{sid}/turns",
+        json={"user_message": "confirm"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "error": "planner_payload_blocked",
+        "field": "intent",
+        "category": "email",
+    }
+    assert detected_value not in response.text
+    assert calls["planner"] == 0
+    captured = capsys.readouterr()
+    assert detected_value not in captured.err
+    assert "field=intent" in captured.err
+    assert "category=email" in captured.err
+
+
+def test_planner_payload_block_covers_planner_assisted_edit_path(tmp_path):
+    calls = {"planner": 0}
+
+    def planner(**_kwargs):
+        calls["planner"] += 1
+        return _sample_ir()
+
+    client = _client(tmp_path, planner=planner)
+    sid = client.post(
+        "/v1/sessions",
+        json={"template_id": "knowledge-retrieval-rag", "scope": "ecommerce/kb"},
+    ).json()["session_id"]
+    detected_value = "patient@clinic.cn"
+
+    response = client.post(
+        f"/v1/sessions/{sid}/turns",
+        json={
+            "user_message": (
+                "manual review after retrieve reviewer ops "
+                f"contact {detected_value}"
+            )
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "error": "planner_payload_blocked",
+        "field": "intent",
+        "category": "email",
+    }
+    assert detected_value not in response.text
+    assert calls["planner"] == 0
+
+
+def test_clean_draft_planner_receives_allowlisted_outbound_string(tmp_path):
+    captured = {}
+    intent = "Answer TCM clinic FAQ from the approved knowledge base."
+    draft = _complete_draft().model_copy(
+        update={
+            "workflow_id": "DROP-WORKFLOW-ID",
+            "title": "DROP-TITLE",
+            "intent": intent,
+            "inputs": [
+                InputSpec(
+                    name="question",
+                    type="string",
+                    required=True,
+                    description="DROP-INPUT-DESCRIPTION",
+                )
+            ],
+            "tools": ["retrieve_tcm_knowledge"],
+            "credentials": [
+                CredentialBindingRef(
+                    handle="tcm_api",
+                    scheme="bearer",
+                    allowed_hosts=["api.tcm.example"],
+                )
+            ],
+            "approval_points": [
+                ApprovalPoint(
+                    stage="clinical_review",
+                    reviewer_role="licensed_practitioner",
+                )
+            ],
+            "success_criteria": "DROP-SUCCESS-CRITERIA",
+            "intent_clarifications": ["DROP-INTENT-CLARIFICATION"],
+            "known_edits": ["DROP-KNOWN-EDIT"],
+        }
+    )
+
+    def planner(**kwargs):
+        captured.update(kwargs)
+        return _sample_ir()
+
+    clarify_engine = FakeClarifyEngine([
+        ClarifyEngineResult(
+            intent_update=draft.model_dump(mode="json"),
+            next_action="ready",
+        ),
+    ])
+    client = _client(
+        tmp_path,
+        planner=planner,
+        clarify_engine=clarify_engine,
+    )
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+    client.post(
+        f"/v1/sessions/{sid}/turns",
+        json={"user_message": "build clinic workflow"},
+    )
+
+    response = client.post(
+        f"/v1/sessions/{sid}/turns",
+        json={"user_message": "confirm"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["kind"] == "plan"
+    outbound = captured["user_message"]
+    assert isinstance(outbound, str)
+    assert outbound.startswith(intent + "\n\n# Workflow brief draft\n")
+    for allowed_value in (
+        '"target_runtime": "hiagent"',
+        '"scope": "ecommerce/kb"',
+        '"handle": "product_kb"',
+        '"handle": "tcm_api"',
+        '"stage": "clinical_review"',
+        '"name": "question"',
+        '"tools": ["retrieve_tcm_knowledge"]',
+    ):
+        assert allowed_value in outbound
+    for dropped_value in (
+        "DROP-WORKFLOW-ID",
+        "DROP-TITLE",
+        "DROP-INPUT-DESCRIPTION",
+        "DROP-SUCCESS-CRITERIA",
+        "DROP-INTENT-CLARIFICATION",
+        "DROP-KNOWN-EDIT",
+    ):
+        assert dropped_value not in outbound
 
 
 def test_self_design_fourth_turn_emits_questionnaire_when_still_blocked(tmp_path):
