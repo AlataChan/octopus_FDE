@@ -9,7 +9,8 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any
 
-from loom.runtimes.hiagent.spec_check import check_generated_chatflow_config
+from loom.runtimes.hiagent.code_node_lint import lint_hiagent_python
+from loom.runtimes.hiagent.spec_check import HiagentSpecError, check_generated_chatflow_config
 from loom.runtimes.hiagent.v2_6.bundle import HiagentBundle
 from loom.runtimes.hiagent.v2_6.compiler_nodes import emit_workflow_nodes
 from loom.runtimes.hiagent.v2_6.ids import gen_id
@@ -86,7 +87,7 @@ def compile_ir_chatflow(ir: IRDocument, binding: HiagentBinding) -> tuple[Hiagen
     agent_filename = f"{ir.metadata.name}.yaml"
     agent_yaml = _build_agent_yaml(ir=ir, binding=binding, agent_id=agent_id)
     warnings = _policy_warnings(ir)
-    chatflow_detail = build_chatflow_config_draft(ir, binding)
+    chatflow_detail = build_chatflow_config_draft(ir, binding, warning_sink=warnings)
     single = agent_yaml["AppConfig"]["SingleAgentConfig"]
     single["ModelID"] = ""
     single["ModelName"] = ""
@@ -142,6 +143,7 @@ def build_chatflow_config_draft(
     *,
     workflow_id: str | None = None,
     workflow_publish_id: str = "",
+    warning_sink: list[CompileWarning] | None = None,
 ) -> dict[str, Any]:
     """Return API `app.ChatFlowConfig` payload with the full IR graph inline.
 
@@ -164,6 +166,9 @@ def build_chatflow_config_draft(
         node_code_map=node_code_map,
         positions=positions,
     )
+    code_warnings = _lint_emitted_python_code_nodes(nodes)
+    if warning_sink is not None:
+        warning_sink.extend(code_warnings)
     _attach_depends_and_error_config(nodes, node_code_map=node_code_map, edges=edges)
 
     detail: dict[str, Any] = {
@@ -192,6 +197,38 @@ def build_chatflow_config_draft(
         detail["AuditRetentionDays"] = ir.policy.audit.retention_days
     check_generated_chatflow_config(detail)
     return detail
+
+
+def _lint_emitted_python_code_nodes(
+    nodes: list[dict[str, Any]],
+) -> list[CompileWarning]:
+    """Lint emitted Code config while its temporary IR node id is available."""
+    warnings: list[CompileWarning] = []
+    for node in nodes:
+        config = node.get("Configs", {}).get("Code")
+        if node.get("Type") != "Code" or not isinstance(config, dict):
+            continue
+        if config.get("Language") != 1:
+            continue
+        source = config.get("Code")
+        if not isinstance(source, str):
+            continue
+        node_id_value = node.get("_ir_id")
+        node_id = node_id_value if isinstance(node_id_value, str) else None
+        for finding in lint_hiagent_python(source):
+            location = f"HiAgent Python Code node {node_id!r} source"
+            if finding.severity == "fatal":
+                raise HiagentSpecError(
+                    f"{location}: {finding.message} [{finding.code}]"
+                )
+            warnings.append(CompileWarning(
+                target="hiagent",
+                node_id=node_id,
+                field="source",
+                message=finding.message,
+                code=finding.code,
+            ))
+    return warnings
 
 
 def build_chatflow_workflow_snapshot(chatflow_config: dict[str, Any]) -> dict[str, Any]:

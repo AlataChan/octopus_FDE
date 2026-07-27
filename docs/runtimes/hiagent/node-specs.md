@@ -7,7 +7,8 @@
 
 Primary sources:
 
-- Handbook: `Hiagent_MD/raw/workflow/工作流 - HiAgent Document.md`
+- Handbook: `docs/runtimes/hiagent/handbook/workflow/工作流 - HiAgent Document.md`
+  (vendored from `hiagent-architect-kit@330312d`; see `handbook/PROVENANCE.md`)
 - Live API validation on self-hosted Hiagent 2.6
 - Imported customer samples: `用户维修方案_v1.0.6` and `小芸用户维修方案智能体_v1.11`
 
@@ -52,9 +53,36 @@ Primary sources:
 ## Code Node
 
 - Handbook languages: JavaScript / Python.
+- The vendored workflow guide documents Code-node inputs/outputs, Python support,
+  return-schema requirements, timeout/retry ranges, and IDE testing in
+  `handbook/workflow/工作流 - HiAgent Document.md`. Its worked Python example in
+  `handbook/workflow/常见问题 - 工作流 - HiAgent Document.md` also confirms that
+  `handler` receives one merged mapping rather than one Python argument per UI input.
 - Current live API path accepts the numeric language enum used by server samples: `1=python`, `2=javascript`. `[LIVE]`
 - Required field is code body in `Code`.
-- Python code must define `handler(params)` and return a dict. Bare top-level `return {...}` fails at runtime. `[LIVE]`
+- Python code must define exactly one top-level handler using this contract: `[LIVE]`
+
+  ```python
+  def handler(input=""):
+      params = input if isinstance(input, dict) else {}
+      query = params.get("query", "")
+      return {"answer": query}
+  ```
+
+  HiAgent merges every configured node input into one dictionary and passes it
+  only to the first handler parameter. A signature such as
+  `def handler(query="", card_state=""):` therefore leaves `card_state` at its
+  default even when the UI binding is populated, causing silent data loss.
+- Each configured input must be read with `params.get("name", explicit_default)`.
+  Do not subscript `input`/`params`, alias or pass the merged mapping wholesale,
+  or return `params` directly.
+- The compiler AST-lints the final emitted Python source. Syntax errors, missing
+  or duplicate top-level handlers, multi-positional signatures, `*args`,
+  `**kwargs`, and keyword-only parameters stop compilation. Signature style,
+  missing first-statement unpacking, unsafe reads, missing `params.get` defaults,
+  and returning `params` are emitted as structured compile warnings.
+- Bare Python bodies are wrapped by the compiler in the canonical handler form
+  above; bare top-level `return {...}` without that wrapper fails at runtime. `[LIVE]`
 - Outputs are declared in `OutputSchema`.
 - Supported output value types map to String, Integer, Number, Object, Boolean, Array.
 - Live type codes observed in runtime validation and customer samples: `0=String`, `1=Integer`, `2=Boolean`, `3=Number`, `5=Array`, `9=Object`. `[LIVE]`
