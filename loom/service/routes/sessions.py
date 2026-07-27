@@ -5,10 +5,9 @@ import hashlib
 import json
 import re
 import sys
-from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
@@ -18,8 +17,8 @@ from pydantic import BaseModel, Field
 from loom.diff.ir_diff import diff_ir
 from loom.fde_session.brief import WorkflowBriefDraft
 from loom.fde_session.clarify_engine import (
-    ClarifyQuestion,
     QUESTIONNAIRE_AFTER_ROUNDS,
+    ClarifyQuestion,
     next_blocking_questions,
 )
 from loom.fde_session.edit_intent import parse_edit_intent
@@ -27,21 +26,32 @@ from loom.fde_session.redaction import has_potential_secret, redact_draft, redac
 from loom.ir.canonicalize import canonical_ir_hash
 from loom.ir.models import IRDocument
 from loom.registry.models import WorkflowRecord
-from loom.runtimes.dify.v1_14.compiler import compile_ir as compile_dify
+from loom.runtimes import registry as runtime_registry
+from loom.runtimes.base import CompileContext, UnsupportedConstruct
+from loom.runtimes.bootstrap import register_all as register_runtime_adapters
 from loom.runtimes.hiagent.binding import HiagentBinding
-from loom.runtimes.hiagent.v2_6.compiler import compile_ir, compile_ir_chatflow
-from loom.runtimes.warnings import CompileWarning
 from loom.service.deps import Actor, get_actor
 from loom.service.errors import bad_request, conflict, not_found
 from loom.service.models import SessionDetail, SessionPatchInput, SessionSummary
-from loom.state.models import SessionRow, TurnRow
+from loom.state.store import StaleSessionRevision
 from loom.validator.validate import validate
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from loom.runtimes.warnings import CompileWarning
+    from loom.state.models import SessionRow, TurnRow
 
 router = APIRouter(prefix="/v1")
 ActorDep = Annotated[Actor, Depends(get_actor)]
 CLIENT_PLANNER_ERROR = "planner_error"
 REDACTED_SECRET_USER_MESSAGE = "[REDACTED:potential_secret]"
 BRIEF_REVIEW_REPLY = "Please review the workflow brief and confirm when it is ready to generate."
+BINDING_HANDLE_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+
+
+class EditRejected(ValueError):
+    """Raised when an edit cannot be applied within its declared change scope."""
 
 
 class CreateSessionRequest(BaseModel):
@@ -62,7 +72,7 @@ class TurnRequest(BaseModel):
 class CompileRequest(BaseModel):
     target: Literal["hiagent", "dify"]
     mode: Literal["chat", "chatflow"] | None = None
-    binding: str = "test"
+    binding: str = Field(default="test", pattern=BINDING_HANDLE_PATTERN)
 
 
 @router.get("/sessions")
@@ -181,22 +191,27 @@ def create_turn(
     actor: ActorDep,
 ) -> dict[str, object]:
     store = request.app.state.session_store
-    session = store.get_session(session_id, actor_id=actor.id)
-    if session is None:
+    session_snapshot = store.get_session_with_revision(session_id, actor_id=actor.id)
+    if session_snapshot is None:
         raise not_found("session not found")
+    session, session_revision = session_snapshot
     previous_turns = store.list_turns(session_id, actor_id=actor.id)
     last_turn = previous_turns[-1] if previous_turns else None
     loaded_draft_before = _load_draft(session.brief_draft)
     brief_before = _draft_json(loaded_draft_before) if loaded_draft_before else None
     if has_potential_secret(body.user_message):
-        turn = store.create_turn(
-            session_id,
-            actor_id=actor.id,
-            user_message=REDACTED_SECRET_USER_MESSAGE,
-            ir_before=session.latest_ir_json,
-            kind="clarify",
-            brief_before=brief_before,
-        )
+        try:
+            turn = store.create_turn(
+                session_id,
+                actor_id=actor.id,
+                user_message=REDACTED_SECRET_USER_MESSAGE,
+                ir_before=session.latest_ir_json,
+                kind="clarify",
+                brief_before=brief_before,
+                expected_revision=session_revision,
+            )
+        except StaleSessionRevision as e:
+            raise conflict("session IR changed; reload and retry") from e
         _archive_turn_started(request, session_id, actor.id, turn, body.user_message)
         return _handle_clarify_turn(
             request=request,
@@ -206,13 +221,17 @@ def create_turn(
             user_message=body.user_message,
             last_turn=last_turn,
         )
-    turn = store.create_turn(
-        session_id,
-        actor_id=actor.id,
-        user_message=body.user_message,
-        ir_before=session.latest_ir_json,
-        brief_before=brief_before,
-    )
+    try:
+        turn = store.create_turn(
+            session_id,
+            actor_id=actor.id,
+            user_message=body.user_message,
+            ir_before=session.latest_ir_json,
+            brief_before=brief_before,
+            expected_revision=session_revision,
+        )
+    except StaleSessionRevision as e:
+        raise conflict("session IR changed; reload and retry") from e
     _archive_turn_started(request, session_id, actor.id, turn, body.user_message)
     if _is_brief_review_confirmation(last_turn, body.user_message):
         draft = _load_draft(session.brief_draft) or _load_draft(last_turn.brief_after if last_turn else None)
@@ -235,20 +254,46 @@ def create_turn(
             last_turn=last_turn,
         )
     try:
-        ir = request.app.state.planner(
-            user_message=body.user_message,
-            session=session,
-            target=_session_target_runtime(session),
-            scope=_session_scope(session),
-            llm_config={
-                "api_key": request.app.state.fernet.decrypt(session.llm_api_key_encrypted).decode("utf-8")
-                if session.llm_api_key_encrypted
-                else "",
-                "base_url": session.llm_base_url,
-                "model": session.llm_model,
-            },
+        current_doc = IRDocument.model_validate_json(session.latest_ir_json) if session.latest_ir_json else None
+        parsed_edit = parse_edit_intent(body.user_message) if current_doc is not None else None
+        extra_context = (
+            _edit_planner_context(session, current_doc, parsed_edit)
+            if current_doc is not None and parsed_edit is not None
+            else None
         )
-        ir_doc = IRDocument.model_validate(ir) if isinstance(ir, dict) else ir
+        deterministic = (
+            _apply_deterministic_edit(current_doc, parsed_edit)
+            if current_doc is not None and parsed_edit is not None
+            else None
+        )
+        expected_diff: dict[str, object] | None = None
+        if deterministic is not None:
+            ir_doc, expected_diff = deterministic
+            planner_reply = "IR patched deterministically"
+        else:
+            planner_message = (
+                _planner_message_with_context(body.user_message, extra_context)
+                if extra_context is not None
+                else body.user_message
+            )
+            ir = request.app.state.planner(
+                user_message=planner_message,
+                session=session,
+                target=_session_target_runtime(session),
+                scope=_session_scope(session),
+                extra_context=extra_context,
+                llm_config={
+                    "api_key": request.app.state.fernet.decrypt(session.llm_api_key_encrypted).decode("utf-8")
+                    if session.llm_api_key_encrypted
+                    else "",
+                    "base_url": session.llm_base_url,
+                    "model": session.llm_model,
+                },
+            )
+            ir_doc = IRDocument.model_validate(ir) if isinstance(ir, dict) else ir
+            planner_reply = "IR generated"
+            if current_doc is not None and getattr(parsed_edit, "kind", "") == "add_manual_review_gate":
+                _enforce_manual_review_scope(current_doc, ir_doc, parsed_edit)
         ir_json = json.dumps(
             ir_doc.model_dump(by_alias=True, exclude_none=True),
             ensure_ascii=False,
@@ -264,20 +309,33 @@ def create_turn(
         row = store.finish_turn_succeeded(
             turn.turn_id,
             actor_id=actor.id,
-            planner_reply="IR generated",
+            planner_reply=planner_reply,
             ir_after=ir_json,
         )
+        archive_payload: dict[str, object] = {
+            "turn_id": str(turn.turn_id),
+            "ir_after_sha256": _sha256_text(ir_json),
+            "validation_status": "ok",
+        }
+        if expected_diff is not None:
+            archive_payload["expected_diff"] = expected_diff
         request.app.state.archive_writer.append(
             session_id,
             actor_id=actor.id,
             event_type="turn.succeeded",
-            payload={
-                "turn_id": str(turn.turn_id),
-                "ir_after_sha256": _sha256_text(ir_json),
-                "validation_status": "ok",
-            },
+            payload=archive_payload,
         )
         return _turn_response(row)
+    except StaleSessionRevision as e:
+        raise conflict("session IR changed; rebase this edit and retry") from e
+    except EditRejected as e:
+        store.finish_turn_failed(
+            turn.turn_id,
+            actor_id=actor.id,
+            error_kind="edit_rejected",
+            validation_errors=["edit_rejected"],
+        )
+        raise bad_request(str(e)) from e
     except Exception as e:  # noqa: BLE001 - service records planner/validation failures
         row = store.finish_turn_failed(
             turn.turn_id,
@@ -373,6 +431,12 @@ def compile_session(
     if not session.latest_ir_json:
         raise conflict("session has no accepted IR")
     _ensure_template_target_supported(request, session_id, actor.id, body.target)
+    if not request.app.state.session_store.binding_is_authorized(
+        tenant_id=request.app.state.settings.instance_id,
+        actor_id=actor.id,
+        binding_handle=body.binding,
+    ):
+        raise bad_request(f"binding not found or not authorized: {body.binding}")
     ir = IRDocument.model_validate_json(session.latest_ir_json)
     artifact_bytes, artifact_name, artifact_kind, compile_warnings = _compile_artifact(
         ir,
@@ -380,6 +444,8 @@ def compile_session(
         mode=body.mode,
         binding_handle=body.binding,
         binding_dir=request.app.state.settings.binding_dir,
+        actor=actor.id,
+        tenant=request.app.state.settings.instance_id,
     )
     digest = hashlib.sha256(artifact_bytes).hexdigest()
     workflow_id = uuid4()
@@ -508,7 +574,7 @@ def _session_audit_writer(request: Request, actor_id: str) -> Callable[[UUID, li
             request.app.state.archive_writer.append(
                 session_id,
                 actor_id=actor_id,
-                event_type=cast(Any, event_type),
+                event_type=cast("Any", event_type),
                 payload=payload,
             )
 
@@ -536,8 +602,13 @@ def _archive_planner_failure(
     error: Exception,
     correlation_id: str | None,
 ) -> None:
-    message = str(error)
-    print(f"planner_error correlation_id={correlation_id} message={message}", file=sys.stderr)
+    print(
+        "planner_error "
+        f"correlation_id={correlation_id} "
+        f"error_code={CLIENT_PLANNER_ERROR} "
+        f"error_type={type(error).__name__}",
+        file=sys.stderr,
+    )
     request.app.state.archive_writer.append(
         session_id,
         actor_id=actor_id,
@@ -546,7 +617,7 @@ def _archive_planner_failure(
             "turn_id": str(turn_id),
             "error_kind": CLIENT_PLANNER_ERROR,
             "error_correlation_id": correlation_id,
-            "error_message_sha256": _sha256_text(message),
+            "error_message_sha256": _sha256_text(str(error)),
         },
     )
 
@@ -560,7 +631,6 @@ def _handle_clarify_turn(
     user_message: str,
     last_turn: TurnRow | None,
 ) -> dict[str, object]:
-    store = request.app.state.session_store
     draft_before = _load_draft(session.brief_draft)
     brief_before_json = _draft_json(draft_before) if draft_before else None
     round_index = session.clarify_round + 1
@@ -680,18 +750,21 @@ def _finish_clarify_response(
     clarify_round: int,
 ) -> dict[str, object]:
     draft_after_json = _draft_json(draft_after)
-    row = request.app.state.session_store.finish_turn_clarify(
-        turn.turn_id,
-        actor_id=actor.id,
-        kind=kind,
-        planner_reply=_question_text(question_payload),
-        clarify_question=json.dumps(question_payload, ensure_ascii=False, sort_keys=True),
-        brief_before=draft_before_json,
-        brief_after=draft_after_json,
-        clarify_round=clarify_round,
-        target_runtime=draft_after.target_runtime,
-        scope=draft_after.scope,
-    )
+    try:
+        row = request.app.state.session_store.finish_turn_clarify(
+            turn.turn_id,
+            actor_id=actor.id,
+            kind=kind,
+            planner_reply=_question_text(question_payload),
+            clarify_question=json.dumps(question_payload, ensure_ascii=False, sort_keys=True),
+            brief_before=draft_before_json,
+            brief_after=draft_after_json,
+            clarify_round=clarify_round,
+            target_runtime=draft_after.target_runtime,
+            scope=draft_after.scope,
+        )
+    except StaleSessionRevision as e:
+        raise conflict("session planning context changed; reload and retry") from e
     options_count = _options_count(question_payload)
     request.app.state.archive_writer.append(
         session.session_id,
@@ -721,15 +794,18 @@ def _finish_brief_review_response(
     brief_before_json: str | None,
 ) -> dict[str, object]:
     draft_json = _draft_json(draft)
-    row = request.app.state.session_store.finish_turn_brief_review(
-        turn.turn_id,
-        actor_id=actor.id,
-        planner_reply=BRIEF_REVIEW_REPLY,
-        brief_before=brief_before_json,
-        brief_after=draft_json,
-        target_runtime=draft.target_runtime,
-        scope=draft.scope,
-    )
+    try:
+        row = request.app.state.session_store.finish_turn_brief_review(
+            turn.turn_id,
+            actor_id=actor.id,
+            planner_reply=BRIEF_REVIEW_REPLY,
+            brief_before=brief_before_json,
+            brief_after=draft_json,
+            target_runtime=draft.target_runtime,
+            scope=draft.scope,
+        )
+    except StaleSessionRevision as e:
+        raise conflict("session planning context changed; reload and retry") from e
     request.app.state.archive_writer.append(
         session.session_id,
         actor_id=actor.id,
@@ -759,19 +835,11 @@ def _finish_plan_from_draft(
 ) -> dict[str, object]:
     del brief_before_json
     draft_json = _draft_json(draft)
-    request.app.state.session_store.update_session_brief_state(
-        session.session_id,
-        actor_id=actor.id,
-        brief_draft=draft_json,
-        clarify_round=0,
-        target_runtime=draft.target_runtime,
-        scope=draft.scope,
-    )
     try:
         ir = request.app.state.planner(
             user_message=_draft_to_planner_message(draft),
             session=session,
-            target=cast(Literal["hiagent", "dify"], draft.target_runtime),
+            target=cast("Literal['hiagent', 'dify']", draft.target_runtime),
             scope=draft.scope or _session_scope(session),
             llm_config={
                 "api_key": request.app.state.fernet.decrypt(session.llm_api_key_encrypted).decode("utf-8")
@@ -825,6 +893,8 @@ def _finish_plan_from_draft(
             },
         )
         return _turn_response(row)
+    except StaleSessionRevision as e:
+        raise conflict("session IR changed; rebase this edit and retry") from e
     except Exception as e:  # noqa: BLE001 - service records planner/validation failures
         row = request.app.state.session_store.finish_turn_failed(
             turn.turn_id,
@@ -871,6 +941,256 @@ def _looks_like_post_ir_edit(user_message: str) -> bool:
     )
 
 
+def _edit_planner_context(
+    session: SessionRow,
+    current_doc: IRDocument,
+    parsed_edit: object,
+) -> dict[str, object]:
+    current_ir = current_doc.model_dump(by_alias=True, exclude_none=True)
+    draft = _load_draft(session.brief_draft)
+    edit = cast("Any", parsed_edit)
+    context: dict[str, object] = {
+        "current_ir": current_ir,
+        "base_ir_sha256": session.latest_ir_sha256 or _sha256_text(
+            json.dumps(current_ir, ensure_ascii=False, sort_keys=True)
+        ),
+        "parsed_edit": edit.model_dump(mode="json"),
+        "allowed_change_fields": _allowed_change_fields(parsed_edit),
+        "workflow_brief": draft.model_dump(mode="json") if draft is not None else None,
+    }
+    if getattr(parsed_edit, "kind", "") == "add_manual_review_gate":
+        context["manual_review_gate_contract"] = _manual_review_gate_contract(parsed_edit)
+    return context
+
+
+def _allowed_change_fields(parsed_edit: object) -> list[str]:
+    kind = getattr(parsed_edit, "kind", "")
+    edit = cast("Any", parsed_edit)
+    if kind == "change_trigger_mode":
+        return ["nodes.<trigger>.mode", "nodes.<trigger>.schedule", "nodes.<trigger>.webhook"]
+    if kind == "change_retrieval_top_k":
+        return [f"nodes.{edit.node_id}.top_k"]
+    if kind == "add_retry_policy":
+        return [f"nodes.{edit.node_id}.retry"]
+    if kind == "change_temperature":
+        return [f"nodes.{edit.node_id}.temperature"]
+    if kind == "add_compliance_disclaimer":
+        return [f"nodes.{edit.node_id}.rationale"]
+    if kind == "add_manual_review_gate":
+        contract = _manual_review_gate_contract(parsed_edit)
+        return [f"nodes.{contract['gate_id']}", "edges"]
+    return []
+
+
+def _planner_message_with_context(user_message: str, context: dict[str, object]) -> str:
+    return (
+        f"{user_message}\n\n"
+        "# Existing workflow context\n"
+        f"{json.dumps(context, ensure_ascii=False, sort_keys=True)}\n\n"
+        "Apply only the declared edit and preserve every field outside allowed_change_fields."
+    )
+
+
+def _apply_deterministic_edit(
+    current_doc: IRDocument,
+    parsed_edit: object,
+) -> tuple[IRDocument, dict[str, object]] | None:
+    kind = getattr(parsed_edit, "kind", "")
+    edit = cast("Any", parsed_edit)
+    if kind == "mark_unrecognized":
+        raise EditRejected("existing workflow edit is not recognized; specify the node and field to change")
+    if kind == "add_manual_review_gate":
+        return None
+
+    before = current_doc.model_dump(by_alias=True, exclude_none=True)
+    after = json.loads(json.dumps(before, ensure_ascii=False))
+    allowed_paths: set[str]
+    if kind == "change_trigger_mode":
+        node = _resolve_edit_node(after, node_id=None, expected_type="trigger")
+        node["mode"] = edit.to
+        node.pop("schedule", None)
+        node.pop("webhook", None)
+        allowed_paths = {
+            f"nodes.{node['id']}.mode",
+            f"nodes.{node['id']}.schedule",
+            f"nodes.{node['id']}.webhook",
+        }
+    elif kind == "change_retrieval_top_k":
+        node = _resolve_edit_node(
+            after,
+            node_id=edit.node_id,
+            expected_type="retrieval",
+        )
+        node["top_k"] = edit.to_k
+        allowed_paths = {f"nodes.{node['id']}.top_k"}
+    elif kind == "add_retry_policy":
+        node = _resolve_edit_node(after, node_id=edit.node_id)
+        if node.get("type") not in {"llm", "retrieval", "http", "code"}:
+            raise EditRejected(f"node {node['id']} does not support retry policy")
+        node["retry"] = {
+            "max_attempts": edit.max_attempts,
+            "backoff": "exponential",
+            "retry_on": edit.retry_on,
+        }
+        allowed_paths = {f"nodes.{node['id']}.retry"}
+    elif kind == "change_temperature":
+        node = _resolve_edit_node(
+            after,
+            node_id=edit.node_id,
+            expected_type="llm",
+        )
+        node["temperature"] = edit.to
+        allowed_paths = {f"nodes.{node['id']}.temperature"}
+    elif kind == "add_compliance_disclaimer":
+        node = _resolve_edit_node(after, node_id=edit.node_id)
+        node["rationale"] = (
+            f"{node['rationale']} Compliance disclaimer: {edit.text}"
+        )
+        allowed_paths = {f"nodes.{node['id']}.rationale"}
+    else:
+        raise EditRejected("recognized edit has no constrained patch implementation")
+
+    changed_paths = _changed_ir_paths(before, after)
+    unexpected = sorted(changed_paths - allowed_paths)
+    if unexpected:
+        raise EditRejected(
+            "edit exceeded declared edit scope: " + ", ".join(unexpected)
+        )
+    try:
+        patched = IRDocument.model_validate(after)
+    except ValueError as e:
+        raise EditRejected("edit produced an invalid workflow") from e
+    return patched, cast("dict[str, object]", diff_ir(before, after))
+
+
+def _resolve_edit_node(
+    ir: dict[str, object],
+    *,
+    node_id: str | None,
+    expected_type: str | None = None,
+) -> dict[str, object]:
+    nodes = cast("list[dict[str, object]]", ir["nodes"])
+    if node_id is not None:
+        exact = [node for node in nodes if node.get("id") == node_id]
+        if exact:
+            node = exact[0]
+            if expected_type is not None and node.get("type") != expected_type:
+                raise EditRejected(f"node {node_id} is not a {expected_type} node")
+            return node
+    candidates = [
+        node for node in nodes
+        if expected_type is not None and node.get("type") == expected_type
+    ]
+    if len(candidates) == 1:
+        return candidates[0]
+    requested = node_id or expected_type or "requested"
+    raise EditRejected(f"cannot uniquely resolve {requested} node")
+
+
+def _changed_ir_paths(before: object, after: object, path: tuple[str, ...] = ()) -> set[str]:
+    if isinstance(before, dict) and isinstance(after, dict):
+        changed: set[str] = set()
+        for key in before.keys() | after.keys():
+            changed.update(_changed_ir_paths(before.get(key), after.get(key), (*path, str(key))))
+        return changed
+    if isinstance(before, list) and isinstance(after, list) and path == ("nodes",):
+        before_nodes = {str(item["id"]): item for item in before if isinstance(item, dict) and "id" in item}
+        after_nodes = {str(item["id"]): item for item in after if isinstance(item, dict) and "id" in item}
+        changed = set()
+        for node_id in before_nodes.keys() | after_nodes.keys():
+            changed.update(
+                _changed_ir_paths(
+                    before_nodes.get(node_id),
+                    after_nodes.get(node_id),
+                    ("nodes", node_id),
+                )
+            )
+        return changed
+    if before != after:
+        return {".".join(path)}
+    return set()
+
+
+def _manual_review_gate_contract(parsed_edit: object) -> dict[str, object]:
+    edit = cast("Any", parsed_edit)
+    gate_id = f"manual_review_after_{edit.after_node_id}"
+    return {
+        "after_node_id": edit.after_node_id,
+        "reviewer_role": edit.reviewer_role,
+        "gate_id": gate_id,
+        "gate_node": {
+            "id": gate_id,
+            "type": "code",
+            "language": "python",
+            "source": "raise RuntimeError('manual_review_required')",
+            "rationale": (
+                f"Blocking manual review gate requiring approval from {edit.reviewer_role}."
+            ),
+        },
+    }
+
+
+def _enforce_manual_review_scope(
+    before_doc: IRDocument,
+    after_doc: IRDocument,
+    parsed_edit: object,
+) -> None:
+    before = before_doc.model_dump(by_alias=True, exclude_none=True)
+    after = after_doc.model_dump(by_alias=True, exclude_none=True)
+    contract = _manual_review_gate_contract(parsed_edit)
+    after_node_id = cast("str", contract["after_node_id"])
+    gate_id = cast("str", contract["gate_id"])
+    expected_gate = cast("dict[str, object]", contract["gate_node"])
+    for key in before.keys() | after.keys():
+        if key not in {"nodes", "edges"} and before.get(key) != after.get(key):
+            raise EditRejected("planner result exceeded declared edit scope")
+    before_nodes = {
+        node["id"]: node for node in cast("list[dict[str, object]]", before["nodes"])
+    }
+    after_nodes = {
+        node["id"]: node for node in cast("list[dict[str, object]]", after["nodes"])
+    }
+    if before_nodes.keys() - after_nodes.keys():
+        raise EditRejected("planner result exceeded declared edit scope")
+    if any(after_nodes[node_id] != node for node_id, node in before_nodes.items()):
+        raise EditRejected("planner result exceeded declared edit scope")
+    added = after_nodes.keys() - before_nodes.keys()
+    if added != {gate_id} or after_nodes[gate_id] != expected_gate:
+        raise EditRejected("planner result exceeded declared edit scope")
+    if after_node_id not in before_nodes or gate_id in before_nodes:
+        raise EditRejected("planner result exceeded declared edit scope")
+
+    before_edges = cast("list[dict[str, object]]", before["edges"])
+    after_edges = cast("list[dict[str, object]]", after["edges"])
+    outgoing = [edge for edge in before_edges if edge.get("from") == after_node_id]
+    if len(outgoing) != 1 or outgoing[0].get("when") is not None:
+        raise EditRejected("manual review requires one unconditional outgoing edge")
+    original = outgoing[0]
+    expected_edges = [edge for edge in before_edges if edge is not original]
+    expected_edges.extend(
+        [
+            {
+                "from": after_node_id,
+                "to": gate_id,
+                "data": original.get("data", True),
+            },
+            {
+                "from": gate_id,
+                "to": original["to"],
+                "data": original.get("data", True),
+            },
+        ]
+    )
+    def normalize(edges: list[dict[str, object]]) -> list[str]:
+        return sorted(
+            json.dumps(edge, ensure_ascii=False, sort_keys=True)
+            for edge in edges
+        )
+
+    if normalize(after_edges) != normalize(expected_edges):
+        raise EditRejected("planner result exceeded declared edit scope")
+
+
 def _stale_turn_reference_response(
     *,
     request: Request,
@@ -903,7 +1223,7 @@ def _stale_turn_reference_response(
         actor=actor,
         session=session,
         turn=turn,
-        kind=cast(Literal["clarify", "questionnaire"], last_turn.kind),
+        kind=cast("Literal['clarify', 'questionnaire']", last_turn.kind),
         question_payload=question_payload,
         draft_before_json=brief_before_json,
         draft_after=draft_after or WorkflowBriefDraft(title="Self-Design workflow", intent=""),
@@ -998,12 +1318,15 @@ def _options_count(payload: dict[str, object]) -> int:
 
 @router.get("/bindings")
 def list_bindings(request: Request, actor: ActorDep) -> list[dict[str, str]]:
-    del actor
     binding_dir: Path = request.app.state.settings.binding_dir
     if not binding_dir.exists():
         return []
+    authorized = request.app.state.session_store.list_authorized_binding_handles(
+        tenant_id=request.app.state.settings.instance_id,
+        actor_id=actor.id,
+    )
     rows: list[dict[str, str]] = []
-    suffixes = {
+    suffixes: dict[str, Literal["hiagent", "dify"]] = {
         ".dify.yaml": "dify",
         ".hiagent.yaml": "hiagent",
     }
@@ -1011,7 +1334,8 @@ def list_bindings(request: Request, actor: ActorDep) -> list[dict[str, str]]:
         for suffix, target in suffixes.items():
             if path.name.endswith(suffix):
                 handle = path.name.removesuffix(suffix)
-                rows.append({"handle": handle, "target": target, "display_name": handle})
+                if handle in authorized and _safe_binding_path(binding_dir, handle, target) is not None:
+                    rows.append({"handle": handle, "target": target, "display_name": handle})
                 break
     return sorted(rows, key=lambda row: (row["handle"], row["target"]))
 
@@ -1038,16 +1362,64 @@ def _compile_artifact(
     mode: Literal["chat", "chatflow"] | None,
     binding_handle: str,
     binding_dir: Path,
+    actor: str,
+    tenant: str,
 ) -> tuple[bytes, str, Literal["zip", "yaml"], list[CompileWarning]]:
+    register_runtime_adapters()
+    adapter = runtime_registry.get(target)
+    binding_path = _resolve_binding_path(binding_dir, binding_handle, target)
+    binding: object = binding_handle
+    if target == "hiagent":
+        binding = HiagentBinding.load(binding_path)
+    context = CompileContext(
+        binding=binding,
+        mode=mode,
+        actor=actor,
+        tenant=tenant,
+    )
+    try:
+        dsl, warnings = adapter.compile(ir, context=context)
+    except UnsupportedConstruct as exc:
+        raise bad_request(str(exc)) from exc
+    serialized = adapter.serialize_dsl(dsl)
     if target == "dify":
-        text, warnings = compile_dify(ir)
+        text = serialized if isinstance(serialized, str) else serialized.decode("utf-8")
         return text.encode("utf-8"), f"{ir.metadata.name}.yaml", "yaml", warnings
-    binding_path = binding_dir / f"{binding_handle}.hiagent.yaml"
-    if not binding_path.exists():
-        raise bad_request(f"binding not found: {binding_handle}")
-    binding = HiagentBinding.load(binding_path)
-    bundle, warnings = compile_ir_chatflow(ir, binding) if mode == "chatflow" else compile_ir(ir, binding)
-    return bundle.to_zip_bytes(), f"{ir.metadata.name}.zip", "zip", warnings
+    raw = serialized if isinstance(serialized, bytes) else serialized.encode("utf-8")
+    return raw, f"{ir.metadata.name}.zip", "zip", warnings
+
+
+def _resolve_binding_path(
+    binding_dir: Path,
+    binding_handle: str,
+    target: Literal["hiagent", "dify"],
+) -> Path:
+    path = _safe_binding_path(binding_dir, binding_handle, target)
+    if path is None:
+        raise bad_request(f"binding not found or not authorized: {binding_handle}")
+    return path
+
+
+def _safe_binding_path(
+    binding_dir: Path,
+    binding_handle: str,
+    target: Literal["hiagent", "dify"],
+) -> Path | None:
+    if re.fullmatch(BINDING_HANDLE_PATTERN, binding_handle) is None:
+        return None
+    if binding_dir.is_symlink():
+        return None
+    suffix = ".hiagent.yaml" if target == "hiagent" else ".dify.yaml"
+    try:
+        root = binding_dir.resolve(strict=True)
+        candidate = binding_dir / f"{binding_handle}{suffix}"
+        if candidate.is_symlink() or not candidate.is_file():
+            return None
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(root)
+    except (FileNotFoundError, NotADirectoryError, OSError, ValueError):
+        return None
+    return resolved
 
 
 def _seed_session_from_template(
@@ -1065,7 +1437,7 @@ def _seed_session_from_template(
     selected_scope = scope or record.entry.scopes[0]
     if selected_scope not in record.entry.scopes:
         raise bad_request(f"template {template_id} is not available for scope {selected_scope}")
-    selected_target = cast(Literal["hiagent", "dify"], record.entry.compile_targets[0])
+    selected_target = cast("Literal['hiagent', 'dify']", record.entry.compile_targets[0])
     request.app.state.session_store.update_session_planning_context(
         session_id,
         actor_id=actor_id,
@@ -1105,7 +1477,7 @@ def _seed_session_from_template(
     )
     seeded = request.app.state.session_store.get_session(session_id, actor_id=actor_id)
     assert seeded is not None
-    return cast(SessionRow, seeded)
+    return cast("SessionRow", seeded)
 
 
 def _ensure_template_target_supported(

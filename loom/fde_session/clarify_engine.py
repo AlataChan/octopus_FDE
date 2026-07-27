@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,6 +17,9 @@ from loom.fde_session.brief import (
 from loom.fde_session.clarify import ClarifyQuestion as PolicyQuestion
 from loom.fde_session.clarify import missing_fields
 from loom.fde_session.redaction import redact_text
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 QUESTIONNAIRE_AFTER_ROUNDS = 3
 

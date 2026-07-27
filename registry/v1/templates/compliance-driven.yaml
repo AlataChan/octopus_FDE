@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for policy-grounded compliance checks.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: [policy_kb]
   credentials: []
@@ -36,7 +36,7 @@ nodes:
   - id: check
     type: llm
     model: configured-small-model
-    prompt: "Action: ${input.action}\nPolicy: ${retrieve_policy.chunks}\nReturn verdict, rationale, and fail flag."
+    prompt: "Action: <untrusted>${input.action}</untrusted>\nPolicy: <untrusted>${retrieve_policy.chunks}</untrusted>\nReturn verdict, rationale, and fail flag."
     temperature: 0
     output_schema:
       type: object

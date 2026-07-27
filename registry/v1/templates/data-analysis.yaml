@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for lightweight analytical reports.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: []
   credentials: []
@@ -35,7 +35,7 @@ nodes:
   - id: interpret
     type: llm
     model: configured-small-model
-    prompt: "Dataset: ${input.dataset_json}\nStats: ${stats.rows}\nWrite a concise interpretation."
+    prompt: "Dataset: <untrusted>${input.dataset_json}</untrusted>\nStats: ${stats.rows}\nWrite a concise interpretation."
     temperature: 0.1
     output_schema:
       type: object

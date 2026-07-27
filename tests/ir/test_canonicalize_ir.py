@@ -1,14 +1,52 @@
 import copy
 import json
 from pathlib import Path
+from typing import Any
 
 from loom.ir.canonicalize import canonical_ir, canonical_ir_hash
+from loom.ir.models import IRDocument
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def _load_example(name: str) -> dict:
+    return json.loads((ROOT / "examples" / "ir" / name).read_text())
+
+
 def _ecommerce_faq():
-    return json.loads((ROOT / "examples" / "ir" / "01-ecommerce-customer-faq.json").read_text())
+    return _load_example("01-ecommerce-customer-faq.json")
+
+
+def _nested_retrieval_loop_doc(*, top_k: int | None = None, rerank: bool | None = None) -> dict[str, Any]:
+    """Minimal but schema-real doc with a RetrievalNode nested in a loop body."""
+    lookup: dict[str, Any] = {
+        "id": "lookup", "type": "retrieval", "rationale": "look up per-item context",
+        "dataset": "kb", "query": "${item}",
+    }
+    if top_k is not None:
+        lookup["top_k"] = top_k
+    if rerank is not None:
+        lookup["rerank"] = rerank
+    doc = {
+        "ir_version": "0.3",
+        "metadata": {"name": "nested retrieval", "owner": "o",
+                     "rationale": "regression fixture for nested default-strip dispatch"},
+        "registry_ref": {"registry_version": "sha:0000000", "tools": [], "datasets": [], "credentials": []},
+        "policy": {},
+        "inputs": [], "outputs": [],
+        "nodes": [
+            {"id": "start", "type": "trigger", "mode": "manual", "rationale": "entry"},
+            {
+                "id": "loop", "type": "loop", "rationale": "iterate over items",
+                "over": "${input.items}", "as": "item", "max_iterations": 3,
+                "body": [lookup],
+            },
+            {"id": "out", "type": "output", "rationale": "bind", "bindings": {"x": "${loop}"}},
+        ],
+        "edges": [{"from": "start", "to": "loop"}, {"from": "loop", "to": "out"}],
+    }
+    IRDocument.model_validate(doc)  # fail fast if this fixture drifts from the real schema
+    return doc
 
 
 def test_canonical_form_is_idempotent():
@@ -87,3 +125,70 @@ def test_semantic_difference_changes_hash():
     b = copy.deepcopy(a)
     b["nodes"][0]["rationale"] = "different rationale on purpose"
     assert canonical_ir_hash(a) != canonical_ir_hash(b)
+
+
+def test_retrieval_node_top_k_and_rerank_stripped_when_explicit_default():
+    """Per-type strip rules must fire for top-level nodes, not just Edge."""
+    doc = _ecommerce_faq()
+    retrieve = next(n for n in doc["nodes"] if n["id"] == "retrieve")
+    retrieve["top_k"] = 5
+    retrieve["rerank"] = False
+    out = canonical_ir(doc)
+    out_retrieve = next(n for n in out["nodes"] if n["id"] == "retrieve")
+    assert "top_k" not in out_retrieve
+    assert "rerank" not in out_retrieve
+
+
+def test_retrieval_node_hash_equal_for_explicit_vs_omitted_default():
+    doc = _ecommerce_faq()
+    retrieve = next(n for n in doc["nodes"] if n["id"] == "retrieve")
+    retrieve["top_k"] = 5
+    retrieve["rerank"] = False
+    explicit_hash = canonical_ir_hash(doc)
+
+    omitted = copy.deepcopy(doc)
+    omitted_retrieve = next(n for n in omitted["nodes"] if n["id"] == "retrieve")
+    del omitted_retrieve["top_k"]
+    del omitted_retrieve["rerank"]
+    assert canonical_ir_hash(omitted) == explicit_hash
+
+
+def test_nested_retrieval_node_defaults_stripped_and_hash_matches_omitted():
+    """The exact H-5 bug: a node under LoopNode.body was parented "Node", so
+    RetrievalNode-specific strip rules never matched for nested nodes either.
+    """
+    explicit = _nested_retrieval_loop_doc(top_k=5, rerank=False)
+    omitted = _nested_retrieval_loop_doc()
+    assert canonical_ir_hash(explicit) == canonical_ir_hash(omitted)
+
+    out = canonical_ir(explicit)
+    nested_lookup = next(n for n in out["nodes"] if n["id"] == "loop")["body"][0]
+    assert "top_k" not in nested_lookup
+    assert "rerank" not in nested_lookup
+
+
+def test_nested_retrieval_node_semantic_change_still_changes_hash():
+    a = _nested_retrieval_loop_doc(top_k=10)
+    b = _nested_retrieval_loop_doc(top_k=10)
+    b["nodes"][1]["body"][0]["dataset"] = "other_kb"
+    assert canonical_ir_hash(a) != canonical_ir_hash(b)
+
+
+def test_reordering_top_level_nodes_and_edges_is_hash_invariant():
+    """Top-level node/edge order carries no meaning — the edges graph does."""
+    doc = _ecommerce_faq()
+    reordered = copy.deepcopy(doc)
+    reordered["nodes"] = list(reversed(reordered["nodes"]))
+    reordered["edges"] = list(reversed(reordered["edges"]))
+    assert canonical_ir_hash(doc) == canonical_ir_hash(reordered)
+
+
+def test_reordering_loop_body_changes_hash():
+    """Unlike top-level nodes, LoopNode.body order IS semantic (no separate
+    edges list encodes intra-body sequencing) and must not be sorted away.
+    """
+    doc = _load_example("04-tcm-followup.json")
+    reordered = copy.deepcopy(doc)
+    loop = next(n for n in reordered["nodes"] if n["type"] == "loop")
+    loop["body"] = list(reversed(loop["body"]))
+    assert canonical_ir_hash(doc) != canonical_ir_hash(reordered)

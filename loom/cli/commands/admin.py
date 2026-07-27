@@ -8,12 +8,11 @@ import socket
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NoReturn, cast
+from typing import TYPE_CHECKING, NoReturn, cast
 
 import click
 
 from loom.archive.jsonl import ArchiveWriter
-from loom.archive.schema import ArchiveEventType
 from loom.archive.writer import InstanceArchiveWriter
 from loom.service.auth.credentials import (
     AUTH_FILENAME,
@@ -26,6 +25,9 @@ from loom.service.auth.credentials import (
 from loom.service.auth.password import hash_password
 from loom.service.deps import Settings
 from loom.service.routes.auth import AUTH_ARCHIVE_SESSION_ID
+
+if TYPE_CHECKING:
+    from loom.archive.schema import ArchiveEventType
 
 CLI_SCHEMA_VERSION = "1"
 
@@ -232,7 +234,7 @@ def _append_admin_event(
     writer.append(
         AUTH_ARCHIVE_SESSION_ID,
         actor_id="auth",
-        event_type=cast(ArchiveEventType, event_type),
+        event_type=cast("ArchiveEventType", event_type),
         payload={"username_hmac": writer.hmac_text(username), **payload},
     )
 

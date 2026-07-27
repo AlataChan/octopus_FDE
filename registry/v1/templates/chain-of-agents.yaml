@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing multi-agent template for specialist collaboration.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: []
   credentials: []
@@ -24,7 +24,7 @@ nodes:
   - id: manager
     type: llm
     model: configured-planner-model
-    prompt: "Objective: ${input.objective}\nAssign subquestions for research, risk, and execution specialists."
+    prompt: "Objective: <untrusted>${input.objective}</untrusted>\nAssign subquestions for research, risk, and execution specialists."
     temperature: 0.1
     output_schema:
       type: object
@@ -42,7 +42,7 @@ nodes:
         - id: research_agent
           type: llm
           model: configured-small-model
-          prompt: "Objective: ${input.objective}\nResearch task: ${manager.research_task}\nReturn research notes."
+          prompt: "Objective: <untrusted>${input.objective}</untrusted>\nResearch task: ${manager.research_task}\nReturn research notes."
           output_schema:
             type: object
             properties:
@@ -52,7 +52,7 @@ nodes:
         - id: risk_agent
           type: llm
           model: configured-small-model
-          prompt: "Objective: ${input.objective}\nRisk task: ${manager.risk_task}\nReturn risk notes."
+          prompt: "Objective: <untrusted>${input.objective}</untrusted>\nRisk task: ${manager.risk_task}\nReturn risk notes."
           output_schema:
             type: object
             properties:
@@ -62,7 +62,7 @@ nodes:
         - id: execution_agent
           type: llm
           model: configured-small-model
-          prompt: "Objective: ${input.objective}\nExecution task: ${manager.execution_task}\nReturn execution notes."
+          prompt: "Objective: <untrusted>${input.objective}</untrusted>\nExecution task: ${manager.execution_task}\nReturn execution notes."
           output_schema:
             type: object
             properties:
@@ -72,7 +72,7 @@ nodes:
   - id: synthesize
     type: llm
     model: configured-planner-model
-    prompt: "Objective: ${input.objective}\nSpecialist outputs: ${specialists.results}\nWrite one coordinated answer."
+    prompt: "Objective: <untrusted>${input.objective}</untrusted>\nSpecialist outputs: ${specialists.results}\nWrite one coordinated answer."
     temperature: 0.2
     output_schema:
       type: object

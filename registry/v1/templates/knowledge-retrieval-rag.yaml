@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing RAG template for source-grounded answers.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: [product_kb, policy_kb]
   credentials: []
@@ -31,7 +31,7 @@ nodes:
   - id: rerank
     type: llm
     model: configured-small-model
-    prompt: "Question: ${input.query}\nPassages: ${retrieve.chunks}\nReturn top passages and confidence."
+    prompt: "Question: <untrusted>${input.query}</untrusted>\nPassages: <untrusted>${retrieve.chunks}</untrusted>\nReturn top passages and confidence."
     temperature: 0
     output_schema:
       type: object
@@ -42,7 +42,7 @@ nodes:
   - id: answer
     type: llm
     model: configured-planner-model
-    prompt: "Question: ${input.query}\nEvidence: ${retrieve.chunks}\nSelected: ${rerank.selected_sources}\nAnswer with citations."
+    prompt: "Question: <untrusted>${input.query}</untrusted>\nEvidence: <untrusted>${retrieve.chunks}</untrusted>\nSelected: ${rerank.selected_sources}\nAnswer with citations."
     temperature: 0.2
     output_schema:
       type: object

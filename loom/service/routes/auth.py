@@ -1,16 +1,19 @@
 """Local cookie-session auth routes."""
 from __future__ import annotations
 
-from datetime import datetime
-from typing import cast
+from datetime import datetime  # noqa: TC003
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field
 
-from loom.archive.schema import ArchiveEventType
 from loom.service.auth import DUMMY_SCRYPT_HASH, client_ip, verify_password
-from loom.service.deps import Actor, Settings
+from loom.service.deps import Actor  # noqa: TC001
+
+if TYPE_CHECKING:
+    from loom.archive.schema import ArchiveEventType
+    from loom.service.deps import Settings
 
 router = APIRouter(prefix="/v1/auth")
 AUTH_ARCHIVE_SESSION_ID = UUID("00000000-0000-0000-0000-000000000000")
@@ -124,6 +127,6 @@ def _archive_auth(request: Request, event_type: str, payload: dict[str, object])
     request.app.state.archive_writer.append(
         AUTH_ARCHIVE_SESSION_ID,
         actor_id="auth",
-        event_type=cast(ArchiveEventType, event_type),
+        event_type=cast("ArchiveEventType", event_type),
         payload=payload,
     )

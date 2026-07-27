@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
-from loom.fde_session.brief import WorkflowBriefDraft
+if TYPE_CHECKING:
+    from loom.fde_session.brief import WorkflowBriefDraft
 
 MAX_TEXT_CHARS = 10_000
 REDACTED_TEXT = "[REDACTED]"

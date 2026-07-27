@@ -1,6 +1,7 @@
 """Per-node policy invariants beyond what the JSON Schema enforces."""
 from __future__ import annotations
 
+import ast
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -12,6 +13,7 @@ from loom.ir.models import (
     LoopNode,
     OutputNode,
     ParallelNode,
+    RetrievalNode,
 )
 from loom.validator.errors import ValidationFailure
 from loom.validator.refs import RefParseError, VarRef, parse_refs
@@ -66,6 +68,10 @@ def check_policy(ir: IRDocument, *, audit_max_retention_days: int = 365) -> list
             failures.append(ValidationFailure(
                 "policy", "code with retry must declare idempotency_key", location=loc,
             ))
+        # code: sandbox allowlist — reject anything the Validator can't vet statically.
+        if isinstance(n, CodeNode):
+            for reason in _check_code_sandbox(n):
+                failures.append(ValidationFailure("policy", reason, location=loc))
         # agent: budget tightening, fallback edge existence, tools subset.
         if isinstance(n, AgentNode):
             if default_budget is not None:
@@ -97,6 +103,448 @@ def check_policy(ir: IRDocument, *, audit_max_retention_days: int = 365) -> list
     if ir.ir_version == "0.4":
         failures.extend(_check_v04_policy(ir, node_by_id, audit_max_retention_days))
 
+    failures.extend(_check_trust_boundaries(ir))
+
+    return failures
+
+
+# ---------------------------------------------------------------------------
+# Code sandbox: AST/import allowlist. Anything the Validator can't vet
+# statically (an import outside the allowlist, a dangerous builtin) is
+# rejected — "if it can't be sandboxed, reject the code node."
+# ---------------------------------------------------------------------------
+
+_PY_IMPORT_ALLOWLIST = {
+    "json", "re", "math", "statistics", "decimal", "datetime", "itertools",
+    "functools", "collections", "typing", "dataclasses", "string", "textwrap",
+    "uuid", "enum",
+}
+_PY_DANGEROUS_CALLS = {"eval", "exec", "compile", "__import__", "open", "input"}
+_PY_DANGEROUS_ATTR_ROOTS = {
+    "os", "sys", "subprocess", "socket", "shutil", "pathlib", "importlib",
+    "ctypes", "multiprocessing", "threading", "requests", "urllib", "http",
+    "ftplib", "smtplib", "pickle", "marshal", "ssl",
+}
+# Object-introspection attribute names used by classic sandbox-escape chains
+# (e.g. `().__class__.__bases__[0].__subclasses__()` reaches arbitrary
+# builtins without importing anything or naming a blocked root). None of the
+# import-allowlisted stdlib modules need these on a workflow code node, so
+# any use is rejected regardless of what object the attribute is accessed on.
+_PY_DANGEROUS_ATTR_NAMES = {
+    "__class__", "__bases__", "__base__", "__subclasses__", "__mro__",
+    "__globals__", "__builtins__", "__import__", "__loader__", "__spec__",
+    "__code__", "__closure__", "__func__", "__self__", "__dict__",
+    "__getattribute__", "__reduce__", "__reduce_ex__", "__init_subclass__",
+}
+# Builtins that reach an attribute or a namespace dynamically. They produce an
+# `ast.Call`, not an `ast.Attribute`, so the attribute-name checks above never
+# see them: `getattr(object, "__subcl" + "asses__")()` rebuilds the escape chain
+# with no `ast.Attribute` node in the tree at all.
+#
+# `getattr`/`setattr`/`delattr` take the attribute name as their second
+# positional argument. When that argument is a string literal the name can be
+# resolved statically and checked like any other attribute access. When it is
+# computed, the checker cannot prove it safe and rejects it.
+#
+# `vars`/`globals`/`locals` return whole namespaces and have no verifiable
+# literal form, so they are rejected outright.
+_PY_ATTR_ACCESS_CALLS = {"getattr", "setattr", "delattr"}
+_PY_NAMESPACE_CALLS = {"vars", "globals", "locals"}
+_PY_DYNAMIC_ACCESS_CALLS = _PY_ATTR_ACCESS_CALLS | _PY_NAMESPACE_CALLS
+_JS_DANGEROUS_PATTERNS = [
+    re.compile(r"\beval\("),
+    re.compile(r"\bnew\s+Function\("),
+    re.compile(r"\brequire\(\s*['\"](?:child_process|fs|net|dgram|http|https|os|cluster)['\"]\s*\)"),
+    re.compile(r"\bfetch\("),
+    re.compile(r"\bXMLHttpRequest\b"),
+    re.compile(r"\bWebSocket\("),
+]
+
+
+def _check_code_sandbox(node: CodeNode) -> list[str]:
+    if node.language == "python":
+        return _check_python_sandbox(node.source)
+    return _check_js_sandbox(node.source)
+
+
+def _check_python_sandbox(source: str) -> list[str]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as e:
+        return [f"code does not parse as python: {e}"]
+
+    visitor = _PythonSandboxVisitor()
+    visitor.visit(tree)
+    return visitor.reasons
+
+
+class _PythonNameScope:
+    def __init__(self, bindings: set[str], global_names: set[str] | None = None) -> None:
+        self.bindings = bindings
+        self.global_names = global_names or set()
+
+
+class _PythonSandboxVisitor(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.reasons: list[str] = []
+        self._scopes: list[_PythonNameScope] = []
+        # Call sites whose attribute name resolved to a safe string literal.
+        # `visit_Call` records the callee here before descending, so the
+        # `visit_Name` reference check can tell a verified call apart from a
+        # bare reference that defers the name to runtime.
+        self._verified_callees: set[ast.expr] = set()
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            root = alias.name.split(".")[0]
+            if root not in _PY_IMPORT_ALLOWLIST:
+                self.reasons.append(
+                    f"import {alias.name!r} is not in the sandbox allowlist"
+                )
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        root = (node.module or "").split(".")[0]
+        if node.level or root not in _PY_IMPORT_ALLOWLIST:
+            self.reasons.append(
+                f"import from {node.module!r} is not in the sandbox allowlist"
+            )
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if not isinstance(node.ctx, ast.Load) or self._is_locally_bound(node.id):
+            return
+        if node.id in _PY_DANGEROUS_CALLS:
+            self.reasons.append(
+                f"reference to {node.id!r} is forbidden in a sandboxed code node"
+            )
+        elif node.id in _PY_DYNAMIC_ACCESS_CALLS and node not in self._verified_callees:
+            # Reached as a value rather than a verified call: aliased
+            # (`g = getattr`) or passed on (`map(getattr, ...)`). The attribute
+            # name is only known at runtime, so it cannot be checked.
+            self.reasons.append(
+                f"reference to {node.id!r} is forbidden in a sandboxed code node "
+                "unless called directly with a literal attribute name "
+                "(a deferred reference hides the attribute name from static checks)"
+            )
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        if isinstance(func, ast.Name) and not self._is_locally_bound(func.id):
+            if func.id in _PY_NAMESPACE_CALLS:
+                self.reasons.append(
+                    f"call to {func.id!r} is forbidden in a sandboxed code node "
+                    "(it returns a namespace that defeats attribute checks)"
+                )
+            elif func.id in _PY_ATTR_ACCESS_CALLS:
+                self._check_dynamic_attribute_call(func.id, node)
+        self.generic_visit(node)
+
+    def _check_dynamic_attribute_call(self, builtin: str, node: ast.Call) -> None:
+        name_arg = node.args[1] if len(node.args) > 1 else None
+        if isinstance(name_arg, ast.Constant) and isinstance(name_arg.value, str):
+            if name_arg.value in _PY_DANGEROUS_ATTR_NAMES:
+                self.reasons.append(
+                    f"{builtin}(...) access to {name_arg.value!r} is forbidden in a "
+                    "sandboxed code node (object-introspection attributes can "
+                    "escape the import allowlist)"
+                )
+            else:
+                # Statically resolved to a harmless name; the callee reference
+                # itself is fine.
+                self._verified_callees.add(node.func)
+            return
+        self.reasons.append(
+            f"{builtin}(...) requires a literal attribute name in a sandboxed code "
+            "node; a computed name cannot be checked against the forbidden "
+            "introspection attributes"
+        )
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if node.attr in _PY_DANGEROUS_ATTR_NAMES:
+            self.reasons.append(
+                f"access to {node.attr!r} is forbidden in a sandboxed code node "
+                "(object-introspection attributes can escape the import allowlist)"
+            )
+        root: ast.expr = node
+        while isinstance(root, ast.Attribute):
+            root = root.value
+        if isinstance(root, ast.Name) and root.id in _PY_DANGEROUS_ATTR_ROOTS:
+            self.reasons.append(
+                f"access to {root.id!r} is forbidden in a sandboxed code node"
+            )
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_function_definition(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_function_definition(node)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        self._visit_argument_expressions(node.args)
+        self._scopes.append(_function_scope(node))
+        self.visit(node.body)
+        self._scopes.pop()
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._visit_comprehension(node.generators, [node.elt])
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._visit_comprehension(node.generators, [node.elt])
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self._visit_comprehension(node.generators, [node.key, node.value])
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self._visit_comprehension(node.generators, [node.elt])
+
+    def _visit_function_definition(
+        self,
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> None:
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        self._visit_argument_expressions(node.args)
+        if node.returns is not None:
+            self.visit(node.returns)
+
+        self._scopes.append(_function_scope(node))
+        for statement in node.body:
+            self.visit(statement)
+        self._scopes.pop()
+
+    def _visit_argument_expressions(self, arguments: ast.arguments) -> None:
+        all_arguments = [
+            *arguments.posonlyargs,
+            *arguments.args,
+            *arguments.kwonlyargs,
+        ]
+        if arguments.vararg is not None:
+            all_arguments.append(arguments.vararg)
+        if arguments.kwarg is not None:
+            all_arguments.append(arguments.kwarg)
+        for argument in all_arguments:
+            if argument.annotation is not None:
+                self.visit(argument.annotation)
+        for default in [*arguments.defaults, *arguments.kw_defaults]:
+            if default is not None:
+                self.visit(default)
+
+    def _visit_comprehension(
+        self,
+        generators: list[ast.comprehension],
+        result_nodes: list[ast.expr],
+    ) -> None:
+        # The first iterable is evaluated outside the comprehension's implicit scope.
+        first, *remaining = generators
+        self.visit(first.iter)
+
+        bindings: set[str] = set()
+        for generator in generators:
+            bindings.update(_bound_target_names(generator.target))
+        self._scopes.append(_PythonNameScope(bindings))
+        self.visit(first.target)
+        for condition in first.ifs:
+            self.visit(condition)
+        for generator in remaining:
+            self.visit(generator.iter)
+            self.visit(generator.target)
+            for condition in generator.ifs:
+                self.visit(condition)
+        for result_node in result_nodes:
+            self.visit(result_node)
+        self._scopes.pop()
+
+    def _is_locally_bound(self, name: str) -> bool:
+        for scope in reversed(self._scopes):
+            if name in scope.global_names:
+                return False
+            if name in scope.bindings:
+                return True
+        return False
+
+
+def _function_scope(
+    node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
+) -> _PythonNameScope:
+    # Python decides function locals from the whole body before executing it.
+    collector = _FunctionBindingCollector()
+    if isinstance(node, ast.Lambda):
+        collector.visit(node.body)
+    else:
+        for statement in node.body:
+            collector.visit(statement)
+
+    bindings = _argument_names(node.args) | collector.bindings
+    bindings.difference_update(collector.global_names | collector.nonlocal_names)
+    return _PythonNameScope(bindings, collector.global_names)
+
+
+class _FunctionBindingCollector(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.bindings: set[str] = set()
+        self.global_names: set[str] = set()
+        self.nonlocal_names: set[str] = set()
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
+            self.bindings.add(node.id)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            self.bindings.add(alias.asname or alias.name.split(".")[0])
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        for alias in node.names:
+            if alias.name != "*":
+                self.bindings.add(alias.asname or alias.name)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if node.name is not None:
+            self.bindings.add(node.name)
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.bindings.add(node.name)
+        self._visit_nested_function_expressions(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.bindings.add(node.name)
+        self._visit_nested_function_expressions(node)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        for default in [*node.args.defaults, *node.args.kw_defaults]:
+            if default is not None:
+                self.visit(default)
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._visit_comprehension(node.generators, [node.elt])
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._visit_comprehension(node.generators, [node.elt])
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self._visit_comprehension(node.generators, [node.key, node.value])
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self._visit_comprehension(node.generators, [node.elt])
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.bindings.add(node.name)
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for base in node.bases:
+            self.visit(base)
+        for keyword in node.keywords:
+            self.visit(keyword.value)
+
+    def visit_Global(self, node: ast.Global) -> None:
+        self.global_names.update(node.names)
+
+    def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
+        self.nonlocal_names.update(node.names)
+
+    def _visit_nested_function_expressions(
+        self,
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> None:
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for default in [*node.args.defaults, *node.args.kw_defaults]:
+            if default is not None:
+                self.visit(default)
+
+    def _visit_comprehension(
+        self,
+        generators: list[ast.comprehension],
+        result_nodes: list[ast.expr],
+    ) -> None:
+        # Comprehension targets do not leak into the containing function scope.
+        for generator in generators:
+            self.visit(generator.iter)
+            for condition in generator.ifs:
+                self.visit(condition)
+        for result_node in result_nodes:
+            self.visit(result_node)
+
+
+def _argument_names(arguments: ast.arguments) -> set[str]:
+    names = {
+        argument.arg
+        for argument in [
+            *arguments.posonlyargs,
+            *arguments.args,
+            *arguments.kwonlyargs,
+        ]
+    }
+    if arguments.vararg is not None:
+        names.add(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        names.add(arguments.kwarg.arg)
+    return names
+
+
+def _bound_target_names(target: ast.AST) -> set[str]:
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, ast.Starred):
+        return _bound_target_names(target.value)
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return {
+            name
+            for element in target.elts
+            for name in _bound_target_names(element)
+        }
+    return set()
+
+
+def _check_js_sandbox(source: str) -> list[str]:
+    return [
+        f"js source matches forbidden pattern {p.pattern!r}"
+        for p in _JS_DANGEROUS_PATTERNS if p.search(source)
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Trust-boundary delimiters: prompts must not splice untrusted content
+# (raw user input, retrieved KB text, external HTTP responses) directly
+# into instructions without an explicit <untrusted>...</untrusted> wrapper.
+# ---------------------------------------------------------------------------
+
+_UNTRUSTED_BLOCK_RE = re.compile(r"<untrusted>.*?</untrusted>", re.S)
+
+
+def _untrusted_producer_ids(ir: IRDocument) -> set[str]:
+    ids = {"input"}
+    for n in _walk(ir.nodes):
+        if isinstance(n, (RetrievalNode, HTTPNode)):
+            ids.add(n.id)
+    return ids
+
+
+def _check_trust_boundaries(ir: IRDocument) -> list[ValidationFailure]:
+    failures: list[ValidationFailure] = []
+    untrusted = _untrusted_producer_ids(ir)
+
+    for n in _walk(ir.nodes):
+        fields: list[tuple[str, str]] = []
+        if isinstance(n, LLMNode):
+            fields.append(("prompt", n.prompt))
+            if n.system_prompt:
+                fields.append(("system_prompt", n.system_prompt))
+        elif isinstance(n, AgentNode) and n.system_prompt:
+            fields.append(("system_prompt", n.system_prompt))
+
+        for field_label, text in fields:
+            spans = [(m.start(), m.end()) for m in _UNTRUSTED_BLOCK_RE.finditer(text)]
+            for pid in untrusted:
+                ref_re = re.compile(rf"\$\{{{re.escape(pid)}(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[\d+\])*\}}")
+                for m in ref_re.finditer(text):
+                    if not any(s <= m.start() and m.end() <= e for s, e in spans):
+                        failures.append(ValidationFailure(
+                            "policy",
+                            f"prompt references untrusted producer {pid!r} outside a <untrusted> delimiter",
+                            location=f"nodes[{n.id}].{field_label}",
+                        ))
     return failures
 
 

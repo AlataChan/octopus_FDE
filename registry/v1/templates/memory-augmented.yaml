@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for workflows that need continuity across sessions.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: []
   credentials: []
@@ -30,7 +30,7 @@ nodes:
   - id: answer
     type: llm
     model: configured-planner-model
-    prompt: "Request: ${input.request}\nMemory: ${memory_fetch.body}\nAnswer and summarize any memory update."
+    prompt: "Request: <untrusted>${input.request}</untrusted>\nMemory: <untrusted>${memory_fetch.body}</untrusted>\nAnswer and summarize any memory update."
     temperature: 0.2
     output_schema:
       type: object

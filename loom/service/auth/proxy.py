@@ -1,7 +1,10 @@
 """Client IP extraction with explicit trusted-proxy opt-in."""
 from __future__ import annotations
 
-from fastapi import Request
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from fastapi import Request
 
 
 def client_ip(request: Request, *, trusted_proxy: bool) -> str:

@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for clinic analytics with auditable decisions.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: [ehr_kb]
   credentials: []
@@ -50,7 +50,7 @@ nodes:
   - id: predict
     type: llm
     model: configured-small-model
-    prompt: "Patient: ${input.patient_id}\nWindow: ${input.analysis_window}\nRecord count: ${stats.count}\nRisk score: ${stats.risk_score}\nExplain the trend and recommend clinician follow-up if needed."
+    prompt: "Patient: <untrusted>${input.patient_id}</untrusted>\nWindow: <untrusted>${input.analysis_window}</untrusted>\nRecord count: ${stats.count}\nRisk score: ${stats.risk_score}\nExplain the trend and recommend clinician follow-up if needed."
     temperature: 0
     output_schema:
       type: object

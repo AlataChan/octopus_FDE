@@ -5,6 +5,7 @@ versioned registry per PRD §8.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -16,6 +17,15 @@ _REGISTRY_ROOT = Path(__file__).resolve().parents[2] / "registry"
 
 class RegistryEntryNotFound(KeyError):
     pass
+
+
+def content_sha(raw: dict[str, Any]) -> str:
+    """Digest the registry's actual handle content — never the self-reported
+    "version" field, which lives in the same mutable file it's meant to pin.
+    """
+    payload = {k: v for k, v in raw.items() if k != "version"}
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return "sha:" + hashlib.sha256(canonical).hexdigest()[:40]
 
 
 @dataclass(frozen=True)
@@ -41,6 +51,13 @@ class CredentialEntry:
     description: str
     vault_path: str
     scopes: tuple[str, ...]
+    # ADR 0003: HTTP-node auth bindings, not secret-value storage. Empty
+    # allowed_hosts means "authorize no host" (fail closed) rather than
+    # implicitly trusting a credential the registry hasn't fully described.
+    auth_scheme: str = ""
+    allowed_hosts: tuple[str, ...] = ()
+    placement: str = ""
+    require_tls: bool = True
 
 
 @dataclass(frozen=True)
@@ -68,10 +85,13 @@ class Registry:
         credentials = {c["handle"]: CredentialEntry(
             handle=c["handle"], description=c["description"],
             vault_path=c["vault_path"], scopes=tuple(c.get("scopes", [])),
+            auth_scheme=c.get("auth_scheme", ""),
+            allowed_hosts=tuple(c.get("allowed_hosts", [])),
+            placement=c.get("placement", ""),
+            require_tls=c.get("require_tls", True),
         ) for c in raw.get("credentials", [])}
         return Registry(
-            version=f"sha:{raw['version'][4:]}" if raw["version"].startswith("sha:")
-            else "sha:0000000",
+            version=content_sha(raw),
             tools=tools, datasets=datasets, credentials=credentials,
         )
 

@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for image-grounded reasoning.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: []
   credentials: []
@@ -25,7 +25,7 @@ nodes:
   - id: vision
     type: llm
     model: configured-vision-model
-    prompt: "Image: ${input.image}\nQuestion: ${input.question}\nDescribe observations and answer."
+    prompt: "Image: <untrusted>${input.image}</untrusted>\nQuestion: <untrusted>${input.question}</untrusted>\nDescribe observations and answer."
     temperature: 0.1
     output_schema:
       type: object

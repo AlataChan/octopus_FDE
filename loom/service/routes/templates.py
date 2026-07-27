@@ -1,13 +1,16 @@
 """Template gallery API routes."""
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from loom.registry.templates import LocalizedText, Target, TemplateRecord
+from loom.registry.templates import LocalizedText, Target  # noqa: TC001
 from loom.service.errors import not_found
+
+if TYPE_CHECKING:
+    from loom.registry.templates import TemplateRecord
 
 router = APIRouter(prefix="/v1")
 

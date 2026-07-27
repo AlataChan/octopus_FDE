@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing verification template for claims that need evidence.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: [policy_kb]
   credentials: []
@@ -30,7 +30,7 @@ nodes:
   - id: validate
     type: llm
     model: configured-planner-model
-    prompt: "Claim: ${input.claim}\nEvidence candidates: ${retrieve.chunks}\nReturn supported/refuted/unclear, evidence ids, and confidence."
+    prompt: "Claim: <untrusted>${input.claim}</untrusted>\nEvidence candidates: <untrusted>${retrieve.chunks}</untrusted>\nReturn supported/refuted/unclear, evidence ids, and confidence."
     temperature: 0
     output_schema:
       type: object

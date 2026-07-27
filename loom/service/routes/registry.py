@@ -16,6 +16,11 @@ if TYPE_CHECKING:
 router = APIRouter(prefix="/v1/registry/workflows")
 ActorDep = Annotated[Actor, Depends(get_actor)]
 
+# Roles allowed to mark a workflow deployed, on top of the ownership check
+# enforced by the store. Kept explicit so a future read-only role is excluded
+# without further changes here (see ADR 0027).
+DEPLOY_CAPABLE_ROLES = frozenset({"fde", "admin"})
+
 
 class MarkDeployedRequest(BaseModel):
     platform_app_id: str | None = None
@@ -29,8 +34,7 @@ def list_workflows(
     target: str | None = None,
     binding: str | None = None,
 ) -> list[dict[str, object]]:
-    del actor
-    rows = request.app.state.registry_store.list(target=target, binding_handle=binding)
+    rows = request.app.state.registry_store.list(actor_id=actor.id, target=target, binding_handle=binding)
     return [row.model_dump(mode="json") for row in rows]
 
 
@@ -40,14 +44,13 @@ def get_workflow(
     request: Request,
     actor: ActorDep,
 ) -> dict[str, object]:
-    del actor
-    row = request.app.state.registry_store.get(workflow_id)
+    row = request.app.state.registry_store.get(workflow_id, actor_id=actor.id)
     if row is None:
         raise not_found("workflow not found")
     artifact = request.app.state.session_store.get_artifact(
         row.session_id,
         row.artifact_id,
-        actor_id=row.created_by_actor,
+        actor_id=actor.id,
     )
     return {
         "registry_row": cast("dict[str, object]", row.model_dump(mode="json")),
@@ -62,12 +65,17 @@ def mark_deployed(
     request: Request,
     actor: ActorDep,
 ) -> dict[str, object]:
-    row = request.app.state.registry_store.mark_deployed(
-        workflow_id,
-        platform_app_id=body.platform_app_id,
-        deployment_note=body.deployment_note,
-        deployed_by_actor=actor.id,
-    )
+    if actor.role not in DEPLOY_CAPABLE_ROLES:
+        raise not_found("workflow not found")
+    try:
+        row = request.app.state.registry_store.mark_deployed(
+            workflow_id,
+            platform_app_id=body.platform_app_id,
+            deployment_note=body.deployment_note,
+            deployed_by_actor=actor.id,
+        )
+    except KeyError as e:
+        raise not_found("workflow not found") from e
     # Registry deployment is a workflow-level event; append it to the linked session archive.
     request.app.state.archive_writer.append(
         row.session_id,

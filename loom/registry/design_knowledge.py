@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from loom.fde_session.persona_brief import PersonaBrief
-from loom.registry.templates import LocalizedText, Target, TemplateCatalog, TemplateRecord
+from loom.registry.templates import LocalizedText, Target  # noqa: TC001
+
+if TYPE_CHECKING:
+    from loom.fde_session.persona_brief import PersonaBrief
+    from loom.registry.templates import TemplateCatalog, TemplateRecord
 
 
 class RegistryHandles(BaseModel):
@@ -41,6 +44,9 @@ class _ScoredCard:
     card: DesignKnowledgeCard
 
 
+_DesignKnowledgeCardList = list[DesignKnowledgeCard]
+
+
 class DesignKnowledgeCatalog:
     def __init__(self, *, cards: dict[str, DesignKnowledgeCard]):
         self._cards = cards
@@ -58,7 +64,7 @@ class DesignKnowledgeCatalog:
         *,
         scope: str | None = None,
         target: Target | None = None,
-    ) -> list[DesignKnowledgeCard]:
+    ) -> _DesignKnowledgeCardList:
         rows = [self._cards[key] for key in sorted(self._cards)]
         if scope:
             rows = [row for row in rows if scope in row.scopes]
@@ -78,7 +84,7 @@ class DesignKnowledgeCatalog:
         persona: PersonaBrief | None = None,
         brief_draft: dict[str, Any] | None = None,
         top_k: int = 5,
-    ) -> list[DesignKnowledgeCard]:
+    ) -> _DesignKnowledgeCardList:
         query = " ".join(part for part in (intent, _brief_text(brief_draft), _persona_text(persona)) if part)
         scored = [
             _ScoredCard(score=_score(card, query) + _persona_score(card, persona), card=card)
@@ -86,7 +92,7 @@ class DesignKnowledgeCatalog:
         ]
         scored.sort(key=lambda row: (-row.score, row.card.id))
 
-        selected: list[DesignKnowledgeCard] = []
+        selected: _DesignKnowledgeCardList = []
         seen_signatures: set[str] = set()
         for row in scored:
             if row.card.node_signature in seen_signatures:
@@ -130,12 +136,12 @@ def _card_from_template(row: TemplateRecord) -> DesignKnowledgeCard:
 def _node_types(nodes: list[Any]) -> list[str]:
     types: list[str] = []
     for node in nodes:
-        node_type = str(getattr(node, "type"))
+        node_type = str(node.type)
         types.append(node_type)
         if node_type == "loop":
-            types.extend(_node_types(getattr(node, "body")))
+            types.extend(_node_types(node.body))
         elif node_type == "parallel":
-            branches = getattr(node, "branches")
+            branches = node.branches
             for branch_name in sorted(branches):
                 types.extend(_node_types(branches[branch_name]))
     return types
@@ -259,9 +265,14 @@ def _persona_score(card: DesignKnowledgeCard, persona: PersonaBrief | None) -> i
     score += sum(2 for token in persona_tokens if token in card_text)
 
     regulatory_tags = {tag.lower() for tag in persona.compliance_boundary.regulatory_tags}
-    if persona.compliance_boundary.pii_class_default in {"medium", "high"}:
-        if "guardrails" in card.policy_features or "compliance" in {tag.lower() for tag in card.tags}:
-            score += 3
+    if (
+        persona.compliance_boundary.pii_class_default in {"medium", "high"}
+        and (
+            "guardrails" in card.policy_features
+            or "compliance" in {tag.lower() for tag in card.tags}
+        )
+    ):
+        score += 3
     if regulatory_tags and ("guardrails" in card.policy_features or "audit" in card.policy_features):
         score += 2
     if persona.reviewer.decision_authority and (

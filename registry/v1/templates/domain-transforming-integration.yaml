@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for cross-domain workflow integration.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: []
   credentials: []
@@ -30,7 +30,7 @@ nodes:
   - id: map
     type: llm
     model: configured-small-model
-    prompt: "Source payload: ${source_read.body}\nTarget system: ${input.target_system}\nMap the payload to the target schema."
+    prompt: "Source payload: <untrusted>${source_read.body}</untrusted>\nTarget system: <untrusted>${input.target_system}</untrusted>\nMap the payload to the target schema."
     temperature: 0
     output_schema:
       type: object

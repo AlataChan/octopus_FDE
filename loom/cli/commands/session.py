@@ -3,17 +3,19 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 import socket
+import sqlite3
 import sys
 from pathlib import Path
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
 from uuid import UUID
 
 import click
 
-from loom.state.models import TurnRow
 from loom.state.store import SessionStore
+
+if TYPE_CHECKING:
+    from loom.state.models import TurnRow
 
 CLI_SCHEMA_VERSION = "1"
 

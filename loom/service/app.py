@@ -48,7 +48,7 @@ def _default_planner(**kwargs: object) -> IRDocument:
     target = kwargs.get("target") or "hiagent"
     if target not in {"hiagent", "dify"}:
         raise RuntimeError(f"unsupported target runtime: {target}")
-    target_runtime = cast(Literal["hiagent", "dify"], target)
+    target_runtime = cast("Literal['hiagent', 'dify']", target)
     llm_config = kwargs["llm_config"]
     if not isinstance(llm_config, dict):
         raise RuntimeError("planner llm_config missing")
@@ -146,7 +146,7 @@ def _install_spa_routes(app: FastAPI, web_dist: Path) -> None:
                 candidate.relative_to(web_dist.resolve())
             except ValueError:
                 # Path traversal attempt.
-                raise HTTPException(status_code=404, detail="Not Found")
+                raise HTTPException(status_code=404, detail="Not Found") from None
             if candidate.is_file():
                 return FileResponse(candidate)
         if not index_html.is_file():

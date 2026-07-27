@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for bounded autonomous decisions with explicit evidence.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: [policy_kb]
   credentials: []
@@ -30,7 +30,7 @@ nodes:
   - id: reason
     type: llm
     model: configured-planner-model
-    prompt: "Situation: ${input.situation}\nSignals: ${perceive.body}\nReturn decision, rationale, and confidence."
+    prompt: "Situation: <untrusted>${input.situation}</untrusted>\nSignals: <untrusted>${perceive.body}</untrusted>\nReturn decision, rationale, and confidence."
     temperature: 0.1
     output_schema:
       type: object

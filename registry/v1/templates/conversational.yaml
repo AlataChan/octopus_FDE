@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for conversational agents with context recall.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: [product_kb, policy_kb]
   credentials: []
@@ -31,7 +31,7 @@ nodes:
   - id: reply
     type: llm
     model: configured-planner-model
-    prompt: "Message: ${input.message}\nContext: ${retrieve_history.chunks}\nWrite a helpful reply with citations."
+    prompt: "Message: <untrusted>${input.message}</untrusted>\nContext: <untrusted>${retrieve_history.chunks}</untrusted>\nWrite a helpful reply with citations."
     temperature: 0.3
     output_schema:
       type: object

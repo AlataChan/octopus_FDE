@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for review-aware agentic workflow planning.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: [policy_kb]
   credentials: []
@@ -26,7 +26,7 @@ nodes:
   - id: propose
     type: llm
     model: configured-planner-model
-    prompt: "Objective: ${input.objective}\nPropose an executable workflow and confidence."
+    prompt: "Objective: <untrusted>${input.objective}</untrusted>\nPropose an executable workflow and confidence."
     temperature: 0.1
     output_schema:
       type: object

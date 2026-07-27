@@ -5,7 +5,7 @@ metadata:
   owner: template-gallery
   rationale: User-facing template for catalog-based recommendation flows.
 registry_ref:
-  registry_version: sha:0000000
+  registry_version: sha:e44736a363bab7d24b565313d22a21773b826961
   tools: []
   datasets: [product_kb]
   credentials: []
@@ -31,7 +31,7 @@ nodes:
   - id: score
     type: llm
     model: configured-small-model
-    prompt: "Need: ${input.user_need}\nCandidates: ${retrieve_catalog.chunks}\nScore and rank recommendations."
+    prompt: "Need: <untrusted>${input.user_need}</untrusted>\nCandidates: <untrusted>${retrieve_catalog.chunks}</untrusted>\nScore and rank recommendations."
     temperature: 0.1
     output_schema:
       type: object
