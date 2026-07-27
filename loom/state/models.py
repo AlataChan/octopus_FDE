@@ -7,7 +7,7 @@ from uuid import UUID  # noqa: TC003
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from loom.runtimes.warnings import CompileWarning
+from loom.runtimes.warnings import CompileWarning  # noqa: TC001
 
 TurnKind = Literal["clarify", "plan", "questionnaire", "brief_review"]
 

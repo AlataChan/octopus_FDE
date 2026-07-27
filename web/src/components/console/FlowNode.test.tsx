@@ -26,8 +26,23 @@ function nodeData(overrides: Partial<FlowNodeData> = {}): FlowNodeData {
   };
 }
 
-function nodeProps(data: FlowNodeData) {
-  return { data, id: data.id, type: "flowNode" as const };
+type FlowNodeProps = Parameters<typeof FlowNode>[0];
+
+function nodeProps(data: FlowNodeData): FlowNodeProps {
+  return {
+    data,
+    deletable: true,
+    draggable: true,
+    dragging: false,
+    id: data.id,
+    isConnectable: true,
+    positionAbsoluteX: 0,
+    positionAbsoluteY: 0,
+    selectable: true,
+    selected: data.selected,
+    type: "flowNode",
+    zIndex: 0
+  };
 }
 
 describe("FlowNode", () => {

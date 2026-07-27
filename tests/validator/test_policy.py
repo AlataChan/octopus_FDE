@@ -136,7 +136,16 @@ def test_v04_audit_retention_cannot_exceed_org_cap():
 
 
 def _ir_with_code(source: str, *, language: str = "python"):
-    from loom.ir.models import CodeNode, Edge, Metadata, OutputNode, Policy, PortDecl, RegistryRef, TriggerNode
+    from loom.ir.models import (
+        CodeNode,
+        Edge,
+        Metadata,
+        OutputNode,
+        Policy,
+        PortDecl,
+        RegistryRef,
+        TriggerNode,
+    )
 
     return IRDocument(
         ir_version="0.3",

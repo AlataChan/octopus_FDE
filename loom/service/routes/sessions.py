@@ -5,10 +5,9 @@ import hashlib
 import json
 import re
 import sys
-from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
@@ -31,13 +30,17 @@ from loom.runtimes import registry as runtime_registry
 from loom.runtimes.base import CompileContext, UnsupportedConstruct
 from loom.runtimes.bootstrap import register_all as register_runtime_adapters
 from loom.runtimes.hiagent.binding import HiagentBinding
-from loom.runtimes.warnings import CompileWarning
 from loom.service.deps import Actor, get_actor
 from loom.service.errors import bad_request, conflict, not_found
 from loom.service.models import SessionDetail, SessionPatchInput, SessionSummary
-from loom.state.models import SessionRow, TurnRow
 from loom.state.store import StaleSessionRevision
 from loom.validator.validate import validate
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from loom.runtimes.warnings import CompileWarning
+    from loom.state.models import SessionRow, TurnRow
 
 router = APIRouter(prefix="/v1")
 ActorDep = Annotated[Actor, Depends(get_actor)]
@@ -571,7 +574,7 @@ def _session_audit_writer(request: Request, actor_id: str) -> Callable[[UUID, li
             request.app.state.archive_writer.append(
                 session_id,
                 actor_id=actor_id,
-                event_type=cast(Any, event_type),
+                event_type=cast("Any", event_type),
                 payload=payload,
             )
 
@@ -628,7 +631,6 @@ def _handle_clarify_turn(
     user_message: str,
     last_turn: TurnRow | None,
 ) -> dict[str, object]:
-    store = request.app.state.session_store
     draft_before = _load_draft(session.brief_draft)
     brief_before_json = _draft_json(draft_before) if draft_before else None
     round_index = session.clarify_round + 1
@@ -837,7 +839,7 @@ def _finish_plan_from_draft(
         ir = request.app.state.planner(
             user_message=_draft_to_planner_message(draft),
             session=session,
-            target=cast(Literal["hiagent", "dify"], draft.target_runtime),
+            target=cast("Literal['hiagent', 'dify']", draft.target_runtime),
             scope=draft.scope or _session_scope(session),
             llm_config={
                 "api_key": request.app.state.fernet.decrypt(session.llm_api_key_encrypted).decode("utf-8")
@@ -1179,9 +1181,12 @@ def _enforce_manual_review_scope(
             },
         ]
     )
-    normalize = lambda edges: sorted(  # noqa: E731 - local canonicalizer
-        json.dumps(edge, ensure_ascii=False, sort_keys=True) for edge in edges
-    )
+    def normalize(edges: list[dict[str, object]]) -> list[str]:
+        return sorted(
+            json.dumps(edge, ensure_ascii=False, sort_keys=True)
+            for edge in edges
+        )
+
     if normalize(after_edges) != normalize(expected_edges):
         raise EditRejected("planner result exceeded declared edit scope")
 
@@ -1218,7 +1223,7 @@ def _stale_turn_reference_response(
         actor=actor,
         session=session,
         turn=turn,
-        kind=cast(Literal["clarify", "questionnaire"], last_turn.kind),
+        kind=cast("Literal['clarify', 'questionnaire']", last_turn.kind),
         question_payload=question_payload,
         draft_before_json=brief_before_json,
         draft_after=draft_after or WorkflowBriefDraft(title="Self-Design workflow", intent=""),
@@ -1432,7 +1437,7 @@ def _seed_session_from_template(
     selected_scope = scope or record.entry.scopes[0]
     if selected_scope not in record.entry.scopes:
         raise bad_request(f"template {template_id} is not available for scope {selected_scope}")
-    selected_target = cast(Literal["hiagent", "dify"], record.entry.compile_targets[0])
+    selected_target = cast("Literal['hiagent', 'dify']", record.entry.compile_targets[0])
     request.app.state.session_store.update_session_planning_context(
         session_id,
         actor_id=actor_id,
@@ -1472,7 +1477,7 @@ def _seed_session_from_template(
     )
     seeded = request.app.state.session_store.get_session(session_id, actor_id=actor_id)
     assert seeded is not None
-    return cast(SessionRow, seeded)
+    return cast("SessionRow", seeded)
 
 
 def _ensure_template_target_supported(

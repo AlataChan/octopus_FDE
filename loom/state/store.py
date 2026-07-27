@@ -5,10 +5,11 @@ import hashlib
 import json
 import sqlite3
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID, uuid4
 
 from cryptography.fernet import Fernet  # noqa: TC002
@@ -16,6 +17,9 @@ from cryptography.fernet import Fernet  # noqa: TC002
 from loom.runtimes.warnings import CompileWarning
 from loom.state.models import ActorLLMConfigRow, ArtifactRow, SessionRow, TurnKind, TurnRow
 from loom.state.sm import SessionState, transition
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 AuditEventWriter = Callable[[UUID, list[tuple[str, dict[str, object]]]], None]
 
@@ -851,17 +855,22 @@ class SessionStore:
             raise KeyError(f"turn not found: {turn_id}")
         return row
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         if self._readonly:
             con = sqlite3.connect(f"{self.db_path.resolve().as_uri()}?mode=ro", uri=True)
             con.row_factory = sqlite3.Row
             con.execute("PRAGMA query_only = ON")
-            return con
-        con = sqlite3.connect(self.db_path)
-        con.row_factory = sqlite3.Row
-        con.execute("PRAGMA journal_mode=WAL")
-        con.execute("PRAGMA busy_timeout=5000")
-        return con
+        else:
+            con = sqlite3.connect(self.db_path)
+            con.row_factory = sqlite3.Row
+            con.execute("PRAGMA journal_mode=WAL")
+            con.execute("PRAGMA busy_timeout=5000")
+        try:
+            with con:
+                yield con
+        finally:
+            con.close()
 
     def _ensure_writable(self) -> None:
         if self._readonly:
@@ -997,22 +1006,23 @@ def _now() -> str:
 
 
 def _session_row(row: sqlite3.Row) -> SessionRow:
+    columns = set(row.keys())
     return SessionRow(
         session_id=UUID(row["session_id"]),
         actor_id=row["actor_id"],
         state=row["state"],
         latest_ir_json=row["latest_ir_json"],
         latest_ir_sha256=row["latest_ir_sha256"],
-        title=row["title"] if "title" in row.keys() else None,
+        title=row["title"] if "title" in columns else None,
         llm_api_key_encrypted=row["llm_api_key_encrypted"],
         llm_base_url=row["llm_base_url"],
         llm_model=row["llm_model"],
         llm_key_version=row["llm_key_version"],
-        target_runtime=row["target_runtime"] if "target_runtime" in row.keys() else None,
-        scope=row["scope"] if "scope" in row.keys() else None,
-        brief_draft=row["brief_draft"] if "brief_draft" in row.keys() else None,
-        clarify_round=row["clarify_round"] if "clarify_round" in row.keys() else 0,
-        self_design=bool(row["self_design"]) if "self_design" in row.keys() else False,
+        target_runtime=row["target_runtime"] if "target_runtime" in columns else None,
+        scope=row["scope"] if "scope" in columns else None,
+        brief_draft=row["brief_draft"] if "brief_draft" in columns else None,
+        clarify_round=row["clarify_round"] if "clarify_round" in columns else 0,
+        self_design=bool(row["self_design"]) if "self_design" in columns else False,
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )
@@ -1032,6 +1042,7 @@ def _actor_llm_config_row(row: sqlite3.Row) -> ActorLLMConfigRow:
 
 
 def _turn_row(row: sqlite3.Row) -> TurnRow:
+    columns = set(row.keys())
     return TurnRow(
         turn_id=UUID(row["turn_id"]),
         session_id=UUID(row["session_id"]),
@@ -1040,11 +1051,11 @@ def _turn_row(row: sqlite3.Row) -> TurnRow:
         planner_reply=row["planner_reply"],
         ir_before=row["ir_before"],
         ir_after=row["ir_after"],
-        kind=row["kind"] if "kind" in row.keys() else "plan",
-        clarify_question=row["clarify_question"] if "clarify_question" in row.keys() else None,
-        brief_before=row["brief_before"] if "brief_before" in row.keys() else None,
-        brief_after=row["brief_after"] if "brief_after" in row.keys() else None,
-        error_correlation_id=row["error_correlation_id"] if "error_correlation_id" in row.keys() else None,
+        kind=row["kind"] if "kind" in columns else "plan",
+        clarify_question=row["clarify_question"] if "clarify_question" in columns else None,
+        brief_before=row["brief_before"] if "brief_before" in columns else None,
+        brief_after=row["brief_after"] if "brief_after" in columns else None,
+        error_correlation_id=row["error_correlation_id"] if "error_correlation_id" in columns else None,
         validation_errors=json.loads(row["validation_errors"]),
         status=row["status"],
         created_at=datetime.fromisoformat(row["created_at"]),
@@ -1052,7 +1063,8 @@ def _turn_row(row: sqlite3.Row) -> TurnRow:
 
 
 def _artifact_row(row: sqlite3.Row) -> ArtifactRow:
-    warnings_raw = row["compile_warnings_json"] if "compile_warnings_json" in row.keys() else "[]"
+    columns = set(row.keys())
+    warnings_raw = row["compile_warnings_json"] if "compile_warnings_json" in columns else "[]"
     return ArtifactRow(
         artifact_id=UUID(row["artifact_id"]),
         session_id=UUID(row["session_id"]),

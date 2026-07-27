@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
 
-from loom.validator.validate import validate
 from loom.validator.registry import Registry
+from loom.validator.validate import validate
 
 ROOT = Path(__file__).resolve().parents[2]
 

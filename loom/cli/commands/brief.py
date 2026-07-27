@@ -81,7 +81,7 @@ def brief(
     draft = _build_draft(
         intent=intent,
         scope=scope,
-        target=cast(Literal["hiagent", "dify"] | None, target),
+        target=cast("Literal['hiagent', 'dify'] | None", target),
         draft_json_path=draft_json_path,
     )
     questions = missing_fields(draft)
@@ -168,9 +168,9 @@ def _emit_json(payload: dict[str, object], *, err: bool = False) -> None:
 
 def _emit_text(payload: dict[str, object]) -> None:
     click.echo(f"ready={str(payload['ready']).lower()}")
-    for item in cast(list[dict[str, str]], payload["missing_block"]):
+    for item in cast("list[dict[str, str]]", payload["missing_block"]):
         click.echo(f"block {item['field_path']}: {item['question']}")
-    for item in cast(list[dict[str, str]], payload["missing_warn"]):
+    for item in cast("list[dict[str, str]]", payload["missing_warn"]):
         click.echo(f"warn {item['field_path']}: {item['question']}")
 
 

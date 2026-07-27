@@ -102,8 +102,10 @@ def _list_item_kind(parent: str, item: Any) -> str:
 
 
 def _node_sort_key(node: Any) -> str:
-    if isinstance(node, dict) and isinstance(node.get("id"), str):
-        return node["id"]
+    if isinstance(node, dict):
+        node_id = node.get("id")
+        if isinstance(node_id, str):
+            return node_id
     return json.dumps(node, sort_keys=True, ensure_ascii=False)
 
 

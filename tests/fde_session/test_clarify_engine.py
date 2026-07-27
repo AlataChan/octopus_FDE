@@ -1,4 +1,9 @@
-from loom.fde_session.brief import ComplianceBoundary, DataSourceRef, TriggerSpec, WorkflowBriefDraft
+from loom.fde_session.brief import (
+    ComplianceBoundary,
+    DataSourceRef,
+    TriggerSpec,
+    WorkflowBriefDraft,
+)
 from loom.fde_session.clarify_engine import DeterministicClarifyEngine
 
 

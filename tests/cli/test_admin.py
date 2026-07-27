@@ -7,9 +7,9 @@ from cryptography.fernet import Fernet
 
 from loom.cli.commands import admin as admin_cmd
 from loom.cli.main import cli
-from loom.service.routes.auth import AUTH_ARCHIVE_SESSION_ID
 from loom.service.auth.credentials import AUTH_FILENAME, read_auth_file
 from loom.service.auth.password import verify_password
+from loom.service.routes.auth import AUTH_ARCHIVE_SESSION_ID
 
 
 def _json_from_output(output: str) -> dict:

@@ -1,14 +1,16 @@
 """Actor-scoped settings routes."""
 from __future__ import annotations
 
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, Request, Response
 
 from loom.service.deps import Actor, get_actor
 from loom.service.errors import bad_request
 from loom.service.models import ActorLLMConfigInput, ActorLLMConfigResponse
-from loom.state.models import ActorLLMConfigRow
+
+if TYPE_CHECKING:
+    from loom.state.models import ActorLLMConfigRow
 
 router = APIRouter(prefix="/v1")
 ActorDep = Annotated[Actor, Depends(get_actor)]

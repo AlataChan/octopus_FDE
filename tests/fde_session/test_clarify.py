@@ -1,4 +1,10 @@
-from loom.fde_session.brief import ComplianceBoundary, DataSourceRef, TriggerSpec, WorkflowBrief, WorkflowBriefDraft
+from loom.fde_session.brief import (
+    ComplianceBoundary,
+    DataSourceRef,
+    TriggerSpec,
+    WorkflowBrief,
+    WorkflowBriefDraft,
+)
 from loom.fde_session.clarify import missing_fields
 
 

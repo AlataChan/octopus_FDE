@@ -123,19 +123,31 @@ def _node_config_change(old: JsonObj, new: JsonObj, node_id: str, path: str) -> 
 def _nested_node_changes(old: JsonObj, new: JsonObj, node_id: str, path: str) -> list[dict[str, Any]]:
     node_type = new.get("type") or old.get("type")
     if node_type == "loop":
-        old_body = old.get("body") if isinstance(old.get("body"), list) else []
-        new_body = new.get("body") if isinstance(new.get("body"), list) else []
+        old_body_value = old.get("body")
+        new_body_value = new.get("body")
+        old_body: list[Any] = old_body_value if isinstance(old_body_value, list) else []
+        new_body: list[Any] = new_body_value if isinstance(new_body_value, list) else []
         return _diff_node_list(old_body, new_body, path=_join_path(path, node_id, "body"))
     if node_type == "parallel":
-        old_branches = old.get("branches") if isinstance(old.get("branches"), dict) else {}
-        new_branches = new.get("branches") if isinstance(new.get("branches"), dict) else {}
+        old_branches_value = old.get("branches")
+        new_branches_value = new.get("branches")
+        old_branches: dict[Any, Any] = (
+            old_branches_value if isinstance(old_branches_value, dict) else {}
+        )
+        new_branches: dict[Any, Any] = (
+            new_branches_value if isinstance(new_branches_value, dict) else {}
+        )
         changes: list[dict[str, Any]] = []
         for branch_key in sorted(set(old_branches) | set(new_branches)):
-            old_branch = old_branches.get(branch_key)
-            new_branch = new_branches.get(branch_key)
-            old_branch = old_branch if isinstance(old_branch, list) else []
-            new_branch = new_branch if isinstance(new_branch, list) else []
-            branch_path = _join_path(path, node_id, "branches", branch_key)
+            old_branch_value = old_branches.get(branch_key)
+            new_branch_value = new_branches.get(branch_key)
+            old_branch: list[Any] = (
+                old_branch_value if isinstance(old_branch_value, list) else []
+            )
+            new_branch: list[Any] = (
+                new_branch_value if isinstance(new_branch_value, list) else []
+            )
+            branch_path = _join_path(path, node_id, "branches", str(branch_key))
             changes.extend(_diff_node_list(old_branch, new_branch, path=branch_path))
         return changes
     return []
@@ -153,7 +165,10 @@ def _join_path(*parts: str) -> str:
     return ".".join(p for p in parts if p)
 
 
-def _config_view(node: JsonObj, exclude: set[str] = frozenset()) -> dict[str, Any]:
+def _config_view(
+    node: JsonObj,
+    exclude: set[str] | frozenset[str] = frozenset(),
+) -> dict[str, Any]:
     ignored = {"id", "name", "title", "label", *exclude}
     return {key: value for key, value in node.items() if key not in ignored}
 

@@ -93,7 +93,7 @@ describe("flow-layout", () => {
   });
 
   it("rejects malformed IR graphs loaded from the fixture file", () => {
-    const fixturePath = resolve(__dirname, "../../tests/fixtures/malformed-ir.yaml");
+    const fixturePath = resolve(process.cwd(), "tests/fixtures/malformed-ir.yaml");
     const raw = readFileSync(fixturePath, "utf-8");
     const cases = parseFixtureDocuments(raw);
 

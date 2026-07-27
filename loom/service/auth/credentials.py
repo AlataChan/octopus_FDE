@@ -1,18 +1,22 @@
 """File-backed local admin credentials for single-user deployments."""
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 import stat
 from dataclasses import dataclass
-from datetime import datetime
-from pathlib import Path
-from typing import Annotated, Literal, Mapping
+from datetime import datetime  # noqa: TC003
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
 
 from loom.service.auth.password import ScryptPasswordError, validate_scrypt_hash
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from pathlib import Path
 
 LOGGER = logging.getLogger(__name__)
 AUTH_FILENAME = "auth.json"
@@ -123,15 +127,11 @@ def atomic_write_auth_file(data_dir: Path, doc: AuthFileSchema, *, force: bool =
         raise AuthCredentialsError(f"failed to write {auth_path}: {e}") from e
     finally:
         if fd is not None:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(fd)
-            except OSError:
-                pass
         if tmp_path.exists() or tmp_path.is_symlink():
-            try:
+            with contextlib.suppress(OSError):
                 tmp_path.unlink()
-            except OSError:
-                pass
 
 
 def _validate_hash(encoded: str, *, auth_path: Path | None) -> None:

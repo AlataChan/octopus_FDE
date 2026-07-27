@@ -6,9 +6,9 @@ from typing import Any
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
-from loom.fde_session.persona_brief import PersonaBrief
-from loom.registry.design_knowledge import DesignKnowledgeCard
-from loom.registry.templates import Target
+from loom.fde_session.persona_brief import PersonaBrief  # noqa: TC001
+from loom.registry.design_knowledge import DesignKnowledgeCard  # noqa: TC001
+from loom.registry.templates import Target  # noqa: TC001
 from loom.service.errors import not_found
 
 router = APIRouter(prefix="/v1")

@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import hmac
-from uuid import UUID
+from typing import TYPE_CHECKING
 
-from loom.archive.jsonl import ArchiveWriter
-from loom.archive.schema import ArchiveEvent, ArchiveEventType
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    from loom.archive.jsonl import ArchiveWriter
+    from loom.archive.schema import ArchiveEvent, ArchiveEventType
 
 
 class InstanceArchiveWriter:
