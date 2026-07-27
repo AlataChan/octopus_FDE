@@ -162,7 +162,11 @@ def test_code_emits_code(minimal_binding: HiagentBinding):
     # Hiagent's Go backend expects Language as integer enum (1=python, 2=js).
     assert node["Configs"]["Code"]["Language"] == 1
     # Hiagent uses 'Code' field name, not 'Source'.
-    assert node["Configs"]["Code"]["Code"] == "def handler(params):\n    return {'answer': 'ok'}"
+    assert node["Configs"]["Code"]["Code"] == (
+        'def handler(input=""):\n'
+        "    params = input if isinstance(input, dict) else {}\n"
+        "    return {'answer': 'ok'}"
+    )
     assert "Retries" in node["Configs"]["Code"]
     assert "TimeoutSeconds" in node["Configs"]["Code"]
 
