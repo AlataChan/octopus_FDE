@@ -19,6 +19,8 @@ from loom.fde_session.clarify_engine import DeterministicClarifyEngine
 from loom.planner.client import PlannerClient
 from loom.planner.retry import plan as plan_intent
 from loom.planner.types import IntentRequest
+from loom.registry.design_knowledge import DesignKnowledgeCatalog
+from loom.registry.personas import PersonaCatalog
 from loom.registry.store import WorkflowRegistryStore
 from loom.registry.templates import TemplateCatalog
 from loom.service.auth import AuthSessionStore, LoginRateLimiter
@@ -26,7 +28,9 @@ from loom.service.deps import Settings
 from loom.service.routes.actor import router as actor_router
 from loom.service.routes.auth import AUTH_ARCHIVE_SESSION_ID
 from loom.service.routes.auth import router as auth_router
+from loom.service.routes.design_knowledge import router as design_knowledge_router
 from loom.service.routes.health import router as health_router
+from loom.service.routes.personas import router as personas_router
 from loom.service.routes.registry import router as registry_router
 from loom.service.routes.sessions import router as sessions_router
 from loom.service.routes.templates import router as templates_router
@@ -95,6 +99,8 @@ def create_app(
     app.state.auth_store = AuthSessionStore(ttl_hours=settings.auth_session_ttl_hours)
     app.state.auth_rate_limiter = LoginRateLimiter()
     app.state.template_catalog = TemplateCatalog.load()
+    app.state.persona_catalog = PersonaCatalog.load()
+    app.state.design_knowledge_catalog = DesignKnowledgeCatalog.from_template_catalog(app.state.template_catalog)
     app.state.planner = planner or _default_planner
     app.state.clarify_engine = clarify_engine or DeterministicClarifyEngine()
     _install_auth_middleware(app, settings)
@@ -105,6 +111,8 @@ def create_app(
     app.include_router(sessions_router)
     app.include_router(registry_router)
     app.include_router(templates_router)
+    app.include_router(personas_router)
+    app.include_router(design_knowledge_router)
     web_dist = Path(__file__).resolve().parents[2] / "web" / "dist"
     if web_dist.exists():
         _install_spa_routes(app, web_dist)

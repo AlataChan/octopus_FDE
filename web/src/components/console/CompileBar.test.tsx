@@ -1,7 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import "../../lib/i18n";
 import { CompileBar } from "./CompileBar";
+
+afterEach(() => {
+  cleanup();
+});
 
 describe("CompileBar", () => {
   it("disables the compile button while a compile is in flight", () => {
@@ -15,14 +19,15 @@ describe("CompileBar", () => {
       />
     );
 
-    const button = screen.getByRole("button", { name: /正在编译|Compiling/i });
+    const button = screen.getByRole("button", { name: /正在生成交付包|Generating package/i });
     expect(button).toBeDisabled();
 
     fireEvent.click(button);
     expect(button).toBeDisabled();
   });
 
-  it("renders artifact cards with a prominent download action and no import controls", () => {
+  it("renders artifact cards with download and import handoff actions", async () => {
+    const onMarkDeployed = vi.fn().mockResolvedValue(undefined);
     render(
       <CompileBar
         artifacts={[
@@ -47,6 +52,7 @@ describe("CompileBar", () => {
         isCompiling={false}
         onCompile={vi.fn()}
         onDownload={vi.fn()}
+        onMarkDeployed={onMarkDeployed}
       />
     );
 
@@ -55,9 +61,22 @@ describe("CompileBar", () => {
     expect(button).toHaveClass("bg-accent");
     expect(button).toHaveClass("h-10");
     expect(button).toHaveClass("text-sm");
-    expect(screen.queryByPlaceholderText(/平台 App ID|Platform App ID/i)).not.toBeInTheDocument();
-    expect(screen.queryByPlaceholderText(/导入备注|Import note/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /标记已导入|Mark imported/i })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText(/平台 App ID|Platform App ID/i), {
+      target: { value: "hiagent-app-42" }
+    });
+    fireEvent.change(screen.getByPlaceholderText(/交接备注|Handoff note/i), {
+      target: { value: "Imported into staging." }
+    });
+    fireEvent.click(screen.getByRole("button", { name: /标记已导入\/交接|Mark imported\/handed off/i }));
+
+    await waitFor(() => {
+      expect(onMarkDeployed).toHaveBeenCalledWith({
+        artifact: expect.objectContaining({ workflow_id: "workflow-1" }),
+        deployment_note: "Imported into staging.",
+        platform_app_id: "hiagent-app-42"
+      });
+    });
   });
 
   it("uses the card as the single vertical scroll container", () => {
@@ -85,6 +104,7 @@ describe("CompileBar", () => {
         isCompiling={false}
         onCompile={vi.fn()}
         onDownload={vi.fn()}
+        onMarkDeployed={vi.fn()}
       />
     );
 

@@ -54,7 +54,7 @@ export type Turn = {
   planner_reply: string | null;
   errors: string[];
   ir_diff: unknown;
-  kind?: "clarify" | "plan" | "questionnaire";
+  kind?: "brief_review" | "clarify" | "design_preview" | "plan" | "questionnaire";
   clarify_question?: ClarifyQuestion | { questions: ClarifyQuestion[] } | null;
   brief_after?: WorkflowBriefSnapshot | null;
   clarify_round?: number | null;
@@ -69,12 +69,23 @@ export type AuthMe = {
 export type ClarifyQuestion = {
   text: string;
   field_path: string;
-  options?: { label: string; value: string }[] | null;
+  options?: { description?: string | null; label: string; value: string }[] | null;
   allow_freeform: boolean;
   severity: "block" | "warn";
 };
 
-export type WorkflowBriefSnapshot = Record<string, unknown>;
+export type WorkflowBriefSnapshot = {
+  trigger?: unknown;
+  data_sources?: unknown;
+  credentials?: unknown;
+  approval_points?: unknown;
+  success_criteria?: unknown;
+  compliance_boundary?: unknown;
+  intent_clarifications?: unknown;
+  business_rules?: unknown;
+  risks?: unknown;
+  [key: string]: unknown;
+};
 
 export type BindingSummary = {
   handle: string;
@@ -179,6 +190,8 @@ export type MarkImportedInput = {
   platform_app_id: string;
   deployment_note?: string | null;
 };
+
+export type MarkWorkflowDeployedInput = MarkImportedInput;
 
 export type LocalizedText = {
   zh: string;

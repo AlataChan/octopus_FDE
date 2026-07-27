@@ -556,9 +556,13 @@ def _code_source(n: CodeNode) -> str:
     if n.language != "python" or "def handler(" in n.source:
         return n.source
     lines = n.source.strip().splitlines()
+    prefix = (
+        'def handler(input=""):\n'
+        "    params = input if isinstance(input, dict) else {}\n"
+    )
     if not lines:
-        return "def handler(params):\n    return {}"
-    return "def handler(params):\n" + "\n".join(f"    {line}" if line else "" for line in lines)
+        return prefix + "    return {}"
+    return prefix + "\n".join(f"    {line}" if line else "" for line in lines)
 
 
 def _first_query_variable(value: str, node_code_map: dict[str, str]) -> dict[str, Any] | None:

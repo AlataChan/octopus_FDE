@@ -345,7 +345,7 @@ Required fields:
 - `reviewer_policy`
 - `success_metrics`
 
-Synthetic-partner mode is valid: if no real partner is ready, use a Bambu Lab-style cross-border ecommerce operator profile to fill the SOW and move engineering forward.
+Synthetic-partner mode is valid: if no real partner is ready, use a generic cross-border ecommerce operator profile to fill the SOW and move engineering forward.
 
 ## Context
 
@@ -377,7 +377,7 @@ When a real partner exists, write a new SOW file under `sow/<partner>/<sow_id>.y
 ```yaml
 sow_id: phase0-synthetic-ecommerce
 source: synthetic
-partner_profile: bambu-lab-style-cross-border-ecommerce-operator
+partner_profile: generic-cross-border-ecommerce-operator
 persona_id: ecommerce-operator
 business_goal: >
   Standardize multilingual customer support and order-exception workflows

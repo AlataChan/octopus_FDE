@@ -77,8 +77,12 @@ def test_diff_route_uses_turn_snapshots(tmp_path):
         f"/v1/sessions/{sid}/llm-config",
         json={"api_key": "sk-test", "base_url": "https://api.example.com/v1", "model": "deepseek-v4-flash"},
     )
-    turn_a = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "first"}).json()
-    turn_b = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "second"}).json()
+    review_a = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "first"}).json()
+    assert review_a["kind"] == "brief_review"
+    turn_a = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "确认生成"}).json()
+    assert turn_a["kind"] == "plan"
+    turn_b = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "retrieve top_k 5"}).json()
+    assert turn_b["kind"] == "plan"
 
     response = client.get(
         f"/v1/sessions/{sid}/ir/diff",
@@ -96,7 +100,11 @@ def test_diff_route_uses_turn_snapshots(tmp_path):
 
 def test_diff_route_rejects_turns_outside_session(tmp_path):
     ir = IRDocument.model_validate(_sample_ir())
-    client = _client(tmp_path, planner=lambda **kwargs: ir)
+    clarify_engine = FakeClarifyEngine([
+        ClarifyEngineResult(intent_update=_complete_draft().model_dump(mode="json"), next_action="ready"),
+        ClarifyEngineResult(intent_update=_complete_draft().model_dump(mode="json"), next_action="ready"),
+    ])
+    client = _client(tmp_path, planner=lambda **kwargs: ir, clarify_engine=clarify_engine)
     sid_a = client.post("/v1/sessions", json={}).json()["session_id"]
     sid_b = client.post("/v1/sessions", json={}).json()["session_id"]
     for sid in [sid_a, sid_b]:
@@ -104,8 +112,10 @@ def test_diff_route_rejects_turns_outside_session(tmp_path):
             f"/v1/sessions/{sid}/llm-config",
             json={"api_key": "sk-test", "base_url": "https://api.example.com/v1", "model": "deepseek-v4-flash"},
         )
-    turn_a = client.post(f"/v1/sessions/{sid_a}/turns", json={"user_message": "a"}).json()
-    turn_b = client.post(f"/v1/sessions/{sid_b}/turns", json={"user_message": "b"}).json()
+    client.post(f"/v1/sessions/{sid_a}/turns", json={"user_message": "a"})
+    turn_a = client.post(f"/v1/sessions/{sid_a}/turns", json={"user_message": "确认生成"}).json()
+    client.post(f"/v1/sessions/{sid_b}/turns", json={"user_message": "b"})
+    turn_b = client.post(f"/v1/sessions/{sid_b}/turns", json={"user_message": "确认生成"}).json()
 
     response = client.get(
         f"/v1/sessions/{sid_a}/ir/diff",
@@ -113,3 +123,44 @@ def test_diff_route_rejects_turns_outside_session(tmp_path):
     )
 
     assert response.status_code == 404
+
+
+def test_diff_route_returns_empty_diff_for_turns_without_ir_snapshots(tmp_path):
+    clarify_engine = FakeClarifyEngine([
+        ClarifyEngineResult(
+            question={
+                "text": "请补充业务目标。",
+                "field_path": "intent_clarification",
+                "allow_freeform": True,
+                "severity": "block",
+            },
+            next_action="ask",
+        ),
+        ClarifyEngineResult(
+            question={
+                "text": "请选择运行平台。",
+                "field_path": "target_runtime",
+                "options": [{"label": "HiAgent", "value": "hiagent"}],
+                "allow_freeform": False,
+                "severity": "block",
+            },
+            next_action="ask",
+        ),
+    ])
+    client = _client(tmp_path, planner=lambda **_kwargs: IRDocument.model_validate(_sample_ir()), clarify_engine=clarify_engine)
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+    first = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "我要一个客服 FAQ"}).json()
+    second = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "补充一点"}).json()
+
+    response = client.get(
+        f"/v1/sessions/{sid}/ir/diff",
+        params={"from_turn": first["turn_id"], "to_turn": second["turn_id"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "from": first["turn_id"],
+        "to": second["turn_id"],
+        "changes": [],
+        "summary": {"nodes": 0, "edges": 0, "total": 0},
+    }

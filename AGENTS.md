@@ -1,11 +1,11 @@
 ## Learned User Preferences
-- 所有对话回复默认使用中文。
-- 当讨论产品方向时，优先聚焦中国市场语境与本地化可落地性。
-- 在中国市场切入点上，用户明确不接受财务/审计与知识产权代理作为主赛道。
-- 用户认可“中医诊所为主、跨境电商为辅”的双垂直路线。
+- Reply in the language the user wrote in. If the user's message is in English, reply in English; if in Chinese, reply in Chinese. Do not apply a fixed default language over the live signal.
+- When discussing product direction, prioritize the China market context and what is actually deliverable locally.
+- For the China market entry point, the user has explicitly rejected finance/audit and IP-agency work as a primary vertical.
+- The user has endorsed the dual-vertical route: TCM clinics as primary, cross-border e-commerce as secondary.
 
 ## Learned Workspace Facts
-- 中国市场主设计文档为 `docs/design/fde-tcm-ecommerce.zh-CN.md`。
-- 通用 FDE 产品设计文档为 `docs/design/fde-product-design.md`。
-- 执行计划统一放在 `docs/plans/`；不要再把项目计划放入 `docs/superpowers/plans/`。
-- 旧工作名为 Loom；产品、PRD、设计与路线图以 FDE / AI 驻场流程工程师为准，内部实现包名 `loom/` 可暂时保留。
+- The primary China-market design document is `docs/design/fde-ecommerce-tcm.zh-CN.md`.
+- The general FDE product design document is `docs/design/fde-product-design.md`.
+- All execution plans belong in `docs/plans/`; do not put project plans in `docs/superpowers/plans/`.
+- The former working name was Loom. Product, PRD, design, and roadmap all use FDE / AI Field Process Engineer as the authoritative name; the internal implementation package name `loom/` may remain for now.

@@ -32,6 +32,10 @@ def redact_draft(draft: WorkflowBriefDraft) -> WorkflowBriefDraft:
         update={
             "intent": _redact_optional_text(draft.intent),
             "success_criteria": redact_text(draft.success_criteria),
+            "intent_clarifications": [
+                redact_text(item)
+                for item in draft.intent_clarifications
+            ],
             "credentials": [
                 credential.model_copy(update={"allowed_hosts": credential.allowed_hosts})
                 for credential in draft.credentials

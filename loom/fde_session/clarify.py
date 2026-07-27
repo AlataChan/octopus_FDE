@@ -24,34 +24,44 @@ def missing_fields(brief: WorkflowBrief | WorkflowBriefDraft) -> list[ClarifyQue
     intent = (brief.intent or "").lower()
 
     if isinstance(brief, WorkflowBriefDraft):
+        if _needs_intent_clarification(brief):
+            questions.append(
+                _block(
+                    "intent_clarification",
+                    (
+                        "请先补充业务目标、目标用户、关键场景、不能自动处理的边界，"
+                        "以及什么结果才算成功。"
+                    ),
+                )
+            )
         if not brief.target_runtime:
-            questions.append(_block("target_runtime", "Which target runtime should this workflow compile to?"))
+            questions.append(_block("target_runtime", "你希望先把这个流程生成到哪个运行平台？如果不确定，建议先选 HiAgent。"))
         if not brief.scope:
-            questions.append(_block("scope", "Which registry scope should constrain datasets, tools, and credentials?"))
+            questions.append(_block("scope", "这个流程更像哪一类业务场景？我会据此选择可用的数据、工具和凭证范围。"))
         if brief.compliance_boundary is None:
             questions.append(
                 _block(
                     "compliance_boundary",
-                    "What PII/compliance boundary applies to this workflow?",
+                    "这个流程会处理哪类个人信息？这决定是否需要脱敏、人工审核和合规提示。",
                 )
             )
 
     if brief.trigger is None:
-        questions.append(_block("trigger", "What trigger should start this workflow?"))
+        questions.append(_block("trigger", "这个流程应该在什么时候启动？"))
 
     if not brief.data_sources and (_needs_retrieval_source(intent) or _needs_channel(intent)):
         if _needs_channel(intent):
             questions.append(
                 _block(
                     "data_sources",
-                    "Which store/channel source should this use, such as Shopify, Amazon, TikTok Shop, Shein, or Temu?",
+                    "它需要连接哪些店铺、渠道或业务系统？例如 Shopify、Amazon、TikTok Shop、Shein、Temu。",
                 )
             )
         else:
             questions.append(
                 _block(
                     "data_sources",
-                    "Which source dataset or KB should provide citation-backed answers?",
+                    "回答问题时应该查哪些资料或知识库？例如商品知识库、政策知识库、诊所知识库。",
                 )
             )
 
@@ -59,7 +69,7 @@ def missing_fields(brief: WorkflowBrief | WorkflowBriefDraft) -> list[ClarifyQue
         questions.append(
             _block(
                 "credentials",
-                "Which credential binding and allowed hosts are needed for API/writeback access?",
+                "如果要读取或写回外部系统，需要使用哪个已配置好的接口凭证？也请说明允许访问的系统域名。",
             )
         )
 
@@ -67,20 +77,20 @@ def missing_fields(brief: WorkflowBrief | WorkflowBriefDraft) -> list[ClarifyQue
         questions.append(
             _block(
                 "approval_points",
-                "Define the human review/escalation point and any required disclaimer or compliance boundary before planning.",
+                "哪些情况必须交给人工审核或升级处理？例如高风险回复、退款、诊疗建议或低置信度答案。",
             )
         )
 
     if not (brief.success_criteria or "").strip():
         questions.append(
-            _block("success_criteria", "What concrete success criteria should the generated workflow satisfy?")
+            _block("success_criteria", "你会用什么标准判断这个流程生成得好？请给出可检查的结果要求。")
         )
 
     if not brief.known_edits:
         questions.append(
             ClarifyQuestion(
                 field_path="known_edits",
-                question="No known edits were provided; add any expected edits if they should anchor the Planner diff.",
+                question="如果你已经知道后续会怎么改这个流程，可以先告诉我；这样生成结果会更贴近你的预期。",
                 severity="warn",
             )
         )
@@ -89,7 +99,7 @@ def missing_fields(brief: WorkflowBrief | WorkflowBriefDraft) -> list[ClarifyQue
         questions.append(
             ClarifyQuestion(
                 field_path="intent",
-                question="Intent is short; add workflow details if available.",
+                question="当前描述还比较短；如果方便，请补充目标用户、场景、输入输出或不能自动处理的边界。",
                 severity="warn",
             )
         )
@@ -99,6 +109,34 @@ def missing_fields(brief: WorkflowBrief | WorkflowBriefDraft) -> list[ClarifyQue
 
 def _block(field_path: str, question: str) -> ClarifyQuestion:
     return ClarifyQuestion(field_path=field_path, question=question, severity="block")
+
+
+def _needs_intent_clarification(brief: WorkflowBriefDraft) -> bool:
+    if brief.intent_clarifications:
+        return False
+    if (
+        brief.target_runtime
+        and brief.scope
+        and brief.trigger is not None
+        and brief.compliance_boundary is not None
+        and bool((brief.success_criteria or "").strip())
+    ):
+        return False
+    intent = (brief.intent or "").strip()
+    if len(intent) < 40:
+        return True
+    signals = 0
+    signal_groups = (
+        ("用户", "客户", "买家", "患者", "客服", "operator", "buyer", "patient", "customer"),
+        ("订单", "物流", "退款", "知识库", "复诊", "随访", "api", "kb", "order", "refund"),
+        ("人工", "审核", "审批", "转人工", "review", "approve", "human"),
+        ("成功", "标准", "输出", "json", "citation", "source", "避免", "不能"),
+    )
+    lower = intent.lower()
+    for group in signal_groups:
+        if any(token in lower or token in intent for token in group):
+            signals += 1
+    return signals < 2
 
 
 def _needs_retrieval_source(intent: str) -> bool:

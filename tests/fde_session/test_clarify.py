@@ -33,7 +33,7 @@ def test_ecommerce_order_exception_missing_channel_blocks() -> None:
     questions = missing_fields(brief)
 
     assert any(q.severity == "block" and q.field_path == "data_sources" for q in questions)
-    assert any("channel" in q.question.lower() for q in questions)
+    assert any("渠道" in q.question for q in questions)
 
 
 def test_ecommerce_faq_requires_source_citation_source() -> None:
@@ -41,7 +41,7 @@ def test_ecommerce_faq_requires_source_citation_source() -> None:
 
     questions = missing_fields(brief)
 
-    assert any(q.field_path == "data_sources" and "source" in q.question.lower() for q in questions)
+    assert any(q.field_path == "data_sources" and "资料" in q.question for q in questions)
 
 
 def test_tcm_followup_asks_source_channel_escalation_and_writeback() -> None:
@@ -77,9 +77,9 @@ def test_tcm_patient_qa_requires_citation_disclaimer_and_human_escalation() -> N
 
     text = "\n".join(q.question.lower() for q in missing_fields(brief))
 
-    assert "citation" in text or "source" in text
-    assert "disclaimer" in text or "boundary" in text
-    assert "human" in text or "review" in text
+    assert "资料" in text or "知识库" in text
+    assert "诊疗建议" in text
+    assert "人工审核" in text
 
 
 def test_missing_known_edits_is_warning() -> None:

@@ -31,7 +31,7 @@ def hiagent() -> None:
     "--binding",
     "binding_path",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=Path("config/customers/bambu.hiagent.yaml"),
+    default=Path("config/customers/example.hiagent.yaml"),
     show_default=True,
     help="Customer Binding YAML.",
 )

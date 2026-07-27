@@ -6,6 +6,7 @@ import { Button } from "../ui/Button";
 import { Card, CardBody, CardHeader } from "../ui/Card";
 import { Chip } from "../ui/Chip";
 import { Textarea } from "../ui/Textarea";
+import { BriefPanel } from "./BriefPanel";
 import { ClarifyBubble } from "./ClarifyBubble";
 import { QuestionnaireBubble } from "./QuestionnaireBubble";
 
@@ -18,6 +19,7 @@ type Props = {
 export function ChatPanel({ isSending, onSend, turns }: Props) {
   const { t } = useTranslation();
   const [message, setMessage] = useState("");
+  const latestInteractiveIndex = findLatestInteractiveIndex(turns);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -47,7 +49,15 @@ export function ChatPanel({ isSending, onSend, turns }: Props) {
               {t("chat.empty")}
             </div>
           ) : (
-            turns.map((turn) => <TurnBubble key={turn.turn_id} isSending={isSending} onSend={onSend} turn={turn} />)
+            turns.map((turn, index) => (
+              <TurnBubble
+                isLatestInteractive={index === latestInteractiveIndex}
+                isSending={isSending}
+                key={turn.turn_id}
+                onSend={onSend}
+                turn={turn}
+              />
+            ))
           )}
         </div>
         <form className="shrink-0 border-t border-border/30 p-4" onSubmit={submit}>
@@ -73,7 +83,17 @@ export function ChatPanel({ isSending, onSend, turns }: Props) {
   );
 }
 
-function TurnBubble({ isSending, onSend, turn }: { isSending: boolean; onSend: (message: string) => void; turn: Turn }) {
+function TurnBubble({
+  isLatestInteractive,
+  isSending,
+  onSend,
+  turn
+}: {
+  isLatestInteractive: boolean;
+  isSending: boolean;
+  onSend: (message: string) => void;
+  turn: Turn;
+}) {
   const { t } = useTranslation();
   const isFailed = turn.status === "failed";
   const kind = turn.kind || "plan";
@@ -93,9 +113,26 @@ function TurnBubble({ isSending, onSend, turn }: { isSending: boolean; onSend: (
         </Chip>
       </div>
       {kind === "clarify" && question && !("questions" in question) ? (
-        <ClarifyBubble disabled={isSending} onSend={onSend} question={question} />
+        <ClarifyBubble
+          disabled={isSending}
+          isLatestInteractive={isLatestInteractive}
+          onSend={onSend}
+          question={question}
+        />
       ) : kind === "questionnaire" && question && "questions" in question ? (
-        <QuestionnaireBubble disabled={isSending} onSend={onSend} questions={question.questions} />
+        <QuestionnaireBubble
+          disabled={isSending}
+          isLatestInteractive={isLatestInteractive}
+          onSend={onSend}
+          questions={question.questions}
+        />
+      ) : kind === "brief_review" || kind === "design_preview" ? (
+        <BriefPanel
+          brief={turn.brief_after}
+          disabled={isSending || !isLatestInteractive}
+          variant={kind}
+          onConfirm={() => onSend(t("brief.confirmMessage"))}
+        />
       ) : (
         <div
           className={
@@ -112,4 +149,25 @@ function TurnBubble({ isSending, onSend, turn }: { isSending: boolean; onSend: (
       )}
     </article>
   );
+}
+
+function findLatestInteractiveIndex(turns: Turn[]) {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    if (isInteractiveTurn(turns[index])) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function isInteractiveTurn(turn: Turn) {
+  const kind = turn.kind || "plan";
+  if (kind === "brief_review" || kind === "design_preview") {
+    return true;
+  }
+  const question = turn.clarify_question;
+  if (kind === "clarify") {
+    return Boolean(question && !("questions" in question));
+  }
+  return Boolean(kind === "questionnaire" && question && "questions" in question);
 }

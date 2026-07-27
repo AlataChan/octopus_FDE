@@ -74,6 +74,7 @@ class WorkflowBrief(_Strict):
     approval_points: list[ApprovalPoint] = Field(default_factory=list)
     success_criteria: str = ""
     compliance_boundary: ComplianceBoundary
+    intent_clarifications: list[str] = Field(default_factory=list)
     known_edits: list[str] = Field(default_factory=list)
 
 
@@ -91,6 +92,7 @@ class WorkflowBriefDraft(BaseModel):
     approval_points: list[ApprovalPoint] = Field(default_factory=list)
     success_criteria: str = ""
     compliance_boundary: ComplianceBoundary | None = None
+    intent_clarifications: list[str] = Field(default_factory=list)
     known_edits: list[str] = Field(default_factory=list)
     target_runtime: Literal["hiagent", "dify"] | None = None
     scope: str | None = None
@@ -121,5 +123,6 @@ class WorkflowBriefDraft(BaseModel):
             approval_points=self.approval_points,
             success_criteria=self.success_criteria,
             compliance_boundary=compliance_boundary,
+            intent_clarifications=self.intent_clarifications,
             known_edits=self.known_edits,
         )

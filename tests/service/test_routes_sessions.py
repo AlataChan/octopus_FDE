@@ -54,8 +54,10 @@ def _client(tmp_path, planner=None, clarify_engine=None) -> TestClient:
 
 def test_session_turn_compile_download_archive_and_registry_round_trip(tmp_path):
     ir = _sample_ir()
+    calls = {"planner": 0}
 
     def planner(*, user_message: str, **kwargs):
+        calls["planner"] += 1
         assert "Answer ecommerce FAQ questions" in user_message
         assert kwargs["target"] == "hiagent"
         assert kwargs["scope"] == "ecommerce/kb"
@@ -74,9 +76,16 @@ def test_session_turn_compile_download_archive_and_registry_round_trip(tmp_path)
     )
     assert llm.status_code == 200
 
-    turn = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "build faq"}).json()
+    review = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "build faq"}).json()
+    assert review["status"] == "succeeded"
+    assert review["kind"] == "brief_review"
+    assert review["brief_after"]["target_runtime"] == "hiagent"
+    assert calls["planner"] == 0
+
+    turn = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "确认生成"}).json()
     assert turn["status"] == "succeeded"
     assert turn["kind"] == "plan"
+    assert calls["planner"] == 1
 
     compiled = client.post(
         f"/v1/sessions/{sid}/compile",
@@ -121,7 +130,8 @@ def test_self_design_first_turn_returns_clarify_without_planning(tmp_path):
 
     assert turn["status"] == "succeeded"
     assert turn["kind"] == "clarify"
-    assert turn["clarify_question"]["field_path"] in {"target_runtime", "trigger", "compliance_boundary"}
+    assert turn["clarify_question"]["field_path"] == "intent_clarification"
+    assert "业务目标" in turn["clarify_question"]["text"]
     archive = client.get(f"/v1/archive/sessions/{sid}").text
     assert "turn.clarify_started" in archive
     assert "turn.clarify_replied" in archive
@@ -164,6 +174,36 @@ def test_self_design_fourth_turn_emits_questionnaire_when_still_blocked(tmp_path
     assert len(fourth["clarify_question"]["questions"]) >= 1
 
 
+def test_stale_clarify_turn_id_repeats_current_question_without_merging_answer(tmp_path):
+    client = _client(tmp_path, planner=lambda **_kwargs: _sample_ir())
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+
+    first = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "我要一个客服 FAQ"}).json()
+    assert first["kind"] == "clarify"
+    assert first["clarify_question"]["field_path"] == "intent_clarification"
+    second = client.post(
+        f"/v1/sessions/{sid}/turns",
+        json={
+            "user_message": (
+                "面向跨境电商买家，处理订单取消和物流追踪，查 product_kb，"
+                "人工审核高风险回复，成功标准是回答有来源。"
+            )
+        },
+    ).json()
+    assert second["kind"] == "clarify"
+    assert second["clarify_question"]["field_path"] == "target_runtime"
+
+    stale = client.post(
+        f"/v1/sessions/{sid}/turns",
+        json={"user_message": f"turn_id={first['turn_id']} hiagent"},
+    ).json()
+
+    assert stale["kind"] == "clarify"
+    assert stale["clarify_question"]["field_path"] == "target_runtime"
+    assert stale["clarify_round"] == second["clarify_round"]
+    assert stale["brief_after"].get("target_runtime") is None
+
+
 def test_ready_engine_without_target_runtime_is_overridden_by_gate(tmp_path):
     draft = _complete_draft().model_copy(update={"target_runtime": None})
     clarify_engine = FakeClarifyEngine([
@@ -178,7 +218,7 @@ def test_ready_engine_without_target_runtime_is_overridden_by_gate(tmp_path):
     assert turn["clarify_question"]["field_path"] == "target_runtime"
 
 
-def test_scripted_engine_asks_two_rounds_then_plans(tmp_path):
+def test_scripted_engine_asks_two_rounds_then_reviews_then_confirm_plans(tmp_path):
     ir = _sample_ir()
     calls = {"planner": 0}
 
@@ -223,11 +263,16 @@ def test_scripted_engine_asks_two_rounds_then_plans(tmp_path):
 
     assert one["kind"] == "clarify"
     assert two["kind"] == "clarify"
-    assert three["kind"] == "plan"
+    assert three["kind"] == "brief_review"
+    assert calls["planner"] == 0
+
+    confirmed = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "confirm"}).json()
+
+    assert confirmed["kind"] == "plan"
     assert calls["planner"] == 1
 
 
-def test_questionnaire_submission_can_complete_to_plan(tmp_path):
+def test_questionnaire_submission_completes_to_brief_review_then_confirm_plans(tmp_path):
     client = _client(tmp_path, planner=lambda **_kwargs: _sample_ir())
     sid = client.post("/v1/sessions", json={}).json()["session_id"]
 
@@ -237,7 +282,7 @@ def test_questionnaire_submission_can_complete_to_plan(tmp_path):
     questionnaire = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "skip again"}).json()
     assert questionnaire["kind"] == "questionnaire"
 
-    planned = client.post(
+    review = client.post(
         f"/v1/sessions/{sid}/turns",
         json={
             "user_message": (
@@ -247,8 +292,34 @@ def test_questionnaire_submission_can_complete_to_plan(tmp_path):
         },
     ).json()
 
+    assert review["kind"] == "brief_review"
+
+    planned = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "继续"}).json()
+
     assert planned["kind"] == "plan"
     assert planned["status"] == "succeeded"
+
+
+def test_self_design_post_ir_edit_skips_clarify_and_runs_planner(tmp_path):
+    calls = {"planner": 0}
+
+    def planner(**_kwargs):
+        calls["planner"] += 1
+        return _sample_ir()
+
+    client = _client(tmp_path, planner=planner)
+    sid = client.post("/v1/sessions", json={}).json()["session_id"]
+    ir_json = json.dumps(_sample_ir().model_dump(by_alias=True, exclude_none=True), ensure_ascii=False)
+    client.app.state.session_store.update_latest_ir(sid, actor_id="single-user", ir_json=ir_json)
+
+    turn = client.post(
+        f"/v1/sessions/{sid}/turns",
+        json={"user_message": "retriever top_k 8"},
+    ).json()
+
+    assert turn["kind"] == "plan"
+    assert turn["clarify_question"] is None
+    assert calls["planner"] == 1
 
 
 def test_turn_failure_keeps_latest_ir_pointer(tmp_path):
@@ -272,11 +343,12 @@ def test_turn_failure_keeps_latest_ir_pointer(tmp_path):
         json={"api_key": "sk-secret", "base_url": "https://api.example.com/v1", "model": "deepseek-v4-flash"},
     )
     client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "ok"})
+    client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "确认"})
     before_session = client.get(f"/v1/sessions/{sid}").json()
     before = before_session["latest_ir_sha256"]
     assert before_session["state"] == "validated"
 
-    failed = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "fail"}).json()
+    failed = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "change retriever top_k 9"}).json()
     after_session = client.get(f"/v1/sessions/{sid}").json()
     after = after_session["latest_ir_sha256"]
     assert failed["status"] == "failed"
@@ -294,7 +366,8 @@ def test_planner_exception_is_not_reflected_to_client_or_db(tmp_path):
     client = _client(tmp_path, planner=planner, clarify_engine=clarify_engine)
     sid = client.post("/v1/sessions", json={}).json()["session_id"]
 
-    turn = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "build"}).json()
+    client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "build"})
+    turn = client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "confirm"}).json()
 
     assert turn["status"] == "failed"
     assert turn["errors"] == ["planner_error"]
@@ -363,6 +436,7 @@ def test_download_artifact_with_non_ascii_filename(tmp_path):
         json={"api_key": "sk", "base_url": "https://x/v1", "model": "m"},
     )
     client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "build"})
+    client.post(f"/v1/sessions/{sid}/turns", json={"user_message": "确认"})
     compiled = client.post(
         f"/v1/sessions/{sid}/compile",
         json={"target": "dify", "binding": "demo"},
