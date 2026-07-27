@@ -158,31 +158,284 @@ def _check_python_sandbox(source: str) -> list[str]:
     except SyntaxError as e:
         return [f"code does not parse as python: {e}"]
 
-    reasons: list[str] = []
-    for stmt in ast.walk(tree):
-        if isinstance(stmt, ast.Import):
-            for alias in stmt.names:
-                root = alias.name.split(".")[0]
-                if root not in _PY_IMPORT_ALLOWLIST:
-                    reasons.append(f"import {alias.name!r} is not in the sandbox allowlist")
-        elif isinstance(stmt, ast.ImportFrom):
-            root = (stmt.module or "").split(".")[0]
-            if stmt.level or root not in _PY_IMPORT_ALLOWLIST:
-                reasons.append(f"import from {stmt.module!r} is not in the sandbox allowlist")
-        elif isinstance(stmt, ast.Name) and stmt.id in _PY_DANGEROUS_CALLS:
-            reasons.append(f"reference to {stmt.id!r} is forbidden in a sandboxed code node")
-        elif isinstance(stmt, ast.Attribute):
-            if stmt.attr in _PY_DANGEROUS_ATTR_NAMES:
-                reasons.append(
-                    f"access to {stmt.attr!r} is forbidden in a sandboxed code node "
-                    "(object-introspection attributes can escape the import allowlist)"
+    visitor = _PythonSandboxVisitor()
+    visitor.visit(tree)
+    return visitor.reasons
+
+
+class _PythonNameScope:
+    def __init__(self, bindings: set[str], global_names: set[str] | None = None) -> None:
+        self.bindings = bindings
+        self.global_names = global_names or set()
+
+
+class _PythonSandboxVisitor(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.reasons: list[str] = []
+        self._scopes: list[_PythonNameScope] = []
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            root = alias.name.split(".")[0]
+            if root not in _PY_IMPORT_ALLOWLIST:
+                self.reasons.append(
+                    f"import {alias.name!r} is not in the sandbox allowlist"
                 )
-            root = stmt
-            while isinstance(root, ast.Attribute):
-                root = root.value
-            if isinstance(root, ast.Name) and root.id in _PY_DANGEROUS_ATTR_ROOTS:
-                reasons.append(f"access to {root.id!r} is forbidden in a sandboxed code node")
-    return reasons
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        root = (node.module or "").split(".")[0]
+        if node.level or root not in _PY_IMPORT_ALLOWLIST:
+            self.reasons.append(
+                f"import from {node.module!r} is not in the sandbox allowlist"
+            )
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if (
+            isinstance(node.ctx, ast.Load)
+            and node.id in _PY_DANGEROUS_CALLS
+            and not self._is_locally_bound(node.id)
+        ):
+            self.reasons.append(
+                f"reference to {node.id!r} is forbidden in a sandboxed code node"
+            )
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if node.attr in _PY_DANGEROUS_ATTR_NAMES:
+            self.reasons.append(
+                f"access to {node.attr!r} is forbidden in a sandboxed code node "
+                "(object-introspection attributes can escape the import allowlist)"
+            )
+        root: ast.expr = node
+        while isinstance(root, ast.Attribute):
+            root = root.value
+        if isinstance(root, ast.Name) and root.id in _PY_DANGEROUS_ATTR_ROOTS:
+            self.reasons.append(
+                f"access to {root.id!r} is forbidden in a sandboxed code node"
+            )
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_function_definition(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_function_definition(node)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        self._visit_argument_expressions(node.args)
+        self._scopes.append(_function_scope(node))
+        self.visit(node.body)
+        self._scopes.pop()
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._visit_comprehension(node.generators, [node.elt])
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._visit_comprehension(node.generators, [node.elt])
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self._visit_comprehension(node.generators, [node.key, node.value])
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self._visit_comprehension(node.generators, [node.elt])
+
+    def _visit_function_definition(
+        self,
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> None:
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        self._visit_argument_expressions(node.args)
+        if node.returns is not None:
+            self.visit(node.returns)
+
+        self._scopes.append(_function_scope(node))
+        for statement in node.body:
+            self.visit(statement)
+        self._scopes.pop()
+
+    def _visit_argument_expressions(self, arguments: ast.arguments) -> None:
+        all_arguments = [
+            *arguments.posonlyargs,
+            *arguments.args,
+            *arguments.kwonlyargs,
+        ]
+        if arguments.vararg is not None:
+            all_arguments.append(arguments.vararg)
+        if arguments.kwarg is not None:
+            all_arguments.append(arguments.kwarg)
+        for argument in all_arguments:
+            if argument.annotation is not None:
+                self.visit(argument.annotation)
+        for default in [*arguments.defaults, *arguments.kw_defaults]:
+            if default is not None:
+                self.visit(default)
+
+    def _visit_comprehension(
+        self,
+        generators: list[ast.comprehension],
+        result_nodes: list[ast.expr],
+    ) -> None:
+        # The first iterable is evaluated outside the comprehension's implicit scope.
+        first, *remaining = generators
+        self.visit(first.iter)
+
+        bindings: set[str] = set()
+        for generator in generators:
+            bindings.update(_bound_target_names(generator.target))
+        self._scopes.append(_PythonNameScope(bindings))
+        self.visit(first.target)
+        for condition in first.ifs:
+            self.visit(condition)
+        for generator in remaining:
+            self.visit(generator.iter)
+            self.visit(generator.target)
+            for condition in generator.ifs:
+                self.visit(condition)
+        for result_node in result_nodes:
+            self.visit(result_node)
+        self._scopes.pop()
+
+    def _is_locally_bound(self, name: str) -> bool:
+        for scope in reversed(self._scopes):
+            if name in scope.global_names:
+                return False
+            if name in scope.bindings:
+                return True
+        return False
+
+
+def _function_scope(
+    node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
+) -> _PythonNameScope:
+    # Python decides function locals from the whole body before executing it.
+    collector = _FunctionBindingCollector()
+    if isinstance(node, ast.Lambda):
+        collector.visit(node.body)
+    else:
+        for statement in node.body:
+            collector.visit(statement)
+
+    bindings = _argument_names(node.args) | collector.bindings
+    bindings.difference_update(collector.global_names | collector.nonlocal_names)
+    return _PythonNameScope(bindings, collector.global_names)
+
+
+class _FunctionBindingCollector(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.bindings: set[str] = set()
+        self.global_names: set[str] = set()
+        self.nonlocal_names: set[str] = set()
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
+            self.bindings.add(node.id)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            self.bindings.add(alias.asname or alias.name.split(".")[0])
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        for alias in node.names:
+            if alias.name != "*":
+                self.bindings.add(alias.asname or alias.name)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if node.name is not None:
+            self.bindings.add(node.name)
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.bindings.add(node.name)
+        self._visit_nested_function_expressions(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.bindings.add(node.name)
+        self._visit_nested_function_expressions(node)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        for default in [*node.args.defaults, *node.args.kw_defaults]:
+            if default is not None:
+                self.visit(default)
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._visit_comprehension(node.generators, [node.elt])
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._visit_comprehension(node.generators, [node.elt])
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self._visit_comprehension(node.generators, [node.key, node.value])
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self._visit_comprehension(node.generators, [node.elt])
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.bindings.add(node.name)
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for base in node.bases:
+            self.visit(base)
+        for keyword in node.keywords:
+            self.visit(keyword.value)
+
+    def visit_Global(self, node: ast.Global) -> None:
+        self.global_names.update(node.names)
+
+    def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
+        self.nonlocal_names.update(node.names)
+
+    def _visit_nested_function_expressions(
+        self,
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> None:
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for default in [*node.args.defaults, *node.args.kw_defaults]:
+            if default is not None:
+                self.visit(default)
+
+    def _visit_comprehension(
+        self,
+        generators: list[ast.comprehension],
+        result_nodes: list[ast.expr],
+    ) -> None:
+        # Comprehension targets do not leak into the containing function scope.
+        for generator in generators:
+            self.visit(generator.iter)
+            for condition in generator.ifs:
+                self.visit(condition)
+        for result_node in result_nodes:
+            self.visit(result_node)
+
+
+def _argument_names(arguments: ast.arguments) -> set[str]:
+    names = {
+        argument.arg
+        for argument in [
+            *arguments.posonlyargs,
+            *arguments.args,
+            *arguments.kwonlyargs,
+        ]
+    }
+    if arguments.vararg is not None:
+        names.add(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        names.add(arguments.kwarg.arg)
+    return names
+
+
+def _bound_target_names(target: ast.AST) -> set[str]:
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, ast.Starred):
+        return _bound_target_names(target.value)
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return {
+            name
+            for element in target.elts
+            for name in _bound_target_names(element)
+        }
+    return set()
 
 
 def _check_js_sandbox(source: str) -> list[str]:

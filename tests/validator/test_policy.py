@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from loom.ir.models import IRDocument
-from loom.validator.policy import check_policy
+from loom.validator.policy import _check_python_sandbox, check_policy
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -163,6 +163,91 @@ def test_code_node_dangerous_call_rejected():
     ir = _ir_with_code("return {'x': eval(inputs['expr'])}")
     failures = check_policy(ir)
     assert any("'eval'" in f.detail and "forbidden" in f.detail for f in failures)
+
+
+def test_canonical_hiagent_handler_input_parameter_passes_sandbox():
+    source = (
+        'def handler(input=""):\n'
+        "    params = input if isinstance(input, dict) else {}\n"
+        '    return {"a": params.get("q", "")}\n'
+    )
+
+    assert _check_python_sandbox(source) == []
+
+
+def test_unshadowed_input_builtin_is_rejected():
+    reasons = _check_python_sandbox('input("give me stdin")')
+
+    assert any("reference to 'input' is forbidden" in reason for reason in reasons)
+
+
+def test_aliasing_eval_builtin_is_rejected():
+    reasons = _check_python_sandbox('f = eval\nf("1 + 1")')
+
+    assert any("reference to 'eval' is forbidden" in reason for reason in reasons)
+
+
+def test_function_local_bindings_shadow_dangerous_builtins():
+    sources = [
+        (
+            "def handler(value):\n"
+            "    open = value\n"
+            '    return open("file.txt")\n'
+        ),
+        (
+            "def handler(callables):\n"
+            "    for exec in callables:\n"
+            '        exec("payload")\n'
+        ),
+        (
+            "def handler(context):\n"
+            "    with context as compile:\n"
+            '        return compile("source")\n'
+        ),
+        (
+            "def handler():\n"
+            "    import json as eval\n"
+            "    return eval.dumps({})\n"
+        ),
+    ]
+
+    for source in sources:
+        assert _check_python_sandbox(source) == []
+
+
+def test_comprehension_target_only_shadows_inside_comprehension():
+    source = (
+        "def handler(values):\n"
+        "    shadowed = [input for input in values]\n"
+        '    return input("give me stdin")\n'
+    )
+
+    reasons = _check_python_sandbox(source)
+
+    assert reasons == ["reference to 'input' is forbidden in a sandboxed code node"]
+
+
+def test_nested_function_closes_over_dangerous_name_binding():
+    source = (
+        "def outer(input):\n"
+        "    def inner():\n"
+        "        return input\n"
+        "    return inner()\n"
+    )
+
+    assert _check_python_sandbox(source) == []
+
+
+def test_function_parameter_does_not_shadow_module_builtin_reference():
+    source = (
+        "def handler(input):\n"
+        "    return input\n"
+        'input("give me stdin")\n'
+    )
+
+    reasons = _check_python_sandbox(source)
+
+    assert reasons == ["reference to 'input' is forbidden in a sandboxed code node"]
 
 
 def test_code_node_allowlisted_import_passes():
