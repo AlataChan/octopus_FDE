@@ -12,5 +12,9 @@ def bad_request(detail: str) -> HTTPException:
     return HTTPException(status_code=400, detail={"error": detail})
 
 
+def unprocessable_entity(detail: dict[str, str]) -> HTTPException:
+    return HTTPException(status_code=422, detail=detail)
+
+
 def conflict(detail: str) -> HTTPException:
     return HTTPException(status_code=409, detail={"error": detail})

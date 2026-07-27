@@ -55,9 +55,27 @@ The brief is serialized from an explicit allowlist:
 - `inputs`, limited to `name`, `type`, and `required`
 - `tools`
 
-It omits `title`, `success_criteria`, `intent_clarifications`, `known_edits`,
-`workflow_id`, and every input `description`. The stored draft remains
-unchanged.
+Every `WorkflowBriefDraft` field is classified explicitly:
+
+| Field | Outbound classification |
+|---|---|
+| `workflow_id` | Not sent: the Planner does not consume it, and the unconstrained operator-supplied string can carry a customer or patient identifier. |
+| `title` | Not sent: non-load-bearing free text. |
+| `intent` | Sent only after fail-closed PII detection. |
+| `trigger` | Sent: structured mode, cron, and webhook path. |
+| `inputs` | Sent after stripping each free-text `description`; only `name`, `type`, and `required` remain. |
+| `data_sources` | Sent: handle and kind. |
+| `tools` | Sent: structured tool references. |
+| `credentials` | Sent: handle, scheme, and allowed hosts; never a raw credential. |
+| `approval_points` | Sent: structured stage, reviewer role, and blocking flag. |
+| `success_criteria` | Not sent: non-load-bearing free text. |
+| `compliance_boundary` | Sent: structured PII class, regulatory tags, and geographies. |
+| `intent_clarifications` | Not sent: free text. |
+| `known_edits` | Not sent: free text. |
+| `target_runtime` | Sent: runtime enum. |
+| `scope` | Sent: registry scope. |
+
+The stored draft remains unchanged.
 
 For planner-assisted edits, the chokepoint also replaces the
 `workflow_brief` member of the edit context with the same allowlisted form
